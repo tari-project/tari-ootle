@@ -1,9 +1,19 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+function equalNumberAndBigInt(num: number, big: bigint): boolean {
+  return Number.isInteger(num) && BigInt(num) === big;
+}
+
 function deepEqual(a: unknown, b: unknown): boolean {
   if (a === b) {
     return true;
+  }
+  if (typeof a === "number" && typeof b === "bigint") {
+    return equalNumberAndBigInt(a, b);
+  }
+  if (typeof a === "bigint" && typeof b === "number") {
+    return equalNumberAndBigInt(b, a);
   }
   if (a === null || b === null || typeof a !== "object" || typeof b !== "object") {
     return false;
@@ -15,10 +25,31 @@ function deepEqual(a: unknown, b: unknown): boolean {
     return a.every((item, idx) => deepEqual(item, b[idx]));
   }
   if (ArrayBuffer.isView(a) || ArrayBuffer.isView(b)) {
-    if (!(a instanceof Uint8Array) || !(b instanceof Uint8Array) || a.length !== b.length) {
+    if (!ArrayBuffer.isView(a) || !ArrayBuffer.isView(b) || a.constructor !== b.constructor) {
       return false;
     }
-    return a.every((byte, idx) => byte === b[idx]);
+    if (a instanceof DataView && b instanceof DataView) {
+      if (a.byteLength !== b.byteLength) {
+        return false;
+      }
+      for (let i = 0; i < a.byteLength; i++) {
+        if (a.getUint8(i) !== b.getUint8(i)) {
+          return false;
+        }
+      }
+      return true;
+    }
+    const viewA = a as unknown as ArrayLike<unknown>;
+    const viewB = b as unknown as ArrayLike<unknown>;
+    if (viewA.length !== viewB.length) {
+      return false;
+    }
+    for (let i = 0; i < viewA.length; i++) {
+      if (viewA[i] !== viewB[i]) {
+        return false;
+      }
+    }
+    return true;
   }
   const keysA = Object.keys(a);
   const keysB = Object.keys(b);
@@ -43,7 +74,7 @@ export function matchesTypeEnum<T extends Object>(enumObject: T | null, value: T
     return enumObject === value;
   }
   if (typeof enumObject !== "object" || Array.isArray(enumObject)) {
-    throw new Error("Enum object must have exactly one key");
+    throw new Error("Enum object must be a string unit variant or a single-key object");
   }
 
   const keys = Object.keys(enumObject);

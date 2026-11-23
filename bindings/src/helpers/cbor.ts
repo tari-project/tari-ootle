@@ -60,9 +60,9 @@ export function convertCborValue(input: any): any {
 }
 
 /**
- * Recognise the Tari CBOR tag set and render known byte-payload tags as canonical address
- * strings (e.g. tag 132 → `vault_<hex>`). Falls through to a `{ tag, value }` envelope for
- * unknown tags so callers can still see them in the JSON output.
+ * Recognise the Tari CBOR tag set and render known tagged types as canonical address
+ * strings (e.g. tag 132 → `vault_<hex>`, tag 130 → `nft_<resource>_<id>`, tag 141 → `utxo_<resource>_<id>`).
+ * Falls through to a `{ tag, value }` envelope for unknown or malformed tags so callers can still see them in the JSON output.
  */
 export function tariCborTagHandler(tag: number, value: any): any {
   switch (tag) {
@@ -73,13 +73,15 @@ export function tariCborTagHandler(tag: number, value: any): any {
     case TariTypeTag.ResourceAddress:
       return bytesValueToAddressString("resource", value);
     case TariTypeTag.NonFungibleAddress:
-      return bytesValueToAddressString("nft", value);
+      return decodeNonFungibleAddress(value, tag);
     case TariTypeTag.ClaimedOutputTombstoneAddress:
       return bytesValueToAddressString("tombstone", value);
     case TariTypeTag.TemplateAddress:
       return bytesValueToAddressString("template", value);
+    case TariTypeTag.ValidatorNodeFeePool:
+      return bytesValueToAddressString("vnfp", value);
     case TariTypeTag.Utxo:
-      return bytesValueToAddressString("utxo", value);
+      return decodeUtxoAddress(value, tag);
     case TariTypeTag.TransactionReceipt:
       return bytesValueToAddressString("txreceipt", value);
     case TariTypeTag.Metadata:
@@ -148,10 +150,87 @@ function hexToBytes(hex: string): number[] {
   return out;
 }
 
+function isByteArray(value: unknown): value is number[] {
+  return Array.isArray(value) && value.every((b) => typeof b === "number" && Number.isInteger(b) && b >= 0 && b <= 255);
+}
+
+function bytesToHex(bytes: readonly number[]): string {
+  return bytes.map((b) => ("0" + (b & 0xff).toString(16)).slice(-2)).join("");
+}
+
+function extractHexWithOptionalPrefix(value: unknown, prefix: string): string | null {
+  if (typeof value === "string") {
+    return value.startsWith(prefix) ? value.slice(prefix.length) : value;
+  }
+  if (isByteArray(value)) {
+    return bytesToHex(value);
+  }
+  return null;
+}
+
+function decodeNonFungibleId(raw: unknown): string | null {
+  if (!Array.isArray(raw) || raw.length !== 2) {
+    return null;
+  }
+  const [variant, fields] = raw;
+  if (!Array.isArray(fields) || fields.length !== 1) {
+    return null;
+  }
+  const inner = fields[0];
+  switch (variant) {
+    case 0:
+      if (isByteArray(inner)) {
+        return `uuid_${bytesToHex(inner)}`;
+      }
+      return typeof inner === "string" ? `uuid_${inner}` : null;
+    case 1:
+      return typeof inner === "string" ? `str_${inner}` : null;
+    case 2:
+      return typeof inner === "number" && Number.isInteger(inner) && inner >= 0 ? `u32_${inner}` : null;
+    case 3:
+      return (typeof inner === "number" && Number.isInteger(inner) && inner >= 0) ||
+        (typeof inner === "bigint" && inner >= 0n)
+        ? `u64_${inner.toString()}`
+        : null;
+    default:
+      return null;
+  }
+}
+
+function decodeNonFungibleAddress(value: any, tag: number): any {
+  if (Array.isArray(value) && value.length === 2) {
+    const resourceHex = extractHexWithOptionalPrefix(value[0], "resource_");
+    const idStr = decodeNonFungibleId(value[1]);
+    if (resourceHex !== null && idStr !== null) {
+      return `nft_${resourceHex}_${idStr}`;
+    }
+    return { tag, value };
+  }
+  if (isByteArray(value) || typeof value === "string") {
+    return bytesValueToAddressString("nft", value);
+  }
+  return { tag, value };
+}
+
+function decodeUtxoAddress(value: any, tag: number): any {
+  if (Array.isArray(value) && value.length === 2) {
+    const resourceHex = extractHexWithOptionalPrefix(value[0], "resource_");
+    const idHex = extractHexWithOptionalPrefix(value[1], "utxo_");
+    if (resourceHex !== null && idHex !== null) {
+      return `utxo_${resourceHex}_${idHex}`;
+    }
+    return { tag, value };
+  }
+  if (isByteArray(value) || typeof value === "string") {
+    return bytesValueToAddressString("utxo", value);
+  }
+  return { tag, value };
+}
+
 function bytesValueToAddressString(type: string, value: any): string {
   let hex: string;
-  if (Array.isArray(value)) {
-    hex = value.map((b: number) => ("0" + (b & 0xff).toString(16)).slice(-2)).join("");
+  if (isByteArray(value)) {
+    hex = bytesToHex(value);
   } else if (typeof value === "string") {
     hex = value;
   } else {

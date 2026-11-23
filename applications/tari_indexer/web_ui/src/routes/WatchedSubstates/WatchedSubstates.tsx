@@ -200,11 +200,19 @@ function WatchedSubstatesLayout() {
               </TableHead>
               <TableBody>
                 {substates.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={2}>
-                      <Typography color="textSecondary">No components found for this template.</Typography>
-                    </TableCell>
-                  </TableRow>
+                  loadingSubstates ? (
+                    <TableRow>
+                      <TableCell colSpan={2}>
+                        <Typography color="textSecondary">Loading...</Typography>
+                      </TableCell>
+                    </TableRow>
+                  ) : !substatesError ? (
+                    <TableRow>
+                      <TableCell colSpan={2}>
+                        <Typography color="textSecondary">No components found for this template.</Typography>
+                      </TableCell>
+                    </TableRow>
+                  ) : null
                 ) : (
                   substates.map((s) => (
                     <TableRow key={s.component_address} sx={{ "&:last-child td, &:last-child th": { border: 0 } }}>

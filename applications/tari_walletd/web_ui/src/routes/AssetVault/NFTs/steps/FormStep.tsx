@@ -82,6 +82,7 @@ export default function FormStep({
   availableNfts,
   preSelectedNftId,
   preSelectedNfts,
+  isEstimatingFee,
   onSubmit,
   onCancel,
   onNftsChange,
@@ -231,7 +232,7 @@ export default function FormStep({
           <Button
             variant="contained"
             type="submit"
-            disabled={disabled || formErrors.length > 0 || !transferFormState.targetAccountAddress}
+            disabled={disabled || isEstimatingFee || formErrors.length > 0 || !transferFormState.targetAccountAddress}
           >
             Continue
           </Button>

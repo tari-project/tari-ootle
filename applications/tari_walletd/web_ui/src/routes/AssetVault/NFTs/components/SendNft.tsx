@@ -38,7 +38,7 @@ import {
 } from "@tari-project/ootle-ts-bindings";
 import { substateIdToString } from "@utils/helpers";
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { formatNftTransferRejection, parseNftFeeAmount, resolveSelectedNftTransferState } from "../nftTransferHelpers";
+import { formatNftTransferRejection, resolveSelectedNftTransferState } from "../nftTransferHelpers";
 import ConfirmationStep from "../steps/ConfirmationStep";
 import FormStep from "../steps/FormStep";
 import ResultStep from "../steps/ResultStep";
@@ -154,7 +154,7 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
       source_account: sourceAccount!,
       target_account_address: transferFormState.targetAccountAddress,
       dry_run: false,
-      max_fee: parseNftFeeAmount(transferFormState.maxFee),
+      max_fee: transferFormState.maxFee ? BigInt(transferFormState.maxFee) : 0n,
       fee_payer_account: feePayerAccount!,
       resource_address: transferFormState.resourceAddress,
     };
@@ -215,7 +215,10 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
     // If no fee is calculated yet, estimate it before proceeding
     if (!transferFormState.maxFee) {
       try {
-        await estimateFee();
+        const fee = await estimateFee();
+        if (fee === undefined) {
+          return;
+        }
       } catch (error) {
         console.error("Fee estimation failed:", error);
         setPopup({

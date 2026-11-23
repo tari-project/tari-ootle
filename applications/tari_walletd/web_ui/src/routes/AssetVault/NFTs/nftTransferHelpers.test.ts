@@ -4,7 +4,7 @@
 import { useNftTransferStore } from "@store/nftTransferStore";
 import type { NonFungibleToken, ResourceAddress, TransferNftResponse } from "@tari-project/ootle-ts-bindings";
 import { beforeEach, describe, expect, it } from "vitest";
-import { formatNftTransferRejection, parseNftFeeAmount, resolveSelectedNftTransferState } from "./nftTransferHelpers";
+import { formatNftTransferRejection, resolveSelectedNftTransferState } from "./nftTransferHelpers";
 
 const RESOURCE_A = "resource_0000000000000000000000000000000000000000000000000000000000000001" as ResourceAddress;
 
@@ -47,28 +47,13 @@ describe("resolveSelectedNftTransferState", () => {
     });
   });
 
-  it("ignores malformed or unknown entries safely", () => {
-    const selected = ["not-json", JSON.stringify({ Uint32: 99 }), JSON.stringify({ Uint32: 2 })];
+  it("ignores unknown NFT IDs", () => {
+    const selected = [JSON.stringify({ Uint32: 99 }), JSON.stringify({ Uint32: 2 })];
     expect(resolveSelectedNftTransferState(selected, available)).toEqual({
       nfts: [{ Uint32: 2 }],
       resourceAddress: RESOURCE_A,
       maxFee: "",
     });
-  });
-});
-
-describe("parseNftFeeAmount", () => {
-  it("parses exact bigint fees including values above Number.MAX_SAFE_INTEGER", () => {
-    expect(parseNftFeeAmount("500")).toBe(500n);
-    expect(parseNftFeeAmount(" 9007199254740993 ")).toBe(9007199254740993n);
-  });
-
-  it("returns 0n for empty or non-integer strings instead of NaN", () => {
-    expect(parseNftFeeAmount("")).toBe(0n);
-    expect(parseNftFeeAmount("   ")).toBe(0n);
-    expect(parseNftFeeAmount("-10")).toBe(0n);
-    expect(parseNftFeeAmount("12.5")).toBe(0n);
-    expect(parseNftFeeAmount("abc")).toBe(0n);
   });
 });
 

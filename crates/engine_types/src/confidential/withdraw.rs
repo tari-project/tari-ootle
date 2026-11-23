@@ -245,7 +245,8 @@ mod tests {
             minimum_value_promise: 1,
             viewable_balance_proof: None,
         });
-        // Bogus non-empty range proof that would fail inside `validate_confidential_statement` with `InvalidRangeProof`.
+        // Bogus non-empty range proof that would fail inside `validate_confidential_statement` with
+        // `InvalidRangeProof`.
         proof.output_proof.range_proof = RangeProofBytes::try_from(vec![1u8; 64]).unwrap();
         proof
     }

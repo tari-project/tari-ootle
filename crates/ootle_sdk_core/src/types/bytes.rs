@@ -84,6 +84,11 @@ macro_rules! fixed_byte_newtype {
 
             /// Parses from a lowercase-hex string.
             pub fn from_hex(s: &str) -> Result<Self, OotleSdkError> {
+                if s.chars().any(|c| c.is_ascii_uppercase()) {
+                    return Err(OotleSdkError::Parse(
+                        concat!(stringify!($name), ": expected lowercase hex").to_string(),
+                    ));
+                }
                 let v = hex::decode(s).map_err(|e| OotleSdkError::Parse(format!(
                     concat!(stringify!($name), ": invalid hex: {}"), e
                 )))?;
@@ -159,6 +164,11 @@ macro_rules! secret_byte_newtype {
 
             /// Parses from a lowercase-hex string.
             pub fn from_hex(s: &str) -> Result<Self, OotleSdkError> {
+                if s.chars().any(|c| c.is_ascii_uppercase()) {
+                    return Err(OotleSdkError::Parse(
+                        concat!(stringify!($name), ": expected lowercase hex").to_string(),
+                    ));
+                }
                 let v = hex::decode(s).map_err(|e| OotleSdkError::Parse(format!(
                     concat!(stringify!($name), ": invalid hex: {}"), e
                 )))?;
@@ -207,6 +217,11 @@ macro_rules! var_byte_newtype {
 
             /// Parses from a lowercase-hex string.
             pub fn from_hex(s: &str) -> Result<Self, OotleSdkError> {
+                if s.chars().any(|c| c.is_ascii_uppercase()) {
+                    return Err(OotleSdkError::Parse(
+                        concat!(stringify!($name), ": expected lowercase hex").to_string(),
+                    ));
+                }
                 let v = hex::decode(s).map_err(|e| OotleSdkError::Parse(format!(
                     concat!(stringify!($name), ": invalid hex: {}"), e
                 )))?;
@@ -341,6 +356,9 @@ mod tests {
         assert!(err.is_err());
         let err = serde_json::from_str::<SignatureBytes>("\"0A0B\"");
         assert!(err.is_err());
+        assert_eq!(PublicKeyBytes::from_hex(&"AB".repeat(32)).unwrap_err().code(), "PARSE");
+        assert_eq!(SecretKeyBytes::from_hex(&"AB".repeat(32)).unwrap_err().code(), "PARSE");
+        assert_eq!(SignatureBytes::from_hex("0A0B").unwrap_err().code(), "PARSE");
     }
 
     #[test]

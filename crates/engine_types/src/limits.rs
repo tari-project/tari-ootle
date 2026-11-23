@@ -1,7 +1,7 @@
 //    Copyright 2025 The Tari Project
 //    SPDX-License-Identifier: BSD-3-Clause
 
-use tari_template_lib::types::stealth;
+use tari_template_lib::types::{confidential, stealth};
 
 pub struct WasmLimits {
     /// Maximum number of function arguments
@@ -828,7 +828,7 @@ pub struct ConfidentialLimits {
 /// aggregate so a single transaction cannot stack enough native verification and substate access to stall the proposing
 /// leader. These are consensus-relevant execution rules enforced uniformly during execution, not mempool heuristics.
 pub const CONFIDENTIAL_LIMITS: ConfidentialLimits = ConfidentialLimits {
-    max_inputs: 1000,
+    max_inputs: confidential::MAX_CONFIDENTIAL_INPUTS,
     max_withdraws_per_transaction: 64,
     max_total_inputs_per_transaction: 1024,
 };

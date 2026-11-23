@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 #![no_main]
-//! Untrusted WASM template binary — `WasmModule::validate_code`.
+//! Untrusted WASM template binary — `WasmModule::validate_and_load`.
 //!
 //! Validation runs the wasmer compiler plus the custom-section + ABI-decode
 //! paths over an attacker-supplied module. We bail above the engine's binary
@@ -22,5 +22,5 @@ fuzz_target!(|data: &[u8]| {
     if data.len() > limits::ENGINE_LIMITS.max_template_binary_size_bytes {
         return;
     }
-    let _ = WasmModule::validate_code(data);
+    let _ = WasmModule::validate_and_load(data);
 });

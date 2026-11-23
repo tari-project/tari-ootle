@@ -72,6 +72,11 @@ impl TestOutboundMessaging {
 impl OutboundMessaging for TestOutboundMessaging {
     type Addr = TestAddress;
 
+    /// The test network passes messages without encoding them, so their JSON encoding stands in for the wire size.
+    fn encoded_len(&self, message: &HotstuffMessage) -> usize {
+        serde_json::to_vec(message).map_or(0, |bytes| bytes.len())
+    }
+
     async fn send_self<T: Into<HotstuffMessage> + Send>(&mut self, message: T) -> Result<(), OutboundMessagingError> {
         let message = message.into();
         self.observe(&message);

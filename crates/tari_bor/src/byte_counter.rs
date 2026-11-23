@@ -35,8 +35,7 @@ impl core::fmt::Display for ByteCounterError {
     }
 }
 
-#[cfg(feature = "std")]
-impl std::error::Error for ByteCounterError {}
+impl core::error::Error for ByteCounterError {}
 
 impl ByteCounter {
     fn add(&mut self, n: usize) -> Result<(), ByteCounterError> {

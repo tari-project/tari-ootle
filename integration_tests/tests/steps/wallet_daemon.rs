@@ -762,6 +762,7 @@ async fn when_i_stealth_transfer_with_destination_tag(
             owner_account: ComponentAddressOrName::Name(source_account_name),
             fee_params: TransferFeeParams::new(UtxoInputSelection::PreferRevealed),
             input_selection: UtxoInputSelection::PreferRevealed,
+            inputs: None,
             resource_address: TARI_TOKEN,
             badge_usage: BadgeUsage::None,
             transfers: vec![StealthTransfer {

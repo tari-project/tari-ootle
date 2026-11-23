@@ -149,7 +149,7 @@ where TInner: TemplateProvider<Template = LoadedTemplate>
             .map(|template| {
                 (
                     template.address,
-                    WasmModule::load_template_from_code(template.binary).expect("Built-in template failed to load"),
+                    WasmModule::load(template.binary).expect("Built-in template failed to load"),
                 )
             })
             .collect();

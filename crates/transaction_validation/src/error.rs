@@ -65,6 +65,11 @@ pub enum TransactionValidationError {
          authorization signatures"
     )]
     TransactionNotSigned { transaction_id: TransactionId },
+    #[error(
+        "Transaction {transaction_id} repeats or misorders its authorization signatures: the list must be strictly \
+         ascending by public key"
+    )]
+    AuthorizationsNotCanonical { transaction_id: TransactionId },
     #[error("Network error: {0}")]
     NetworkingError(#[from] NetworkingError),
     #[error("Unknown network byte \"{byte}\": {details}")]
@@ -73,6 +78,14 @@ pub enum TransactionValidationError {
     NetworkMismatch { actual: Network, expected: Network },
     #[error("Transaction {transaction_id} contains a pay fee instruction, which is not allowed")]
     ContainsPayFeeInstruction { transaction_id: TransactionId },
+    #[error(
+        "Transaction {transaction_id} instruction {index} updates a component's template, which the network does not \
+         support. Deploy the new template as a new component and move the state across."
+    )]
+    ComponentTemplateUpdateNotSupported {
+        transaction_id: TransactionId,
+        index: usize,
+    },
     #[error(
         "Transaction {transaction_id} declares reserved substate {substate_id} as an input. Public-key identities, \
          caller badges and the resources those badges belong to are issued or reserved by the engine and never \
@@ -216,9 +229,11 @@ impl TransactionValidationError {
             Self::InvalidSignature |
             Self::MainSignerDidNotSign { .. } |
             Self::TransactionNotSigned { .. } |
+            Self::AuthorizationsNotCanonical { .. } |
             Self::UnknownNetwork { .. } |
             Self::NetworkMismatch { .. } |
             Self::ContainsPayFeeInstruction { .. } |
+            Self::ComponentTemplateUpdateNotSupported { .. } |
             Self::ReservedSubstateInput { .. } |
             Self::OutputOnlySubstateInput { .. } |
             Self::DryRunNotAllowed |
@@ -323,11 +338,18 @@ mod tests {
             TransactionValidationError::TransactionNotSigned {
                 transaction_id: tx_id(),
             },
+            TransactionValidationError::AuthorizationsNotCanonical {
+                transaction_id: tx_id(),
+            },
             TransactionValidationError::NoFeeInstructions {
                 transaction_id: tx_id(),
             },
             TransactionValidationError::ContainsPayFeeInstruction {
                 transaction_id: tx_id(),
+            },
+            TransactionValidationError::ComponentTemplateUpdateNotSupported {
+                transaction_id: tx_id(),
+                index: 0,
             },
             TransactionValidationError::DryRunNotAllowed,
             TransactionValidationError::TransactionExceedsMaxWeight {

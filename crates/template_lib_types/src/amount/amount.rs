@@ -26,13 +26,24 @@ impl<'b, C> minicbor::Decode<'b, C> for Amount {
             // 128-bit integer.
             Type::String => {
                 let s = d.str()?;
+                if s.len() > Amount::MAX_DECIMAL_STR_LEN {
+                    return Err(minicbor::decode::Error::message(
+                        "Amount: decimal string exceeds maximum length",
+                    ));
+                }
                 s.parse::<Amount>()
                     .map_err(|e| minicbor::decode::Error::message(format!("Amount: invalid string '{}': {}", s, e)))
             },
             Type::StringIndef => {
                 let mut s = String::new();
                 for chunk in d.str_iter()? {
-                    s.push_str(chunk?);
+                    let chunk = chunk?;
+                    if s.len().saturating_add(chunk.len()) > Amount::MAX_DECIMAL_STR_LEN {
+                        return Err(minicbor::decode::Error::message(
+                            "Amount: decimal string exceeds maximum length",
+                        ));
+                    }
+                    s.push_str(chunk);
                 }
                 s.parse::<Amount>()
                     .map_err(|e| minicbor::decode::Error::message(format!("Amount: invalid string '{}': {}", s, e)))
@@ -64,6 +75,8 @@ impl Amount {
     pub const BYTE_SIZE: usize = Self::BITS / 8;
     /// The maximum value that an `Amount` can hold.
     pub const MAX: Self = Self(u128::MAX);
+    /// The longest decimal string the CBOR decoder parses: the 39 digits of `u128::MAX` plus an optional `+`.
+    pub(crate) const MAX_DECIMAL_STR_LEN: usize = u128::MAX.ilog10() as usize + 2;
     /// The minimum value that an `Amount` can hold.
     pub const MIN: Self = Self(u128::MIN);
     /// The number of u64 digits used to represent a Amount i.e. 2

@@ -197,6 +197,16 @@ function summarize(instruction: Instruction, blobs: Blobs | undefined): string {
     const target = "Address" in component ? component.Address : `$${component.Workspace}`;
     return `UpdateComponentTemplate(${target} -> template_${new_template})`;
   }
+  if ("SetComponentAccessRules" in instruction) {
+    const { component } = instruction.SetComponentAccessRules;
+    const target = "Address" in component ? component.Address : `$${component.Workspace}`;
+    return `SetComponentAccessRules(${target})`;
+  }
+  if ("SetComponentOwnerRule" in instruction) {
+    const { component } = instruction.SetComponentOwnerRule;
+    const target = "Address" in component ? component.Address : `$${component.Workspace}`;
+    return `SetComponentOwnerRule(${target})`;
+  }
   if ("PutIntoBucket" in instruction) {
     const { src, dest } = instruction.PutIntoBucket;
     return `PutIntoBucket(${workspaceId(src)} -> ${workspaceId(dest)})`;

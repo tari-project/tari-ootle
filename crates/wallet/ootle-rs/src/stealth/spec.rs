@@ -9,7 +9,6 @@ use tari_ootle_common_types::engine_types::crypto::OutputBody;
 use tari_ootle_wallet_crypto::{memo::Memo, pay_to::PayTo};
 use tari_template_lib_types::{
     Amount,
-    EncryptedData,
     ResourceAddress,
     crypto::{PedersenCommitmentBytes, UtxoTag},
     stealth::{RevealedOutput, SpendCondition, StealthInput, TemplateFunction},
@@ -290,22 +289,6 @@ impl ResolvedStealthTransferSpec {
     pub fn requires_balance_proof(&self) -> bool {
         !self.inputs.is_empty() || !self.outputs.is_empty()
     }
-}
-
-/// The claimed-funds side of an L1 burn claim, ready to be turned into a statement by
-/// [`BurnClaimKeyProvider::create_burn_claim_statement`](crate::stealth::BurnClaimKeyProvider::create_burn_claim_statement).
-#[derive(Debug, Clone)]
-pub struct BurnClaimStatementSpec {
-    /// The burn UTXO's commitment, taken from the L1 burn proof.
-    pub commitment: PedersenCommitmentBytes,
-    /// The L1 output's encrypted data, which the burn UTXO's mask is recovered from.
-    pub encrypted_data: EncryptedData,
-    /// `R`, the public nonce the L1 UTXO was burnt with.
-    pub sender_offset_public_key: RistrettoPublicKey,
-    /// The stealth output the claimed funds are paid into.
-    pub output: Output,
-    /// Revealed funds reserved to pay the claim transaction's fee, and the key authorised to take them.
-    pub revealed_output: Option<RevealedOutput>,
 }
 
 #[cfg(test)]

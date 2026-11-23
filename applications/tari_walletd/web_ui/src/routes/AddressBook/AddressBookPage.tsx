@@ -38,7 +38,7 @@ interface EntryFormState {
 const EMPTY_FORM: EntryFormState = { name: "", address: "", note: "" };
 
 export default function AddressBookPage() {
-  const { data, isLoading } = useAddressBookList();
+  const { data, isLoading, isError, error } = useAddressBookList();
   const addMutation = useAddressBookAdd();
   const updateMutation = useAddressBookUpdate();
   const deleteMutation = useAddressBookDelete();
@@ -48,8 +48,10 @@ export default function AddressBookPage() {
   const [form, setForm] = useState<EntryFormState>(EMPTY_FORM);
   const [formError, setFormError] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const entries = data?.entries ?? [];
+  const isSaving = addMutation.isPending || updateMutation.isPending;
 
   const openAddDialog = () => {
     setEditingEntry(null);
@@ -65,7 +67,19 @@ export default function AddressBookPage() {
     setDialogOpen(true);
   };
 
+  const openDeleteDialog = (name: string) => {
+    setDeleteError(null);
+    setDeleteConfirm(name);
+  };
+
+  const closeDeleteDialog = () => {
+    if (deleteMutation.isPending) return;
+    setDeleteConfirm(null);
+    setDeleteError(null);
+  };
+
   const handleSave = async () => {
+    if (isSaving) return;
     if (!form.name.trim()) {
       setFormError("Name is required");
       return;
@@ -79,6 +93,7 @@ export default function AddressBookPage() {
       return;
     }
 
+    setFormError(null);
     try {
       if (editingEntry) {
         // Only send fields that actually changed. For `note` specifically,
@@ -124,11 +139,13 @@ export default function AddressBookPage() {
   };
 
   const handleDelete = async (name: string) => {
+    if (deleteMutation.isPending) return;
+    setDeleteError(null);
     try {
       await deleteMutation.mutateAsync({ name });
       setDeleteConfirm(null);
-    } catch {
-      // Error handling via mutation state
+    } catch (e: unknown) {
+      setDeleteError(e instanceof Error && e.message ? e.message : "Failed to delete entry");
     }
   };
 
@@ -143,10 +160,15 @@ export default function AddressBookPage() {
       sortable: false,
       renderCell: (params: GridRenderCellParams<AddressBookEntry>) => (
         <Stack direction="row" spacing={0.5}>
-          <IconButton size="small" onClick={() => openEditDialog(params.row)}>
+          <IconButton aria-label={`Edit ${params.row.name}`} size="small" onClick={() => openEditDialog(params.row)}>
             <MdEdit />
           </IconButton>
-          <IconButton size="small" onClick={() => setDeleteConfirm(params.row.name)} color="error">
+          <IconButton
+            aria-label={`Delete ${params.row.name}`}
+            size="small"
+            onClick={() => openDeleteDialog(params.row.name)}
+            color="error"
+          >
             <MdDelete />
           </IconButton>
         </Stack>
@@ -168,6 +190,12 @@ export default function AddressBookPage() {
             </Button>
           </Box>
 
+          {isError && (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              {error instanceof Error && error.message ? error.message : "Failed to load address book entries"}
+            </Alert>
+          )}
+
           <DataGrid
             rows={entries}
             columns={columns}
@@ -182,7 +210,7 @@ export default function AddressBookPage() {
       </Grid>
 
       {/* Add/Edit Dialog */}
-      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="sm" fullWidth>
+      <Dialog open={dialogOpen} onClose={() => !isSaving && setDialogOpen(false)} maxWidth="sm" fullWidth>
         <DialogTitle>{editingEntry ? "Edit Entry" : "Add Entry"}</DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
@@ -213,21 +241,28 @@ export default function AddressBookPage() {
           </Stack>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setDialogOpen(false)}>Cancel</Button>
-          <Button onClick={handleSave} variant="contained" disabled={addMutation.isPending || updateMutation.isPending}>
+          <Button onClick={() => setDialogOpen(false)} disabled={isSaving}>
+            Cancel
+          </Button>
+          <Button onClick={handleSave} variant="contained" disabled={isSaving}>
             {editingEntry ? "Update" : "Add"}
           </Button>
         </DialogActions>
       </Dialog>
 
       {/* Delete Confirmation Dialog */}
-      <Dialog open={deleteConfirm !== null} onClose={() => setDeleteConfirm(null)}>
+      <Dialog open={deleteConfirm !== null} onClose={closeDeleteDialog}>
         <DialogTitle>Delete Entry</DialogTitle>
         <DialogContent>
-          <Typography>Are you sure you want to delete &quot;{deleteConfirm}&quot; from your address book?</Typography>
+          <Stack spacing={2}>
+            {deleteError && <Alert severity="error">{deleteError}</Alert>}
+            <Typography>Are you sure you want to delete &quot;{deleteConfirm}&quot; from your address book?</Typography>
+          </Stack>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setDeleteConfirm(null)}>Cancel</Button>
+          <Button onClick={closeDeleteDialog} disabled={deleteMutation.isPending}>
+            Cancel
+          </Button>
           <Button
             onClick={() => deleteConfirm && handleDelete(deleteConfirm)}
             color="error"

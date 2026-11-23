@@ -76,6 +76,10 @@ impl ConfidentialOutputStatement {
 pub struct ConfidentialWithdrawProof {
     #[n(0)]
     #[cbor(decode_with = "decode_inputs")]
+    #[cfg_attr(
+        feature = "serde",
+        serde(deserialize_with = "ootle_serde::bounded_seq::deserialize::<{ MAX_CONFIDENTIAL_INPUTS }, _, _>")
+    )]
     pub inputs: Vec<PedersenCommitmentBytes>,
     /// The amount to withdraw from revealed funds i.e. the revealed funds as inputs
     #[n(1)]
@@ -190,5 +194,15 @@ mod tests {
         let over_limit = proof_with_inputs(MAX_CONFIDENTIAL_INPUTS + 1);
         let bytes = tari_bor::encode(&over_limit).unwrap();
         assert!(tari_bor::decode::<ConfidentialWithdrawProof>(&bytes).is_err());
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn withdraw_proof_deserializes_up_to_max_inputs() {
+        let json = serde_json::to_string(&proof_with_inputs(MAX_CONFIDENTIAL_INPUTS)).unwrap();
+        serde_json::from_str::<ConfidentialWithdrawProof>(&json).unwrap();
+
+        let json = serde_json::to_string(&proof_with_inputs(MAX_CONFIDENTIAL_INPUTS + 1)).unwrap();
+        serde_json::from_str::<ConfidentialWithdrawProof>(&json).unwrap_err();
     }
 }

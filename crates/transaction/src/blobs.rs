@@ -1,9 +1,9 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use std::ops::Deref;
 #[cfg(feature = "serde")]
 use std::{fmt, marker::PhantomData};
-use std::ops::Deref;
 
 use tari_engine_types::hashing::{EngineHashDomainLabel, hasher32};
 use tari_template_lib_types::{Hash32, MaxBytes, bytes::Bytes};

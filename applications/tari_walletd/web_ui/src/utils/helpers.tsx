@@ -304,7 +304,8 @@ export function validateHash(hash: string): boolean {
 const normalizeTimestamp = (rawTimestamp: string | null | undefined): Date | null => {
   if (!rawTimestamp) return null;
 
-  let formatted = rawTimestamp;
+  let formatted = rawTimestamp.trim();
+  if (!formatted) return null;
 
   if (!formatted.includes("T")) {
     formatted = formatted.replace(" ", "T");
@@ -314,7 +315,7 @@ const normalizeTimestamp = (rawTimestamp: string | null | undefined): Date | nul
     formatted = formatted.slice(0, -2);
   }
 
-  if (!/[Z+\-]\d{2}:?\d{2}$/.test(formatted)) {
+  if (!/(?:[Zz]|[+\-]\d{2}:?\d{2})$/.test(formatted)) {
     formatted += "Z";
   }
 

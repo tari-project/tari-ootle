@@ -112,10 +112,11 @@ const validateHash = (hash: string): boolean => {
 };
 
 // formatTimestamp.ts
-const formatTimestamp = (rawTimestamp: string | null | undefined): string => {
-  if (!rawTimestamp) return "";
+const parseTimestamp = (rawTimestamp: string | null | undefined): Date | null => {
+  if (!rawTimestamp) return null;
 
-  let formatted = rawTimestamp;
+  let formatted = rawTimestamp.trim();
+  if (!formatted) return null;
 
   // If it doesn't already have "T" between date and time, add it
   if (!formatted.includes("T")) {
@@ -128,13 +129,18 @@ const formatTimestamp = (rawTimestamp: string | null | undefined): string => {
   }
 
   // If it doesn't already end with "Z" or have a timezone offset, add Z for UTC
-  if (!/[Z+\-]\d{2}:?\d{2}$/.test(formatted)) {
+  if (!/(?:[Zz]|[+\-]\d{2}:?\d{2})$/.test(formatted)) {
     formatted += "Z";
   }
 
   const date = new Date(formatted);
+  return isNaN(date.getTime()) ? null : date;
+};
 
-  if (isNaN(date.getTime())) return "";
+const formatTimestamp = (rawTimestamp: string | null | undefined): string => {
+  const date = parseTimestamp(rawTimestamp);
+
+  if (!date) return "";
 
   return date.toLocaleString(undefined, {
     year: "numeric",
@@ -144,27 +150,6 @@ const formatTimestamp = (rawTimestamp: string | null | undefined): string => {
     minute: "2-digit",
     second: "2-digit",
   });
-};
-
-const parseTimestamp = (rawTimestamp: string | null | undefined): Date | null => {
-  if (!rawTimestamp) return null;
-
-  let formatted = rawTimestamp;
-
-  if (!formatted.includes("T")) {
-    formatted = formatted.replace(" ", "T");
-  }
-
-  if (formatted.endsWith(".0")) {
-    formatted = formatted.slice(0, -2);
-  }
-
-  if (!/[Z+\-]\d{2}:?\d{2}$/.test(formatted)) {
-    formatted += "Z";
-  }
-
-  const date = new Date(formatted);
-  return isNaN(date.getTime()) ? null : date;
 };
 
 const isTimestampNew = (timestamp: string | null | undefined): boolean => {

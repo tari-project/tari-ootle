@@ -49,9 +49,21 @@ pub struct PrunedUnsignedTransactionV1 {
     pub network: u8,
     #[n(1)]
     #[cbor(decode_with = "crate::v1::unsigned::decode_instructions")]
+    #[cfg_attr(
+        feature = "serde",
+        serde(
+            deserialize_with = "ootle_serde::bounded_seq::deserialize::<{ crate::MAX_TRANSACTION_INSTRUCTIONS }, _, _>"
+        )
+    )]
     pub fee_instructions: Vec<Instruction>,
     #[n(2)]
     #[cbor(decode_with = "crate::v1::unsigned::decode_instructions")]
+    #[cfg_attr(
+        feature = "serde",
+        serde(
+            deserialize_with = "ootle_serde::bounded_seq::deserialize::<{ crate::MAX_TRANSACTION_INSTRUCTIONS }, _, _>"
+        )
+    )]
     pub instructions: Vec<Instruction>,
     #[n(3)]
     #[cbor(
@@ -82,7 +94,7 @@ pub struct PrunedUnsignedTransactionV1 {
     #[cbor(decode_with = "decode_blob_sizes")]
     #[cfg_attr(
         feature = "serde",
-        serde(deserialize_with = "crate::blobs::deserialize_bounded_blobs")
+        serde(deserialize_with = "ootle_serde::bounded_seq::deserialize::<{ Blobs::MAX_BLOBS }, _, _>")
     )]
     #[borsh(skip)]
     pub blob_sizes: Vec<u32>,
@@ -142,6 +154,13 @@ pub struct PrunedUnsealedTransactionV1 {
     transaction: PrunedUnsignedTransactionV1,
     #[n(1)]
     #[cbor(decode_with = "crate::v1::unsealed::decode_signatures")]
+    #[cfg_attr(
+        feature = "serde",
+        serde(
+            deserialize_with = "ootle_serde::bounded_seq::deserialize::<{ crate::MAX_SIGNATURES_PER_TRANSACTION }, _, \
+                                _>"
+        )
+    )]
     signatures: Vec<TransactionSignature>,
 }
 
@@ -568,5 +587,56 @@ mod tests {
         // Replace the stored blob_hashes with hashes of different data.
         pruned.body.transaction.blob_hashes = Blobs::from_vec(vec![Blob::from(vec![9, 9, 9])]).hashes();
         assert!(!pruned.verify_all_signatures(SchemaVersion::CURRENT));
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn serde_rejects_more_instructions_or_signatures_than_their_limits() {
+        fn repeat_first(list: &mut serde_json::Value, len: usize) {
+            let first = list[0].clone();
+            *list = serde_json::Value::Array(vec![first; len]);
+        }
+
+        let secret = RistrettoSecretKey::random(&mut rand::rng());
+        let transaction = sealed(sample_unsigned_with_blobs(Blobs::empty()), &secret);
+        let unsealed = serde_json::to_value(transaction.unsealed_transaction()).unwrap();
+        let pruned = serde_json::to_value(PrunedUnsealedTransactionV1::from(
+            transaction.unsealed_transaction().clone(),
+        ))
+        .unwrap();
+
+        for field in ["fee_instructions", "instructions"] {
+            for (len, accepted) in [
+                (crate::MAX_TRANSACTION_INSTRUCTIONS, true),
+                (crate::MAX_TRANSACTION_INSTRUCTIONS + 1, false),
+            ] {
+                let mut json = unsealed.clone();
+                repeat_first(&mut json["transaction"][field], len);
+                assert_eq!(serde_json::from_value::<UnsealedTransactionV1>(json).is_ok(), accepted);
+
+                let mut json = pruned.clone();
+                repeat_first(&mut json["transaction"][field], len);
+                assert_eq!(
+                    serde_json::from_value::<PrunedUnsealedTransactionV1>(json).is_ok(),
+                    accepted
+                );
+            }
+        }
+
+        for (len, accepted) in [
+            (crate::MAX_SIGNATURES_PER_TRANSACTION, true),
+            (crate::MAX_SIGNATURES_PER_TRANSACTION + 1, false),
+        ] {
+            let mut json = unsealed.clone();
+            repeat_first(&mut json["signatures"], len);
+            assert_eq!(serde_json::from_value::<UnsealedTransactionV1>(json).is_ok(), accepted);
+
+            let mut json = pruned.clone();
+            repeat_first(&mut json["signatures"], len);
+            assert_eq!(
+                serde_json::from_value::<PrunedUnsealedTransactionV1>(json).is_ok(),
+                accepted
+            );
+        }
     }
 }

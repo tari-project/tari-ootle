@@ -128,10 +128,107 @@ pub fn validate_confidential_statement(
 mod tests {
     use ootle_byte_type::ToByteType;
     use tari_crypto::{keys::PublicKey, ristretto::RistrettoSecretKey};
-    use tari_template_lib::types::{EncryptedData, crypto::RangeProofBytes, stealth::UnspentOutput};
+    use tari_template_lib::types::{
+        EncryptedData,
+        crypto::{RangeProofBytes, RistrettoPublicKeyBytes, Scalar32Bytes},
+        stealth::{UnspentOutput, ViewableBalanceProof},
+    };
 
     use super::*;
     use crate::crypto::commit_u64_amount;
+
+    fn view_key() -> RistrettoPublicKey {
+        RistrettoPublicKey::from_secret_key(&RistrettoSecretKey::from(42u64))
+    }
+
+    /// Every field decodes, but the proof equations do not hold, so verifying it fails.
+    fn unverifiable_viewable_balance_proof() -> ViewableBalanceProof {
+        let point = |seed: u64| RistrettoPublicKey::from_secret_key(&RistrettoSecretKey::from(seed)).to_byte_type();
+        ViewableBalanceProof {
+            elgamal_encrypted: point(1),
+            elgamal_public_nonce: point(2),
+            c_prime: commit_u64_amount(&RistrettoSecretKey::from(3u64), 3).to_byte_type(),
+            e_prime: point(4),
+            r_prime: point(5),
+            s_v: Scalar32Bytes::from([1u8; 32]),
+            s_m: Scalar32Bytes::from([1u8; 32]),
+            s_r: Scalar32Bytes::from([1u8; 32]),
+        }
+    }
+
+    fn viewable_output(mask_seed: u64, value: u64) -> UnspentOutput {
+        let mut output = sample_unspent_output(mask_seed, value);
+        output.viewable_balance_proof = Some(unverifiable_viewable_balance_proof());
+        output
+    }
+
+    fn statement(
+        output: UnspentOutput,
+        change: UnspentOutput,
+        range_proof: RangeProofBytes,
+    ) -> ConfidentialOutputStatement {
+        ConfidentialOutputStatement {
+            output: Some(output),
+            change_statement: Some(change),
+            range_proof,
+            output_revealed_amount: Amount::ZERO,
+            change_revealed_amount: Amount::ZERO,
+        }
+    }
+
+    fn malformed_range_proof() -> RangeProofBytes {
+        RangeProofBytes::try_from(vec![0xabu8; 64]).unwrap()
+    }
+
+    #[test]
+    fn rejects_an_empty_range_proof_before_verifying_viewable_balance_proofs() {
+        let stmt = statement(
+            viewable_output(1, 100),
+            viewable_output(2, 50),
+            RangeProofBytes::empty(),
+        );
+
+        let err = validate_confidential_statement(&stmt, Some(&view_key())).unwrap_err();
+        assert!(
+            matches!(&err, ResourceError::InvalidRangeProof { details } if details == "Range proof is empty"),
+            "unexpected error: {err:?}"
+        );
+    }
+
+    #[test]
+    fn rejects_a_non_canonical_change_nonce_before_verifying_the_output_viewable_balance_proof() {
+        let mut change = viewable_output(2, 50);
+        change.sender_public_nonce = RistrettoPublicKeyBytes::from([0xffu8; 32]);
+        let stmt = statement(viewable_output(1, 100), change, malformed_range_proof());
+
+        let err = validate_confidential_statement(&stmt, Some(&view_key())).unwrap_err();
+        assert!(
+            matches!(
+                &err,
+                ResourceError::InvalidConfidentialProof { details } if details == "Invalid sender public nonce"
+            ),
+            "unexpected error: {err:?}"
+        );
+    }
+
+    #[test]
+    fn rejects_a_change_missing_its_viewable_balance_proof_before_verifying_the_output_proof() {
+        let stmt = statement(
+            viewable_output(1, 100),
+            sample_unspent_output(2, 50),
+            malformed_range_proof(),
+        );
+
+        let err = validate_confidential_statement(&stmt, Some(&view_key())).unwrap_err();
+        assert!(
+            matches!(
+                &err,
+                ResourceError::InvalidConfidentialProof { details }
+                    if details == "ViewableBalanceProof is required for a viewable resource"
+            ),
+            "unexpected error: {err:?}"
+        );
+    }
 
     fn sample_unspent_output(mask_seed: u64, value: u64) -> UnspentOutput {
         let mask = RistrettoSecretKey::from(mask_seed);

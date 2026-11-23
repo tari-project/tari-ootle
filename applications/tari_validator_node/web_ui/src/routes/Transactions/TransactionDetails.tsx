@@ -186,8 +186,8 @@ export default function TransactionDetails() {
   const transaction = state ? transactionBody(state.transaction)?.body.transaction : undefined;
   const final_decision = state?.final_decision;
   const finalized_time = state?.finalized_at;
-  const decision = final_decision != null && typeof final_decision === "object" ? "Abort" : final_decision;
-  const abortReason = final_decision != null && typeof final_decision === "object" ? final_decision.Abort : null;
+  const decision = typeof final_decision === "object" ? "Abort" : final_decision;
+  const abortReason = final_decision !== null && typeof final_decision === "object" ? final_decision.Abort : null;
   // Decision is Commit, but the body was rejected after the fee was charged (e.g. out of the
   // per-transaction metering budget) — render the status as a partial commit.
   const feeOnly = !!(result && "AcceptFeeRejectRest" in result.finalize.result);
@@ -252,7 +252,8 @@ export default function TransactionDetails() {
                             <DataTableCell>
                               {renderResult(state.result)}
                               <br />
-                              Executed in {result?.execution_time ? displayDuration(result.execution_time) : "--"},
+                              Executed in{" "}
+                              {state.result.execution_time ? displayDuration(state.result.execution_time) : "--"},
                               Finalized at {finalized_time}
                             </DataTableCell>
                           </TableRow>

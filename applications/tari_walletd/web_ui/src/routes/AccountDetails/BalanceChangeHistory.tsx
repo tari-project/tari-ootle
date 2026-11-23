@@ -65,10 +65,6 @@ function ChangeValues({ change, showBalance }: { change: BalanceChange; showBala
     { label: "Confidential", value: change.confidential_delta },
   ].filter(({ value }) => BigInt(value) !== 0n);
 
-  if (values.length === 0) {
-    return <Typography variant="body2">—</Typography>;
-  }
-
   return (
     <Stack spacing={0.25}>
       {values.map(({ label, value }) => (
@@ -138,7 +134,7 @@ function Source({ change }: { change: BalanceChange }) {
   }
 }
 
-export function BalanceChangeHistory({ accountAddress, resourceAddress }: BalanceChangeHistoryProps) {
+function BalanceChangeHistoryInner({ accountAddress, resourceAddress }: BalanceChangeHistoryProps) {
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const [sourceDraft, setSourceDraft] = useState<BalanceChangeSourceType | "">("");
@@ -157,14 +153,6 @@ export function BalanceChangeHistory({ accountAddress, resourceAddress }: Balanc
     sourceType,
     transactionId,
   );
-
-  useEffect(() => {
-    setPage(0);
-    setSourceDraft("");
-    setTransactionDraft("");
-    setSourceType(undefined);
-    setTransactionId(undefined);
-  }, [accountAddress, resourceAddress]);
 
   const total = Number(data?.total ?? 0);
   const maxPage = Math.max(0, Math.ceil(total / rowsPerPage) - 1);
@@ -302,6 +290,10 @@ export function BalanceChangeHistory({ accountAddress, resourceAddress }: Balanc
       </FetchStatusCheck>
     </>
   );
+}
+
+export function BalanceChangeHistory(props: BalanceChangeHistoryProps) {
+  return <BalanceChangeHistoryInner key={`${props.accountAddress}:${props.resourceAddress ?? ""}`} {...props} />;
 }
 
 interface BalanceChangeHistoryDialogProps extends BalanceChangeHistoryProps {

@@ -19,10 +19,10 @@ import {
 import PlaceHolder from "@routes/StealthUtxoList/components/PlaceHolder";
 import SortableHeader from "@routes/StealthUtxoList/components/SortableHeader";
 import StatusChip from "@routes/StealthUtxoList/components/StatusChip";
-import { clampPageIndex } from "@routes/StealthUtxoList/paginationHelpers";
 import { Account, OutputStatus, TARI_TOKEN } from "@tari-project/ootle-ts-bindings";
 import {
   bigintToDecimalString,
+  clampPageIndex,
   emptyRows,
   handleChangePage,
   handleChangeRowsPerPage,

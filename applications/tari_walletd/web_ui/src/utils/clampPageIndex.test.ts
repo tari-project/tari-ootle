@@ -2,7 +2,7 @@
 //  SPDX-License-Identifier: BSD-3-Clause
 
 import { describe, expect, it } from "vitest";
-import { clampPageIndex } from "./paginationHelpers";
+import { clampPageIndex } from "./helpers";
 
 describe("clampPageIndex", () => {
   it("returns 0 when the list is empty or rowsPerPage is non-positive", () => {

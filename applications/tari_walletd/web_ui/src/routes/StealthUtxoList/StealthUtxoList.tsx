@@ -21,6 +21,7 @@ import {
 import { Account, OutputStatus, TARI_TOKEN, UtxoInfo } from "@tari-project/ootle-ts-bindings";
 import {
   bigintToDecimalString,
+  clampPageIndex,
   emptyRows,
   handleChangePage,
   handleChangeRowsPerPage,
@@ -35,7 +36,6 @@ import { SenderAddress } from "./components/SenderAddress";
 import SortableHeader from "./components/SortableHeader";
 import StatusChip from "./components/StatusChip";
 import UtxoDetailsDialog from "./components/UtxoDetailsDialog";
-import { clampPageIndex } from "./paginationHelpers";
 
 function StealthUtxoList({ account }: { account: Account }) {
   const [page, setPage] = useState(0);

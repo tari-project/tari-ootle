@@ -162,6 +162,14 @@ export function emptyRows(page: number, rowsPerPage: number, array: Array<any> |
   return page > 0 ? Math.max(0, (1 + page) * rowsPerPage - array.length) : 0;
 }
 
+export function clampPageIndex(page: number, rowsPerPage: number, totalItems: number): number {
+  if (totalItems <= 0 || rowsPerPage <= 0 || page <= 0) {
+    return 0;
+  }
+  const maxPage = Math.ceil(totalItems / rowsPerPage) - 1;
+  return Math.min(page, maxPage);
+}
+
 export function handleChangePage(
   _event: unknown,
   newPage: number,

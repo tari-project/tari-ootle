@@ -108,9 +108,12 @@ function BlockWeightCell({ weight, max }: { weight: bigint; max: bigint }) {
   );
 }
 
-function BlockBurnCell({ burn, leaderFee }: { burn: bigint | null; leaderFee: bigint }) {
-  if (burn === null) {
+function BlockBurnCell({ burn, leaderFee }: { burn: bigint | null | undefined; leaderFee: bigint }) {
+  if (burn === undefined) {
     return <span>…</span>;
+  }
+  if (burn === null) {
+    return <span>--</span>;
   }
   const collected = leaderFee + burn;
   const percent = collected > 0n ? Number((burn * 1000n) / collected) / 10 : null;
@@ -141,20 +144,41 @@ export default function BlockDetails() {
   const [blockWeight, setBlockWeight] = useState<bigint>(0n);
   const [maxBlockWeight, setMaxBlockWeight] = useState<bigint>(0n);
   const [foreignProposals, setForeignProposals] = useState<ForeignProposalAtom[]>([]);
-  const [blockExhaustBurn, setBlockExhaustBurn] = useState<bigint | null>(null);
+  const [blockExhaustBurn, setBlockExhaustBurn] = useState<bigint | null | undefined>(undefined);
 
   useEffect(() => {
-    if (blockId !== undefined) {
-      Promise.all([getBlock({ block_id: blockId }), getIdentity()])
-        .then(([resp, identity]) => {
-          setIdentity(identity);
-          setBlock(resp.block);
-          setWasmPoints(resp.total_wasm_execution_points);
-          setNativePoints(resp.total_native_execution_points);
-          setMaxExecutionPoints(resp.max_block_execution_points);
-          setBlockWeight(resp.total_block_execution_weight);
-          setMaxBlockWeight(resp.max_block_validation_weight);
-          getBlock({ block_id: resp.block.header.parent }).then((justify_block) => {
+    if (blockId === undefined) {
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    setError(undefined);
+    setBlock(undefined);
+    setBlockTime(0);
+    setBlockExhaustBurn(undefined);
+    setExpandedPanels([]);
+    setBlockData({});
+    setOtherCommands({});
+    setForeignProposals([]);
+    setEpochEvents([]);
+
+    Promise.all([getBlock({ block_id: blockId }), getIdentity()])
+      .then(([resp, identity]) => {
+        if (cancelled) {
+          return;
+        }
+        setIdentity(identity);
+        setBlock(resp.block);
+        setWasmPoints(resp.total_wasm_execution_points);
+        setNativePoints(resp.total_native_execution_points);
+        setMaxExecutionPoints(resp.max_block_execution_points);
+        setBlockWeight(resp.total_block_execution_weight);
+        setMaxBlockWeight(resp.max_block_validation_weight);
+        getBlock({ block_id: resp.block.header.parent })
+          .then((justify_block) => {
+            if (cancelled) {
+              return;
+            }
             if (resp.block.stored_at && justify_block.block.stored_at) {
               let blockTime = resp.block.block_time || 0;
               let justifyTime = justify_block.block.block_time || 0;
@@ -171,44 +195,59 @@ export default function BlockDetails() {
                 ? BigInt(justify_block.block.header.accumulated_data.total_exhaust_burn)
                 : 0n;
             setBlockExhaustBurn(accumulated > parentAccumulated ? accumulated - parentAccumulated : 0n);
-          });
-          setEpochEvents([]);
-          const otherCommands: OtherCommands = {};
-          const foreignProposals = [];
-          const data: { [key: string]: (MultiShardAtom | LocalOnlyAtom)[] } = {};
-          for (let command of resp.block.commands) {
-            if (typeof command === "object") {
-              const cmd = Object.keys(command)[0];
-
-              if (COMMANDS.indexOf(cmd) > -1) {
-                data[cmd] ||= [];
-                data[cmd].push(command[cmd as keyof Command]);
-              } else if ("ForeignProposal" in command) {
-                foreignProposals.push(command.ForeignProposal);
-              } else {
-                if (Array.isArray(otherCommands[cmd])) {
-                  otherCommands[cmd].push(command[cmd as keyof Command]);
-                } else {
-                  // command[cmd as keyof Command]});
-                  Object.assign(otherCommands, { [cmd]: [command[cmd as keyof Command]] });
-                }
-              }
-            } else {
-              setEpochEvents((epochEvents: string[]) => [...epochEvents, command as string]);
+          })
+          .catch(() => {
+            if (cancelled) {
+              return;
             }
-          }
+            setBlockExhaustBurn(null);
+          });
 
-          setForeignProposals(foreignProposals);
-          setBlockData(data);
-          setOtherCommands(otherCommands);
-        })
-        .catch((err) => {
-          setError(err && err.message ? err.message : `Unknown error: ${JSON.stringify(err)}`);
-        })
-        .finally(() => {
+        const newEpochEvents: string[] = [];
+        const otherCommands: OtherCommands = {};
+        const foreignProposals: ForeignProposalAtom[] = [];
+        const data: { [key: string]: (MultiShardAtom | LocalOnlyAtom)[] } = {};
+        for (let command of resp.block.commands) {
+          if (typeof command === "object") {
+            const cmd = Object.keys(command)[0];
+
+            if (COMMANDS.indexOf(cmd) > -1) {
+              data[cmd] ||= [];
+              data[cmd].push(command[cmd as keyof Command]);
+            } else if ("ForeignProposal" in command) {
+              foreignProposals.push(command.ForeignProposal);
+            } else {
+              if (Array.isArray(otherCommands[cmd])) {
+                otherCommands[cmd].push(command[cmd as keyof Command]);
+              } else {
+                Object.assign(otherCommands, { [cmd]: [command[cmd as keyof Command]] });
+              }
+            }
+          } else {
+            newEpochEvents.push(command as string);
+          }
+        }
+
+        setEpochEvents(newEpochEvents);
+        setForeignProposals(foreignProposals);
+        setBlockData(data);
+        setOtherCommands(otherCommands);
+      })
+      .catch((err) => {
+        if (cancelled) {
+          return;
+        }
+        setError(err && err.message ? err.message : `Unknown error: ${JSON.stringify(err)}`);
+      })
+      .finally(() => {
+        if (!cancelled) {
           setLoading(false);
-        });
-    }
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [blockId]);
 
   const handleChange = (panel: string) => (_event: React.SyntheticEvent, isExpanded: boolean) => {
@@ -221,16 +260,15 @@ export default function BlockDetails() {
     });
   };
 
+  const allPanelIds = [
+    ...COMMANDS.filter((cmd) => Boolean(blockData[cmd])).map((cmd) => `panel${cmd}`),
+    ...(foreignProposals.length > 0 ? ["panelForeignProposals"] : []),
+    ...(epochEvents.length > 0 ? ["panelEpochEvents"] : []),
+    ...Object.keys(otherCommands).map((key) => `panel${key}`),
+  ];
+
   const expandAll = () => {
-    for (let cmd in COMMANDS) {
-      setExpandedPanels((prevExpandedPanels: string[]) => {
-        if (!prevExpandedPanels.includes(`panel${cmd}`)) {
-          return [...prevExpandedPanels, `panel${cmd}`];
-        } else {
-          return prevExpandedPanels;
-        }
-      });
-    }
+    setExpandedPanels(allPanelIds);
   };
 
   const collapseAll = () => {
@@ -381,6 +419,9 @@ export default function BlockDetails() {
                             fontSize: "0.85rem",
                           }}
                           startIcon={<KeyboardArrowDownIcon />}
+                          disabled={
+                            allPanelIds.length === 0 || allPanelIds.every((panel) => expandedPanels.includes(panel))
+                          }
                         >
                           Expand All
                         </Button>
@@ -400,7 +441,7 @@ export default function BlockDetails() {
                 )}
                 {COMMANDS.map((cmd, i) => {
                   if (!blockData[cmd]) {
-                    return <> </>;
+                    return null;
                   }
                   return (
                     <Accordion

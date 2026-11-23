@@ -375,7 +375,7 @@ mod tests {
             outputs_statement: StealthOutputsStatement {
                 outputs: vec![out2.clone(), out2],
                 revealed_output: None,
-                agg_range_proof: RangeProofBytes::empty(),
+                agg_range_proof: RangeProofBytes::try_from(vec![0xabu8; 64]).unwrap(),
             },
             balance_proof: Some(dummy_sig),
             covenant_claims: vec![],

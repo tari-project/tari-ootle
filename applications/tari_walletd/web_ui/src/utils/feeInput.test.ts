@@ -2,7 +2,7 @@
 //  SPDX-License-Identifier: BSD-3-Clause
 
 import { describe, expect, it } from "vitest";
-import { parseFeeInput } from "./claimBurnHelpers";
+import { parseFeeInput } from "./helpers";
 
 describe("parseFeeInput", () => {
   it("returns empty for blank strings", () => {

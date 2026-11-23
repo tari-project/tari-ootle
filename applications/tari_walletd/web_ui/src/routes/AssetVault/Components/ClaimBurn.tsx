@@ -47,11 +47,10 @@ import type {
 } from "@tari-project/ootle-ts-bindings";
 import { rejectReasonToString } from "@tari-project/ootle-ts-bindings";
 import { XTR_CURRENCY } from "@utils/currency";
-import { formatCurrency } from "@utils/helpers";
+import { formatCurrency, parseFeeInput } from "@utils/helpers";
 import { accountsClaimBurn, burnProofsGet, burnProofsList, transactionsWaitResult } from "@utils/json_rpc";
 import React, { SyntheticEvent, useEffect, useState } from "react";
 import { Form } from "react-router-dom";
-import { parseFeeInput } from "./claimBurnHelpers";
 
 type ProofSource = "file" | "paste";
 

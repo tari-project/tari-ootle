@@ -35,7 +35,9 @@ pub enum WebRtcSubcommand {
 pub struct StartArgs {
     #[clap(long, alias = "url")]
     pub signaling_server_url: Option<Url>,
+    #[clap(required_unless_present = "signaling_server_url")]
     pub signaling_server_token: Option<String>,
+    #[clap(required_unless_present = "signaling_server_url")]
     pub webrtc_permissions_token: Option<serde_json::Value>,
 }
 
@@ -71,10 +73,10 @@ fn build_start_request(mut args: StartArgs) -> anyhow::Result<WebRtcStartRequest
 
     let signaling_server_token = args
         .signaling_server_token
-        .ok_or_else(|| anyhow!("signaling_server_token is required when --signaling-server-url is not provided"))?;
-    let permissions = args
-        .webrtc_permissions_token
-        .ok_or_else(|| anyhow!("webrtc_permissions_token is required when --signaling-server-url is not provided"))?;
+        .ok_or_else(|| anyhow!("Missing signaling server token (pass --url or signaling_server_token)"))?;
+    let permissions = args.webrtc_permissions_token.ok_or_else(|| {
+        anyhow!("Missing WebRTC permissions token (pass --url or webrtc_permissions_token)")
+    })?;
 
     Ok(WebRtcStartRequest {
         signaling_server_token,
@@ -96,7 +98,9 @@ mod tests {
             webrtc_permissions_token: None,
         })
         .unwrap_err();
-        assert!(err.to_string().contains("signaling_server_token"));
+        let msg = err.to_string();
+        assert!(msg.contains("Missing signaling server token"));
+        assert!(msg.contains("signaling_server_token"));
 
         let err = build_start_request(StartArgs {
             signaling_server_url: None,
@@ -104,7 +108,9 @@ mod tests {
             webrtc_permissions_token: None,
         })
         .unwrap_err();
-        assert!(err.to_string().contains("webrtc_permissions_token"));
+        let msg = err.to_string();
+        assert!(msg.contains("Missing WebRTC permissions token"));
+        assert!(msg.contains("webrtc_permissions_token"));
     }
 
     #[test]
@@ -127,5 +133,17 @@ mod tests {
         .unwrap();
         assert_eq!(from_url.signaling_server_token, "sig-123");
         assert_eq!(from_url.permissions, json!(["Admin"]));
+    }
+
+    #[test]
+    fn build_start_request_rejects_empty_first_url_segment() {
+        let url = Url::parse("https://signal.example.com//%5B%22Admin%22%5D").unwrap();
+        let err = build_start_request(StartArgs {
+            signaling_server_url: Some(url),
+            signaling_server_token: None,
+            webrtc_permissions_token: None,
+        })
+        .unwrap_err();
+        assert!(err.to_string().contains("Malformed Tari URL"));
     }
 }

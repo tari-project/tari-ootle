@@ -43,10 +43,11 @@ describe("parseManifestFee", () => {
     expect(parseManifestFee("18446744073709551615")).toEqual({ kind: "submit", value: 18446744073709551615n });
   });
 
-  it("rejects negative, fractional, scientific-notation, and non-numeric inputs without throwing", () => {
+  it("rejects negative, fractional, scientific-notation, out-of-range u64, and non-numeric inputs without throwing", () => {
     expect(parseManifestFee("-10")).toEqual({ kind: "invalid" });
     expect(parseManifestFee("0.5")).toEqual({ kind: "invalid" });
     expect(parseManifestFee("1e5")).toEqual({ kind: "invalid" });
+    expect(parseManifestFee("18446744073709551616")).toEqual({ kind: "invalid" });
     expect(parseManifestFee("abc")).toEqual({ kind: "invalid" });
   });
 });

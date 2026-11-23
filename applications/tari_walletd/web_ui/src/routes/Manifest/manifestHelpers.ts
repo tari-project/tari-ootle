@@ -33,9 +33,11 @@ export function formatManifestCode(code: string): string {
   return formatted.join("\n");
 }
 
+const MAX_U64 = 18446744073709551615n;
+
 /**
  * Parse the Manifest editor Max Fee field without throwing.
- * Empty input or zero means dry-run fee estimation; a positive base-10 integer submits with that max_fee.
+ * Empty input or zero means dry-run fee estimation; a positive base-10 u64 integer submits with that max_fee.
  */
 export function parseManifestFee(raw: string): ParsedManifestFee {
   const trimmed = raw.trim();
@@ -46,6 +48,9 @@ export function parseManifestFee(raw: string): ParsedManifestFee {
     return { kind: "invalid" };
   }
   const value = BigInt(trimmed);
+  if (value > MAX_U64) {
+    return { kind: "invalid" };
+  }
   if (value === 0n) {
     return { kind: "estimate" };
   }

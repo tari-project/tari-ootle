@@ -188,12 +188,13 @@ function ManifestEditor() {
     setUpgradableComponents([]);
     setComponentUpgrades([]);
     setComponentRulesChanges([]);
+    const maxFee = parsedFee.kind === "submit" ? parsedFee.value : 1n;
     console.log("Manifest code submitted:", manifest.code);
-    console.log("Fee submitted:", parsedFee.kind === "submit" ? parsedFee.value : 0n);
+    console.log("Fee submitted:", maxFee);
     submitManifest({
       manifest: manifest.code,
       variables: manifest.variables,
-      max_fee: parsedFee.kind === "submit" ? parsedFee.value : 1n,
+      max_fee: maxFee,
       seal_signer_key_id: null,
       signing_key_ids: manifest.signingKeys,
       dry_run: isDryRun,
@@ -316,7 +317,9 @@ function ManifestEditor() {
               value={feeInput}
               onChange={(e) => setFeeInput(e.target.value)}
               error={feeError}
-              helperText={feeError ? "Enter a non-negative integer fee in micro-TARI" : undefined}
+              helperText={
+                feeError ? "Enter a non-negative integer fee up to 18446744073709551615 micro-TARI" : undefined
+              }
               slotProps={{ htmlInput: { inputMode: "numeric" } }}
             />
             <Button type="submit" variant="contained" color="primary" disabled={isSubmittingManifest || feeError}>

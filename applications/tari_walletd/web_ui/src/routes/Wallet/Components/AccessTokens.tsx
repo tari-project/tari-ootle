@@ -59,16 +59,6 @@ function formatSessionExpiry(exp: bigint | number): string {
   return `${date.toISOString().slice(0, 10)} ${date.toISOString().slice(11, 16)}`;
 }
 
-function getErrorMessage(err: unknown, fallback: string): string {
-  if (err instanceof Error && err.message) {
-    return err.message;
-  }
-  if (typeof err === "object" && err !== null && "message" in err && typeof err.message === "string" && err.message) {
-    return err.message;
-  }
-  return fallback;
-}
-
 function AlertDialog({ onConfirm, isRevoking }: { onConfirm: () => Promise<boolean>; isRevoking: boolean }) {
   const [open, setOpen] = useState(false);
 
@@ -215,7 +205,7 @@ export default function AccessTokens() {
       showSuccess("Access token revoked");
       return true;
     } catch (err: unknown) {
-      showError(getErrorMessage(err, "Failed to revoke access token"));
+      showError(err instanceof Error && err.message ? err.message : "Failed to revoke access token");
       return false;
     }
   };

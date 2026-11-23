@@ -67,12 +67,22 @@ together with a crafted `-wal` file of a different page size. The fix ships only
 `tari_common_sqlite`. Exploiting it needs local write access to a wallet or validator node data
 directory: every SQLite database these binaries open is their own. Remove once `diesel` releases
 with `libsqlite3-sys` 0.39 allowed and the workspace moves to it.""" },
-    { id = "RUSTSEC-2026-0542", reason = """
-`humantime` 2.3.0 is flagged unmaintained, with no patched release. Every path to it is transitive
-(`log4rs`, `env_logger`, `console-subscriber`, `cucumber`, walletd's `humantime-serde`), so
-`unmaintained = "workspace"` already keeps it out of this check. It is listed so
-`rustsec/audit-check` follows the same policy. Remove once those dependencies move off
-`humantime`.""" },
+    { id = "RUSTSEC-2026-0574", reason = """
+heapless 0.8.0 soundness bugs in collections/queues, fixed in heapless 0.9.3/0.9.4. Absent from
+every compiled crate and binary in this workspace: heapless 0.8.0 is present only in `Cargo.lock`
+and `fuzz/Cargo.lock` as an optional dependency of `faster-hex` 0.10.1's `defmt` feature, which is
+never enabled (the workspace only uses `gix-hash = { version = "0.18", features = ["serde"] }` in
+`tari_ootle_template_metadata`). Upstream `gix-hash` up to 0.28.1 still depends on `faster-hex
+^0.10.1`. Remove once `gix-hash` allows `faster-hex` 2.0, or once `tari_ootle_template_metadata`
+replaces `gix_hash::ObjectId` with a local fixed-size commit-hash newtype.""" },
+    { id = "RUSTSEC-2026-0575", reason = "heapless 0.8.0 soundness; see RUSTSEC-2026-0574." },
+    { id = "RUSTSEC-2026-0576", reason = "heapless 0.8.0 soundness; see RUSTSEC-2026-0574." },
+    { id = "RUSTSEC-2026-0577", reason = "heapless 0.8.0 soundness; see RUSTSEC-2026-0574." },
+    { id = "RUSTSEC-2026-0578", reason = "heapless 0.8.0 soundness; see RUSTSEC-2026-0574." },
+    { id = "RUSTSEC-2026-0579", reason = "heapless 0.8.0 soundness; see RUSTSEC-2026-0574." },
+    { id = "RUSTSEC-2026-0580", reason = "heapless 0.8.0 soundness; see RUSTSEC-2026-0574." },
+    { id = "RUSTSEC-2026-0581", reason = "heapless 0.8.0 soundness; see RUSTSEC-2026-0574." },
+    { id = "RUSTSEC-2026-0582", reason = "heapless 0.8.0 soundness; see RUSTSEC-2026-0574." },
 ]
 
 [licenses]

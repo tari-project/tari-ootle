@@ -11,6 +11,14 @@ ignore = [
     "RUSTSEC-2026-0387",
     # bundled SQLite WAL page-size bug; blocked on `diesel` releasing with `libsqlite3-sys` 0.39 allowed.
     "RUSTSEC-2026-0459",
-    # humantime 2.3.0 unmaintained; transitive only (log4rs, env_logger, console-subscriber, cucumber, humantime-serde).
-    "RUSTSEC-2026-0542",
+    # heapless 0.8.0 soundness advisories; present only in Cargo.lock via unused `faster-hex/defmt` (never compiled).
+    "RUSTSEC-2026-0574",
+    "RUSTSEC-2026-0575",
+    "RUSTSEC-2026-0576",
+    "RUSTSEC-2026-0577",
+    "RUSTSEC-2026-0578",
+    "RUSTSEC-2026-0579",
+    "RUSTSEC-2026-0580",
+    "RUSTSEC-2026-0581",
+    "RUSTSEC-2026-0582",
 ]

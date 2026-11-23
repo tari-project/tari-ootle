@@ -1513,7 +1513,7 @@ fn a_burnt_utxo_cannot_be_frozen_or_unfrozen() {
         test.transaction()
             .call_function(template_addr, "burn_utxo_of", args![faucet_resx, utxo_id, proof])
             .finish()
-            .add_signer(&test.to_public_key_bytes(), &mint.output_masks[0])
+            .authorize(&test.to_public_key_bytes(), [&mint.output_masks[0]])
             .seal(test.secret_key()),
         vec![],
     );

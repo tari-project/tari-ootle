@@ -37,6 +37,25 @@ interface EntryFormState {
 
 const EMPTY_FORM: EntryFormState = { name: "", address: "", note: "" };
 
+function extractErrorMessage(err: unknown, fallback: string): string {
+  if (err instanceof Error) {
+    const cause = err.cause;
+    if (
+      typeof cause === "object" &&
+      cause !== null &&
+      "message" in cause &&
+      typeof cause.message === "string" &&
+      cause.message
+    ) {
+      return cause.message;
+    }
+    if (err.message) {
+      return err.message;
+    }
+  }
+  return fallback;
+}
+
 export default function AddressBookPage() {
   const { data, isLoading, isError, error } = useAddressBookList();
   const addMutation = useAddressBookAdd();
@@ -122,14 +141,14 @@ export default function AddressBookPage() {
         });
       }
       setDialogOpen(false);
-    } catch (e: any) {
+    } catch (e: unknown) {
       // The backend returns `WalletStorageError::DuplicateName { name }` for
       // unique-constraint violations on the address book name column. The
       // JSON-RPC layer serializes this as an error string containing
       // "DuplicateName"; we match on that exact token rather than the
       // sqlite-level "UNIQUE constraint failed" phrasing so the UI stays
       // decoupled from the underlying driver error text.
-      const msg = e?.cause?.message || e?.message || "Failed to save entry";
+      const msg = extractErrorMessage(e, "Failed to save entry");
       if (msg.includes("DuplicateName")) {
         setFormError("An entry with this name already exists");
       } else {
@@ -145,7 +164,7 @@ export default function AddressBookPage() {
       await deleteMutation.mutateAsync({ name });
       setDeleteConfirm(null);
     } catch (e: unknown) {
-      setDeleteError(e instanceof Error && e.message ? e.message : "Failed to delete entry");
+      setDeleteError(extractErrorMessage(e, "Failed to delete entry"));
     }
   };
 
@@ -192,7 +211,7 @@ export default function AddressBookPage() {
 
           {isError && (
             <Alert severity="error" sx={{ mb: 2 }}>
-              {error instanceof Error && error.message ? error.message : "Failed to load address book entries"}
+              {extractErrorMessage(error, "Failed to load address book entries")}
             </Alert>
           )}
 

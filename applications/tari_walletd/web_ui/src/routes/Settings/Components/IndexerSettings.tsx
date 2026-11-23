@@ -31,7 +31,7 @@ import { GetNetworkInfoResponse } from "@tari-project/ootle-ts-bindings";
 import { indexerGetNetworkInfo, settingsSet } from "@utils/json_rpc";
 import React, { useEffect, useState } from "react";
 import { Form } from "react-router-dom";
-import { normalizeIndexerUrl, validateIndexerUrl } from "./indexerSettingsHelpers";
+import { validateIndexerUrl } from "./indexerSettingsHelpers";
 
 interface IndexerStatusProps {
   indexerUrl: string;
@@ -123,7 +123,7 @@ function IndexerSettings({ indexerUrls, activeUrl, walletNetwork, onSaved }: Ind
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  const trimmedInput = normalizeIndexerUrl(inputUrl);
+  const trimmedInput = inputUrl.trim();
   const validationError = trimmedInput ? validateIndexerUrl(trimmedInput, indexerUrls) : null;
 
   const save = async (urls: string[]) => {

@@ -2,13 +2,9 @@
 //  SPDX-License-Identifier: BSD-3-Clause
 
 import { describe, expect, it } from "vitest";
-import { normalizeIndexerUrl, validateIndexerUrl } from "./indexerSettingsHelpers";
+import { validateIndexerUrl } from "./indexerSettingsHelpers";
 
-describe("indexerSettingsHelpers", () => {
-  it("trims surrounding whitespace in normalizeIndexerUrl", () => {
-    expect(normalizeIndexerUrl("  https://indexer.tari.com/  ")).toBe("https://indexer.tari.com/");
-  });
-
+describe("validateIndexerUrl", () => {
   it("accepts valid http and https URLs", () => {
     expect(validateIndexerUrl("http://127.0.0.1:18300")).toBeNull();
     expect(validateIndexerUrl(" https://indexer.tari.com ")).toBeNull();
@@ -21,9 +17,12 @@ describe("indexerSettingsHelpers", () => {
     expect(validateIndexerUrl("   ")).toBe("Invalid URL");
   });
 
-  it("detects duplicates even when the input has surrounding whitespace", () => {
-    const existing = ["https://indexer.tari.com"];
+  it("detects duplicates against daemon-normalized URLs across whitespace, trailing slash, and host case", () => {
+    const existing = ["https://indexer.tari.com/", "https://indexer.tari.com/api"];
     expect(validateIndexerUrl("https://indexer.tari.com", existing)).toBe("This indexer is already configured");
-    expect(validateIndexerUrl("  https://indexer.tari.com  ", existing)).toBe("This indexer is already configured");
+    expect(validateIndexerUrl("https://indexer.tari.com/", existing)).toBe("This indexer is already configured");
+    expect(validateIndexerUrl("  https://INDEXER.TARI.COM  ", existing)).toBe("This indexer is already configured");
+    expect(validateIndexerUrl("https://indexer.tari.com/api", existing)).toBe("This indexer is already configured");
+    expect(validateIndexerUrl("https://indexer.tari.com/other", existing)).toBeNull();
   });
 });

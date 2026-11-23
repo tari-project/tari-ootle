@@ -10,7 +10,7 @@ license.workspace = true
 [dependencies]
 tari_crypto = { workspace = true }
 ootle-network = { workspace = true }
-tari_template_lib_types = { workspace = true }
+tari_template_lib_types = { workspace = true, features = ["std"] }
 ootle_byte_type = { workspace = true, features = ["crypto"] }
 
 bech32 = { workspace = true }

@@ -74,36 +74,9 @@ import { Highlight, themes } from "prism-react-renderer";
 import { useCallback, useEffect, useRef, useState } from "react";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 import EditorImport from "react-simple-code-editor";
+import { formatManifestCode, parseManifestFee } from "./manifestHelpers";
 // Vite 8 dev pre-bundler doesn't unwrap exports.default for CJS packages
 const Editor = (EditorImport as any).default ?? EditorImport;
-
-function formatManifestCode(code: string): string {
-  const lines = code.split("\n");
-  const formatted: string[] = [];
-  let indent = 0;
-
-  for (const rawLine of lines) {
-    const trimmed = rawLine.trim();
-    if (!trimmed) {
-      formatted.push("");
-      continue;
-    }
-
-    // Decrease indent for closing braces
-    if (trimmed.startsWith("}")) {
-      indent = Math.max(0, indent - 1);
-    }
-
-    formatted.push("    ".repeat(indent) + trimmed);
-
-    // Increase indent after opening braces (that aren't closed on the same line)
-    const opens = (trimmed.match(/{/g) || []).length;
-    const closes = (trimmed.match(/}/g) || []).length;
-    indent = Math.max(0, indent + opens - closes);
-  }
-
-  return formatted.join("\n");
-}
 
 function upgradableBy(rule: UpgradableComponent["upgrade_rule"]): string {
   if (rule === "Owner") {
@@ -132,7 +105,7 @@ function Manifest() {
 
 function ManifestEditor() {
   const manifest = useManifestCodeStore();
-  const [fee, setFee] = useState<bigint>(0n);
+  const [feeInput, setFeeInput] = useState<string>("");
   const [finalizeError, setFinalizeError] = useState<string | null>(null);
   const [upgradableComponents, setUpgradableComponents] = useState<UpgradableComponent[]>([]);
   const [componentUpgrades, setComponentUpgrades] = useState<ComponentUpgrade[]>([]);
@@ -144,7 +117,9 @@ function ManifestEditor() {
   // A dry run that is still in flight must not restore a warning after the manifest changes or a later submit starts.
   const dryRunGeneration = useRef(0);
 
-  const isDryRun = !fee;
+  const parsedFee = parseManifestFee(feeInput);
+  const isDryRun = parsedFee.kind === "estimate";
+  const feeError = parsedFee.kind === "invalid";
 
   useEffect(() => {
     dryRunGeneration.current += 1;
@@ -206,16 +181,19 @@ function ManifestEditor() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (parsedFee.kind === "invalid") {
+      return;
+    }
     const generation = ++dryRunGeneration.current;
     setUpgradableComponents([]);
     setComponentUpgrades([]);
     setComponentRulesChanges([]);
     console.log("Manifest code submitted:", manifest.code);
-    console.log("Fee submitted:", fee);
+    console.log("Fee submitted:", parsedFee.kind === "submit" ? parsedFee.value : 0n);
     submitManifest({
       manifest: manifest.code,
       variables: manifest.variables,
-      max_fee: isDryRun ? 1n : fee ? BigInt(fee) : 0n,
+      max_fee: parsedFee.kind === "submit" ? parsedFee.value : 1n,
       seal_signer_key_id: null,
       signing_key_ids: manifest.signingKeys,
       dry_run: isDryRun,
@@ -237,7 +215,7 @@ function ManifestEditor() {
           throw new Error("No result returned for dry run");
         }
         if ("Accept" in finalize!.result) {
-          setFee(BigInt(response.required_fees!));
+          setFeeInput(String(response.required_fees!));
           setFinalizeError(null);
           console.log("Dry run successful:", finalize);
         } else if ("Reject" in finalize!.result) {
@@ -334,13 +312,15 @@ function ManifestEditor() {
           <Box className="flex-container" style={{ justifyContent: "flex-end" }}>
             <TextField
               name="max-fee"
-              placeholder="Max fee"
-              value={fee}
-              onChange={(e) => setFee(BigInt(e.target.value))}
-              type="number"
+              placeholder="Max fee (0 or empty to estimate)"
+              value={feeInput}
+              onChange={(e) => setFeeInput(e.target.value)}
+              error={feeError}
+              helperText={feeError ? "Enter a non-negative integer fee in micro-TARI" : undefined}
+              slotProps={{ htmlInput: { inputMode: "numeric" } }}
             />
-            <Button type="submit" variant="contained" color="primary">
-              {isSubmittingManifest ? "Submitting..." : fee ? "Submit" : "Estimate fee"}
+            <Button type="submit" variant="contained" color="primary" disabled={isSubmittingManifest || feeError}>
+              {isSubmittingManifest ? "Submitting..." : parsedFee.kind === "submit" ? "Submit" : "Estimate fee"}
             </Button>
           </Box>
           {error && (

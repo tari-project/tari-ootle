@@ -603,7 +603,10 @@ mod tests {
     #[test]
     fn signaling_server_address_defaults_when_omitted() {
         let config = load("[ootle_wallet_daemon]\nindexer_api_url = \"http://a.example/\"").unwrap();
-        assert_eq!(config.signaling_server_address, return_default_signaling_server_address());
+        assert_eq!(
+            config.signaling_server_address,
+            return_default_signaling_server_address()
+        );
         config.validate().unwrap();
     }
 }

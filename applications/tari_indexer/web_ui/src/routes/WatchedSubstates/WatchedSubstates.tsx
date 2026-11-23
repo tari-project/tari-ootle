@@ -22,10 +22,21 @@
 
 import KeyboardArrowLeftIcon from "@mui/icons-material/KeyboardArrowLeft";
 import KeyboardArrowRightIcon from "@mui/icons-material/KeyboardArrowRight";
-import { Chip, IconButton, Stack, Table, TableBody, TableCell, TableHead, TableRow, Typography } from "@mui/material";
+import {
+  Alert,
+  Chip,
+  IconButton,
+  Stack,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableRow,
+  Typography,
+} from "@mui/material";
 import Grid from "@mui/material/Grid";
 import type { WatchedSubstateItem, WatchedTemplateItem } from "@tari-project/ootle-ts-bindings";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import CopyToClipboard from "../../Components/CopyToClipboard";
 import PageHeading from "../../Components/PageHeading";
@@ -35,37 +46,84 @@ import { truncateText } from "../../utils/helpers";
 
 const PAGE_SIZE = 20;
 
+function getErrorMessage(err: unknown, fallback: string): string {
+  if (err instanceof Error && err.message) {
+    return err.message;
+  }
+  if (typeof err === "object" && err !== null && "message" in err && typeof err.message === "string" && err.message) {
+    return err.message;
+  }
+  return fallback;
+}
+
 function WatchedSubstatesLayout() {
   const [templates, setTemplates] = useState<WatchedTemplateItem[]>([]);
   const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null);
   const [substates, setSubstates] = useState<WatchedSubstateItem[]>([]);
   const [page, setPage] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [templatesError, setTemplatesError] = useState<string | null>(null);
+  const [substatesError, setSubstatesError] = useState<string | null>(null);
+  const [loadingSubstates, setLoadingSubstates] = useState(false);
+  const requestIdRef = useRef(0);
+  const mountedRef = useRef(true);
 
   useEffect(() => {
-    listWatchedTemplates().then((resp) => {
-      setTemplates(resp.templates);
-      if (resp.templates.length > 0) {
-        setSelectedTemplate(resp.templates[0].template_address);
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    listWatchedTemplates()
+      .then((resp) => {
+        if (cancelled) return;
+        setTemplates(resp.templates);
+        setTemplatesError(null);
+        if (resp.templates.length > 0) {
+          setSelectedTemplate(resp.templates[0].template_address);
+        }
+        setLoading(false);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setTemplatesError(getErrorMessage(err, "Failed to load watched templates."));
+        setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const fetchSubstates = useCallback(async (templateAddress: string, pageNum: number) => {
+    const reqId = ++requestIdRef.current;
+    setLoadingSubstates(true);
+    setSubstatesError(null);
+    try {
+      const resp = await listWatchedSubstates({
+        template_address: templateAddress,
+        limit: BigInt(PAGE_SIZE),
+        offset: BigInt(pageNum * PAGE_SIZE),
+      });
+      if (!mountedRef.current || reqId !== requestIdRef.current) return;
+      setSubstates(resp.substates);
+      setPage(pageNum);
+    } catch (err: unknown) {
+      if (!mountedRef.current || reqId !== requestIdRef.current) return;
+      setSubstatesError(getErrorMessage(err, "Failed to load watched substates."));
+    } finally {
+      if (mountedRef.current && reqId === requestIdRef.current) {
+        setLoadingSubstates(false);
       }
-      setLoading(false);
-    });
+    }
   }, []);
 
   useEffect(() => {
     if (!selectedTemplate) return;
-    fetchSubstates(selectedTemplate, 0);
-  }, [selectedTemplate]);
-
-  async function fetchSubstates(templateAddress: string, pageNum: number) {
-    const resp = await listWatchedSubstates({
-      template_address: templateAddress,
-      limit: BigInt(PAGE_SIZE),
-      offset: BigInt(pageNum * PAGE_SIZE),
-    });
-    setSubstates(resp.substates);
-    setPage(pageNum);
-  }
+    void fetchSubstates(selectedTemplate, 0);
+  }, [selectedTemplate, fetchSubstates]);
 
   async function handleChangePage(newPage: number) {
     if (!selectedTemplate || newPage < 0) return;
@@ -73,8 +131,13 @@ function WatchedSubstatesLayout() {
   }
 
   function handleSelectTemplate(templateAddress: string) {
+    if (templateAddress === selectedTemplate) {
+      if (page !== 0) {
+        void fetchSubstates(templateAddress, 0);
+      }
+      return;
+    }
     setSelectedTemplate(templateAddress);
-    setPage(0);
   }
 
   if (loading) {
@@ -102,7 +165,9 @@ function WatchedSubstatesLayout() {
           <Typography variant="h6" sx={{ marginBottom: 2 }}>
             Watched Templates
           </Typography>
-          {templates.length === 0 ? (
+          {templatesError ? (
+            <Alert severity="error">{templatesError}</Alert>
+          ) : templates.length === 0 ? (
             <Typography color="textSecondary">No watched templates configured.</Typography>
           ) : (
             <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
@@ -126,6 +191,11 @@ function WatchedSubstatesLayout() {
             <Typography variant="h6" sx={{ marginBottom: 2 }}>
               Components
             </Typography>
+            {substatesError && (
+              <Alert severity="error" sx={{ marginBottom: 2 }}>
+                {substatesError}
+              </Alert>
+            )}
             <Table sx={{ minWidth: 650 }} aria-label="watched substates table">
               <TableHead>
                 <TableRow>
@@ -141,8 +211,8 @@ function WatchedSubstatesLayout() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  substates.map((s, i) => (
-                    <TableRow key={i} sx={{ "&:last-child td, &:last-child th": { border: 0 } }}>
+                  substates.map((s) => (
+                    <TableRow key={s.component_address} sx={{ "&:last-child td, &:last-child th": { border: 0 } }}>
                       <TableCell>
                         <Link to={`/substates?address=${encodeURIComponent(s.component_address)}`}>
                           {truncateText(s.component_address, 40)}
@@ -161,14 +231,18 @@ function WatchedSubstatesLayout() {
               </TableBody>
             </Table>
             <Stack direction="row" justifyContent="right" spacing={2} alignItems="center">
-              <IconButton aria-label="previous page" onClick={() => handleChangePage(page - 1)} disabled={page === 0}>
+              <IconButton
+                aria-label="previous page"
+                onClick={() => handleChangePage(page - 1)}
+                disabled={loadingSubstates || page === 0}
+              >
                 <KeyboardArrowLeftIcon />
               </IconButton>
               <Typography>{page}</Typography>
               <IconButton
                 aria-label="next page"
                 onClick={() => handleChangePage(page + 1)}
-                disabled={substates.length < PAGE_SIZE}
+                disabled={loadingSubstates || substates.length < PAGE_SIZE}
               >
                 <KeyboardArrowRightIcon />
               </IconButton>

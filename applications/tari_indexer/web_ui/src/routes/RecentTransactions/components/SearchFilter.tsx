@@ -66,8 +66,10 @@ const TransactionFilter = ({
   const searchStateRef = useRef({ searchValue: formState.searchValue, filterBy });
   const prevSearchRef = useRef({ searchValue: formState.searchValue, filterBy });
 
-  filterItemsRef.current = filterItems;
-  searchStateRef.current = { searchValue: formState.searchValue, filterBy };
+  useEffect(() => {
+    filterItemsRef.current = filterItems;
+    searchStateRef.current = { searchValue: formState.searchValue, filterBy };
+  }, [filterItems, formState.searchValue, filterBy]);
 
   const onSelectChange = (event: any) => {
     setFilterBy(event.target.value as string);

@@ -32,7 +32,6 @@ import AddressBookPage from "@routes/AddressBook/AddressBookPage";
 import ApiKeysLayout from "@routes/ApiKeys/ApiKeys";
 import MyAssets from "@routes/AssetVault/Components/MyAssets";
 import ErrorPage from "@routes/ErrorPage";
-import Keys from "@routes/Keys/Keys";
 import Manifest from "@routes/Manifest/Manifest";
 import Onboarding from "@routes/Onboarding/Onboarding";
 import SettingsPage from "@routes/Settings/Settings";
@@ -70,11 +69,6 @@ export const breadcrumbRoutes = [
   {
     label: "Accounts",
     path: "/accounts",
-    dynamic: false,
-  },
-  {
-    label: "Keys",
-    path: "/keys",
     dynamic: false,
   },
   {
@@ -253,7 +247,6 @@ function App() {
           <Route path="onboarding" element={<GuardedRoute component={Onboarding} />} />
           <Route path="accounts" element={<GuardedRoute redirect="/accounts" component={Accounts} />} />
           <Route path="accounts/:id" element={<GuardedRoute redirect="/accounts" component={AccountDetails} />} />
-          <Route path="keys" element={<GuardedRoute redirect="/keys" component={Keys} />} />
           <Route
             path="access-tokens"
             element={<GuardedRoute redirect="/access-tokens" component={AccessTokensLayout} />}

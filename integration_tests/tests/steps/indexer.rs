@@ -13,7 +13,7 @@ use integration_tests::{
     TariWorld,
     cucumber_log,
     helpers::local_tcp_multiaddr,
-    indexer::spawn_indexer,
+    indexer::{respawn_indexer, spawn_indexer, spawn_indexer_with_epoch_oracle, stop_indexer},
     not_found,
     wait::{TimedOut, wait_until},
 };
@@ -134,6 +134,31 @@ pub async fn indexer_has_scanned_to_at_least_height(
         remaining -= 1;
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     }
+}
+
+#[when(expr = "I stop indexer {word}")]
+async fn when_i_stop_indexer(world: &mut TariWorld, name: String) {
+    stop_indexer(world, &name).await;
+}
+
+#[when(expr = "I start indexer {word}")]
+async fn when_i_start_indexer(world: &mut TariWorld, name: String) {
+    respawn_indexer(world, name.clone()).await;
+    given_validator_connects_to_other_vns(world, name).await;
+}
+
+/// Starts a fresh indexer with the epoch oracle config another indexer was started with.
+#[when(expr = "I start indexer {word} with the epoch oracle config of indexer {word}")]
+async fn when_i_start_indexer_with_epoch_oracle_of(world: &mut TariWorld, name: String, other: String) {
+    let epoch_oracle = world.get_indexer(&other).epoch_oracle.clone();
+    let bn_name = world
+        .base_nodes
+        .keys()
+        .next()
+        .cloned()
+        .expect("An indexer needs a base node");
+    spawn_indexer_with_epoch_oracle(world, name.clone(), bn_name, epoch_oracle).await;
+    given_validator_connects_to_other_vns(world, name).await;
 }
 
 #[given(expr = "an indexer {word} connected to base node {word}")]

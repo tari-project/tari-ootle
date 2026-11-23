@@ -516,10 +516,24 @@ pub fn apply_leader_fee_to_substate_store<TTx: StateStoreReadTransaction>(
     Ok(())
 }
 
-pub(crate) fn get_highest_seen_justified_view<TTx: StateStoreReadTransaction>(
+/// The heights of the highest proposal and timeout certificates seen in an epoch. Zero for a certificate not yet seen.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct JustifiedHeights {
+    pub high_pc: NodeHeight,
+    pub high_tc: NodeHeight,
+}
+
+impl JustifiedHeights {
+    /// The highest view either certificate justifies.
+    pub fn highest(&self) -> NodeHeight {
+        self.high_pc.max(self.high_tc)
+    }
+}
+
+pub(crate) fn get_justified_heights<TTx: StateStoreReadTransaction>(
     tx: &TTx,
     epoch: Epoch,
-) -> Result<NodeHeight, HotStuffError> {
+) -> Result<JustifiedHeights, HotStuffError> {
     let high_pc = HighPc::get(tx, epoch)
         .optional()?
         .map(|high_pc| high_pc.height())
@@ -528,7 +542,14 @@ pub(crate) fn get_highest_seen_justified_view<TTx: StateStoreReadTransaction>(
         .optional()?
         .map(|high_tc| high_tc.height())
         .unwrap_or_default();
-    Ok(high_pc.max(high_tc))
+    Ok(JustifiedHeights { high_pc, high_tc })
+}
+
+pub(crate) fn get_highest_seen_justified_view<TTx: StateStoreReadTransaction>(
+    tx: &TTx,
+    epoch: Epoch,
+) -> Result<NodeHeight, HotStuffError> {
+    Ok(get_justified_heights(tx, epoch)?.highest())
 }
 
 /// Moves `tx_rec` to ABORT if, for a block in `epoch`, it has outlived its validity window in `LocalPrepared` (see

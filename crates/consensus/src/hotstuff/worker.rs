@@ -63,10 +63,12 @@ use super::{
     calculate_last_dummy_block,
     config::HotstuffConfig,
     get_highest_seen_justified_view,
+    get_justified_heights,
     on_receive_new_transaction::OnReceiveNewTransaction,
 };
 use crate::{
     hotstuff::{
+        current_view::CurrentView,
         epoch_end_drain::EpochEndDrain,
         epoch_gc::EpochGc,
         epoch_state::EpochState,
@@ -76,8 +78,7 @@ use crate::{
         on_catch_up_sync::OnCatchUpSync,
         on_catch_up_sync_request::OnSyncRequest,
         on_inbound_message::{InboundMessage, OnInboundMessage},
-        on_leader_timeout::LeaderTimeout,
-        on_message_validate::{MessageValidationResult, OnMessageValidate},
+        on_message_validate::{MessageValidationResult, OnMessageValidate, decode_named_transactions},
         on_next_sync_view::OnNextSyncViewHandler,
         on_propose::OnPropose,
         on_receive_foreign_proposal::OnReceiveForeignProposalHandler,
@@ -85,14 +86,14 @@ use crate::{
         on_receive_new_view::OnReceiveNewViewHandler,
         on_receive_request_missing_transactions::OnReceiveRequestMissingTransactions,
         on_receive_vote::OnReceiveVoteHandler,
-        pacemaker::PaceMaker,
-        pacemaker_handle::PaceMakerHandle,
+        pacemaker::{PaceMaker, PacemakerEvent},
+        pacemaker_action::PacemakerActions,
         state_tree_gc::StateTreeGc,
         substate_store::ShardedStateTree,
         transaction_manager::{ConsensusTransactionManager, UncommittedTemplateStore},
         vote_collector::{ProposalVoteCollector, TimeoutVoteCollector},
     },
-    messages::{HotstuffMessage, ProposalMessage},
+    messages::{CatchUpPageMessage, EncodedTransaction, HotstuffMessage, ProposalMessage},
     tracing::TraceTimer,
     traits::{CertificateStore, ConsensusSpec, PeriodicTask, hooks::ConsensusHooks},
 };
@@ -152,8 +153,9 @@ pub struct HotstuffWorker<TConsensusSpec: ConsensusSpec> {
     /// Whether the end of the given epoch changes the number of committees. Cached for the epoch being ended.
     next_epoch_changes_layout: Option<(Epoch, bool)>,
     epoch_manager: TConsensusSpec::EpochManager,
-    pacemaker_worker: Option<PaceMaker>,
-    pacemaker: PaceMakerHandle,
+    pacemaker: PaceMaker,
+    /// Pacemaker actions requested by the handler call in progress, applied once it returns.
+    pacemaker_actions: PacemakerActions,
     shutdown: ShutdownSignal,
 }
 impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
@@ -199,6 +201,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         );
         let uncommitted_templates = transaction_manager.uncommitted_templates().clone();
 
+        let catch_up_page_bytes = config.catch_up_page_bytes;
         Self {
             local_validator_addr: local_validator_addr.clone(),
 
@@ -217,7 +220,6 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 config.clone(),
                 state_store.clone(),
                 epoch_manager.clone(),
-                pacemaker.clone_handle().current_view().clone(),
                 signing_service.clone(),
                 outbound_messaging.clone(),
                 tx_events.downgrade(),
@@ -234,7 +236,6 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 state_store.clone(),
                 epoch_manager.clone(),
                 leader_strategy.clone(),
-                pacemaker.clone_handle(),
                 outbound_messaging.clone(),
                 signing_service.clone(),
                 transaction_pool.clone(),
@@ -246,13 +247,11 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             on_receive_foreign_proposal: OnReceiveForeignProposalHandler::new(
                 state_store.clone(),
                 epoch_manager.clone(),
-                pacemaker.clone_handle(),
                 outbound_messaging.clone(),
             ),
             on_receive_vote: OnReceiveVoteHandler::new(
                 config.clone(),
                 state_store.clone(),
-                pacemaker.clone_handle(),
                 proposal_vote_collector.clone(),
                 local_validator_addr.clone(),
                 leader_strategy.clone(),
@@ -262,7 +261,6 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 local_validator_addr,
                 state_store.clone(),
                 leader_strategy.clone(),
-                pacemaker.clone_handle(),
                 proposal_vote_collector,
                 timeout_vote_collector,
             ),
@@ -286,8 +284,8 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 outbound_messaging.clone(),
             ),
 
-            on_sync_request: OnSyncRequest::new(state_store.clone(), outbound_messaging.clone()),
-            on_catch_up_sync: OnCatchUpSync::new(state_store.clone(), pacemaker.clone_handle(), outbound_messaging),
+            on_sync_request: OnSyncRequest::new(state_store.clone(), outbound_messaging.clone(), catch_up_page_bytes),
+            on_catch_up_sync: OnCatchUpSync::new(state_store.clone(), outbound_messaging),
             worker_state: WorkerState::default(),
 
             state_store,
@@ -298,16 +296,17 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
 
             next_epoch: None,
             next_epoch_changes_layout: None,
-            pacemaker: pacemaker.clone_handle(),
-            pacemaker_worker: Some(pacemaker),
+            pacemaker,
+            pacemaker_actions: PacemakerActions::new(),
             hooks,
             tx_events,
             shutdown,
         }
     }
 
-    pub fn pacemaker(&self) -> &PaceMakerHandle {
-        &self.pacemaker
+    /// A read-only view that follows the pacemaker's current view.
+    pub fn current_view(&self) -> CurrentView {
+        self.pacemaker.subscribe_view()
     }
 
     pub fn hooks_mut(&mut self) -> &mut TConsensusSpec::Hooks {
@@ -346,8 +345,9 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
     /// event, leaving the committee stuck one epoch behind for an entire base-layer epoch.
     ///
     /// Seeds the oracle's epoch as the target, so the committee proposes `EndEpoch` in each epoch from `starting_epoch`
-    /// until it reaches the oracle's, without waiting for further `EpochChanged` events. Only registration for the
-    /// epoch after `starting_epoch` is checked here; each later epoch is checked as consensus transitions into it.
+    /// until it reaches the oracle's, without waiting for further `EpochChanged` events. The target is seeded whether
+    /// or not this validator is registered for the following epoch; an unregistered validator exits once the current
+    /// epoch transitions.
     async fn seed_epoch_target_from_oracle(&mut self, starting_epoch: Epoch) -> Result<(), HotStuffError> {
         let oracle_epoch = self.epoch_manager.current_epoch().await?;
         if oracle_epoch <= starting_epoch {
@@ -355,29 +355,36 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         }
 
         let next_epoch = starting_epoch + Epoch(1);
-        if !self
+        if self
             .epoch_manager
             .is_this_validator_registered_for_epoch(next_epoch)
             .await?
         {
             info!(
                 target: LOG_TARGET,
+                "🌟 Oracle is at epoch {oracle_epoch} but consensus is resuming at {starting_epoch}. Seeding epoch \
+                 {oracle_epoch} so that EndEpoch can be proposed.",
+            );
+        } else {
+            info!(
+                target: LOG_TARGET,
                 "💤 This validator is not registered for next epoch {next_epoch}. Will stop consensus once the \
                  current epoch {starting_epoch} has transitioned."
             );
-            return Ok(());
         }
-
-        info!(
-            target: LOG_TARGET,
-            "🌟 Oracle is at epoch {oracle_epoch} but consensus is resuming at {starting_epoch}. Seeding epoch \
-             {oracle_epoch} so that EndEpoch can be proposed.",
-        );
-        self.next_epoch = Some((oracle_epoch, Instant::now()));
+        update_next_epoch_target(&mut self.next_epoch, starting_epoch, oracle_epoch, Instant::now());
         Ok(())
     }
 
+    /// Runs consensus until shutdown or an error. The pacemaker is stopped on every exit, so the next `start` resumes
+    /// with fresh timers.
     pub async fn start(&mut self) -> Result<WorkerExitReason, HotStuffError> {
+        let result = self.start_and_run().await;
+        self.pacemaker.stop();
+        result
+    }
+
+    async fn start_and_run(&mut self) -> Result<WorkerExitReason, HotStuffError> {
         let (current_epoch, current_epoch_hash) = self.get_starting_epoch().await?;
         let local_committee_info = self.epoch_manager.get_local_committee_info(current_epoch).await?;
 
@@ -391,17 +398,18 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             Ok::<_, HotStuffError>(())
         })?;
         // Resume pacemaker from the last epoch/height
-        let (current_height, leaf_height) = self.state_store.with_read_tx(|tx| {
-            let height = get_highest_seen_justified_view(tx, current_epoch)?;
+        let (justified_heights, leaf_height) = self.state_store.with_read_tx(|tx| {
+            let justified_heights = get_justified_heights(tx, current_epoch)?;
             let leaf_block = LeafBlock::get(tx, current_epoch)?;
-            Ok::<_, HotStuffError>((height, leaf_block.height()))
+            Ok::<_, HotStuffError>((justified_heights, leaf_block.height()))
         })?;
+        let current_height = justified_heights.highest();
 
         self.worker_state.has_processed_first_block = !leaf_height.is_zero();
 
+        // The leader timeout backs off from the high PC, so a restart during a run of timeouts keeps its backoff.
         self.pacemaker
-            .start(current_epoch, current_height, current_height)
-            .await?;
+            .start(current_epoch, current_height, justified_heights.high_pc);
 
         info!(target: LOG_TARGET, "🚀 Pacemaker started at epoch {}, height: {}", current_epoch, current_height);
 
@@ -447,39 +455,44 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         &mut self,
         mut epoch_state: EpochState<TConsensusSpec::Addr>,
     ) -> Result<WorkerExitReason, HotStuffError> {
-        // Spawn pacemaker if not spawned already
-        if let Some(pm) = self.pacemaker_worker.take() {
-            pm.spawn();
-        }
-
-        let mut on_force_beat = self.pacemaker.get_on_force_beat();
-        let mut on_leader_timeout = self.pacemaker.get_on_leader_timeout();
-
         let mut epoch_manager_events = self.epoch_manager.subscribe();
 
-        let mut prev_height = self.pacemaker.current_view().get_height();
-        let current_epoch = self.pacemaker.current_view().get_epoch();
+        let mut prev_height = self.pacemaker.current_height();
+        let current_epoch = self.pacemaker.current_epoch();
         let mut local_claim_public_key = self
             .epoch_manager
             .get_our_validator_node(current_epoch)
             .await?
             .fee_claim_public_key;
 
-        // Assume we need to catch up at startup. If we're already at the latest height, validators will not return
-        // blocks.
-        self.request_catch_up_sync(&epoch_state).await?;
+        // Assume we need to catch up at startup. A validator at the same height answers with an empty page, which
+        // ends the catch-up.
+        if let Some(to) = self.choose_catch_up_peer(&epoch_state) {
+            let current_height = self.pacemaker.current_height();
+            self.start_catch_up(&epoch_state, current_height, current_height, to, None)
+                .await?;
+        }
 
         let mut periodic_tasks = time::interval(Duration::from_secs(10));
         periodic_tasks.set_missed_tick_behavior(time::MissedTickBehavior::Delay);
 
         let exit_reason;
         loop {
-            let current_height = self.pacemaker.current_view().get_height();
-            let current_epoch = self.pacemaker.current_view().get_epoch();
+            let current_height = self.pacemaker.current_height();
+            let current_epoch = self.pacemaker.current_epoch();
 
             // Need to update epoch state if the epoch has changed
             if epoch_state.epoch != current_epoch {
                 self.worker_state.has_processed_first_block = false;
+                // Heights restart in each epoch, so a catch-up holds only for the epoch it started in.
+                if self
+                    .worker_state
+                    .catch_up
+                    .as_ref()
+                    .is_some_and(|catch_up| catch_up.epoch != current_epoch)
+                {
+                    self.worker_state.catch_up = None;
+                }
                 let exhaust_burn_rate = self.epoch_exhaust_burn_rate(current_epoch)?;
                 epoch_state
                     .update_from_epoch_manager(&self.epoch_manager, current_epoch, exhaust_burn_rate)
@@ -492,17 +505,13 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 // We only clear next_epoch if we've reached it, If more than one eopch has progressed (edge case
                 // expected only on testnets with low difficulties) then we need to keep the next epoch
                 // in place so that we can quickly progress to the actual current epoch.
-                if let Some((next_epoch, _)) = self.next_epoch.as_ref() {
-                    if *next_epoch == current_epoch {
-                        self.next_epoch = None;
-                    } else {
-                        warn!(
-                            target: LOG_TARGET,
-                            "⚠️ this node/shard group is more than one epoch behind! Current epoch: {}, worker epoch: {}",
-                            next_epoch,
-                            current_epoch,
-                        );
-                    }
+                if let Some(remaining_target) = clear_reached_next_epoch(&mut self.next_epoch, current_epoch) {
+                    warn!(
+                        target: LOG_TARGET,
+                        "⚠️ this node/shard group is more than one epoch behind! Current epoch: {}, worker epoch: {}",
+                        remaining_target,
+                        current_epoch,
+                    );
                 }
             }
 
@@ -517,6 +526,13 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 self.local_validator_addr,
                 current_height.as_u64()
             );
+
+            let catch_up_stall_deadline = self
+                .worker_state
+                .catch_up
+                .as_ref()
+                .filter(|catch_up| catch_up.is_awaiting_page() || catch_up.is_behind_target())
+                .map(|catch_up| catch_up.stall_deadline(self.config.catch_up_request_timeout));
 
             tokio::select! {
                 result = epoch_manager_events.recv() => match result {
@@ -533,18 +549,25 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                     },
                 },
 
-                forced_height = on_force_beat.wait() => {
-                    if let Err(e) = self.on_force_beat(&epoch_state, current_height, forced_height, &local_claim_public_key).await {
-                        self.on_failure("propose_if_leader", &e).await;
-                        return Err(e);
-                    }
-                },
-
-                _ = self.pacemaker.on_beat() => {
-                    if let Err(e) = self.on_beat(&epoch_state,  &local_claim_public_key).await {
-                        self.on_failure("on_beat", &e).await;
-                        return Err(e);
-                    }
+                event = self.pacemaker.next_event() => match event {
+                    PacemakerEvent::Beat => {
+                        if let Err(e) = self.on_beat(&epoch_state, &local_claim_public_key).await {
+                            self.on_failure("on_beat", &e).await;
+                            return Err(e);
+                        }
+                    },
+                    PacemakerEvent::ForceBeat { forced_height } => {
+                        if let Err(e) = self.on_force_beat(&epoch_state, current_height, forced_height, &local_claim_public_key).await {
+                            self.on_failure("propose_if_leader", &e).await;
+                            return Err(e);
+                        }
+                    },
+                    PacemakerEvent::LeaderTimeout { num_timeouts } => {
+                        if let Err(e) = self.on_leader_timeout(&epoch_state, current_height, Some(num_timeouts)).await {
+                            self.on_failure("on_leader_timeout", &e).await;
+                            return Err(e);
+                        }
+                    },
                 },
 
                 Some((tx_id, pending)) = self.rx_new_transactions.recv() => {
@@ -572,10 +595,10 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                     }
                 },
 
-                timeout = on_leader_timeout.wait() => {
-                    if let Err(e) = self.on_leader_timeout(&epoch_state, current_height, Some(timeout)).await {
-                        self.on_failure("on_leader_timeout", &e).await;
-                        return Err(e);
+                _ = sleep_until_deadline(catch_up_stall_deadline) => {
+                    if let Err(e) = self.on_catch_up_stalled(&epoch_state, current_height).await {
+                        self.hooks.on_error(&e);
+                        error!(target: LOG_TARGET, "🚨Error re-requesting a stalled catch-up: {}", e);
                     }
                 },
 
@@ -603,9 +626,6 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         }
 
         self.on_inbound_message.clear_buffer();
-        if let Err(err) = self.pacemaker.stop().await {
-            debug!(target: LOG_TARGET, "Pacemaker channel dropped: {}", err);
-        }
 
         Ok(exit_reason)
     }
@@ -625,9 +645,10 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             },
         };
 
-        match self
+        let result = self
             .on_message_validate
             .handle(
+                self.pacemaker.current_epoch(),
                 current_height,
                 epoch_state,
                 from.clone(),
@@ -635,8 +656,28 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 &self.on_receive_new_transaction,
                 &mut self.on_receive_foreign_proposal,
             )
-            .await?
+            .await?;
+        if let MessageValidationResult::Ready {
+            from,
+            message: HotstuffMessage::CatchUpPage(page),
+        } = result
         {
+            return self.on_catch_up_page(epoch_state, from, *page).await;
+        }
+        self.on_validation_result(epoch_state, current_height, from, result)
+            .await
+    }
+
+    /// Acts on a validated message: dispatches it when ready, requests what a parked block is missing, and hands
+    /// invalid messages to error handling.
+    async fn on_validation_result(
+        &mut self,
+        epoch_state: &EpochState<TConsensusSpec::Addr>,
+        current_height: NodeHeight,
+        from: TConsensusSpec::Addr,
+        result: MessageValidationResult<TConsensusSpec::Addr>,
+    ) -> Result<(), HotStuffError> {
+        match result {
             MessageValidationResult::Ready { from, message: msg } => {
                 if let Err(e) = self
                     .dispatch_hotstuff_message(epoch_state, current_height, from, msg)
@@ -667,6 +708,9 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 block_id,
                 ..
             } => {
+                if missing_txs.is_empty() {
+                    return Ok(());
+                }
                 let mut request_from_address = from;
                 if request_from_address == self.local_validator_addr {
                     // Edge case: If we're catching up, we could be the proposer but we no longer have
@@ -803,11 +847,12 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         let is_any_block_unparked = !local_proposals.is_empty() || !foreign_proposals.is_empty();
 
         for msg in foreign_proposals {
-            if let Err(e) = self
+            let result = self
                 .on_receive_foreign_proposal
-                .handle_received(msg, epoch_state.local_committee_info())
-                .await
-            {
+                .handle_received(&mut self.pacemaker_actions, msg, epoch_state.local_committee_info())
+                .await;
+            self.pacemaker.apply(&mut self.pacemaker_actions);
+            if let Err(e) = result {
                 self.on_failure("check_if_block_can_be_unparked -> on_receive_foreign_proposal", &e)
                     .await;
                 return Err(e);
@@ -869,7 +914,12 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 .set_pending_end_of_epoch(eoe_block, commit_qc);
             // Attempt to complete immediately. If the oracle is still behind, this will re-defer
             // and a later EpochChanged event will retry.
-            let _ = self.on_receive_local_proposal.try_resume_pending_end_of_epoch().await?;
+            let result = self
+                .on_receive_local_proposal
+                .try_resume_pending_end_of_epoch(&mut self.pacemaker_actions)
+                .await;
+            self.pacemaker.apply(&mut self.pacemaker_actions);
+            result?;
         }
         Ok(())
     }
@@ -880,7 +930,12 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         if !self.on_receive_local_proposal.has_pending_end_of_epoch() {
             return Ok(());
         }
-        if let Err(err) = self.on_receive_local_proposal.try_resume_pending_end_of_epoch().await {
+        let result = self
+            .on_receive_local_proposal
+            .try_resume_pending_end_of_epoch(&mut self.pacemaker_actions)
+            .await;
+        self.pacemaker.apply(&mut self.pacemaker_actions);
+        if let Err(err) = result {
             error!(
                 target: LOG_TARGET,
                 "Failed to resume deferred end-of-epoch processing: {err}"
@@ -897,32 +952,40 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 registered_shard_group,
                 activated_at,
             } => {
-                if registered_shard_group.is_none() {
-                    let current_epoch = self.pacemaker.current_view().get_epoch();
-                    if current_epoch < epoch {
+                let current_epoch = self.pacemaker.current_epoch();
+                match apply_epoch_changed(
+                    &mut self.next_epoch,
+                    current_epoch,
+                    epoch,
+                    registered_shard_group.is_some(),
+                    activated_at,
+                ) {
+                    EpochChangedOutcome::IgnoredStale => {},
+                    EpochChangedOutcome::NotRegisteredForCurrentEpoch => {
+                        info!(
+                            target: LOG_TARGET,
+                            "💤 This validator is not registered for epoch {}. Going to sleep.", epoch
+                        );
+                        return Err(HotStuffError::NotRegisteredForCurrentEpoch { epoch });
+                    },
+                    EpochChangedOutcome::RotatingOutAfterCurrentEpoch => {
                         info!(
                             target: LOG_TARGET,
                             "💤 This validator is not registered for next epoch {epoch}. Will stop consensus once the current epoch {current_epoch} has transitioned."
                         );
-                        return Ok(());
-                    }
-                    info!(
-                        target: LOG_TARGET,
-                        "💤 This validator is not registered for epoch {}. Going to sleep.", epoch
-                    );
-
-                    return Err(HotStuffError::NotRegisteredForCurrentEpoch { epoch });
+                        self.try_resume_pending_end_of_epoch().await?;
+                    },
+                    EpochChangedOutcome::Registered => {
+                        info!(
+                            target: LOG_TARGET,
+                            "🌟 This validator is registered for epoch {}.", epoch
+                        );
+                        // Oracle just observed `epoch`. If we previously deferred end-of-epoch
+                        // processing because the oracle was lagging, retry now that the data is
+                        // available.
+                        self.try_resume_pending_end_of_epoch().await?;
+                    },
                 }
-                info!(
-                    target: LOG_TARGET,
-                    "🌟 This validator is registered for epoch {}.", epoch
-                );
-                self.next_epoch = Some((epoch, activated_at));
-
-                // Oracle just observed `epoch`. If we previously deferred end-of-epoch
-                // processing because the oracle was lagging, retry now that the data is
-                // available.
-                self.try_resume_pending_end_of_epoch().await?;
             },
             // A running node is already a committee member, so it has nothing to presync.
             EpochManagerEvent::PendingActivation { .. } => {},
@@ -940,8 +1003,26 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         from: TConsensusSpec::Addr,
         justify: &ProposalCertificate,
     ) -> Result<(), HotStuffError> {
-        if self.worker_state.is_active_catch_up() || from == self.local_validator_addr {
+        if from == self.local_validator_addr {
             return Ok(());
+        }
+        if let Some(catch_up) = self.worker_state.active_catch_up_mut() {
+            if justify.epoch() != catch_up.epoch {
+                return Ok(());
+            }
+            // The page on its way may reach the justified block, so the proposer is asked only once it is in.
+            if catch_up.is_awaiting_page() || justify.height() <= catch_up.remote_height {
+                catch_up.raise_target(justify.height(), Some(from));
+                return Ok(());
+            }
+            catch_up.raise_target(justify.height(), Some(from.clone()));
+            info!(
+                target: LOG_TARGET,
+                "⏩ {from} proposed on certified block {}/{} beyond this catch-up's pages. Asking {from}.",
+                justify.epoch(),
+                justify.height(),
+            );
+            return self.request_catch_up_page(epoch_state, from).await;
         }
         // A certified block we already hold, e.g. one parked on missing transactions, is not fetched by catching
         // up.
@@ -959,37 +1040,303 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             justify.epoch(),
             justify.height(),
         );
-        self.on_catch_up_sync
-            .request_sync(epoch_state.epoch(), from.clone())
-            .await?;
-        self.worker_state.catch_up = Some(CatchUp::new(
-            justify.height(),
-            current_height,
-            self.config.catch_up_request_timeout,
-            from,
-        ));
-        Ok(())
+        self.start_catch_up(epoch_state, current_height, justify.height(), from.clone(), Some(from))
+            .await
     }
 
-    async fn request_catch_up_sync(
+    /// Starts a catch-up up to `remote_height` with a page request to `to`. `target_from` is the proposer known to
+    /// hold the blocks up to the target.
+    async fn start_catch_up(
         &mut self,
         epoch_state: &EpochState<TConsensusSpec::Addr>,
-    ) -> Result<Option<TConsensusSpec::Addr>, HotStuffError> {
-        let current_addr = self.worker_state.catch_up.as_ref().map(|c| c.from.clone());
-        let committee_size = epoch_state.local_committee().len();
-        for member in epoch_state.local_committee().shuffled() {
-            // Exclude self and, if there are more than 2 committee members, exclude the current sync peer
-            if member.address != self.local_validator_addr &&
-                (committee_size <= 2 || Some(&member.address) != current_addr.as_ref())
-            {
-                self.on_catch_up_sync
-                    .request_sync(epoch_state.epoch(), member.address.clone())
-                    .await?;
-                return Ok(Some(member.address.clone()));
-            }
+        current_height: NodeHeight,
+        remote_height: NodeHeight,
+        to: TConsensusSpec::Addr,
+        target_from: Option<TConsensusSpec::Addr>,
+    ) -> Result<(), HotStuffError> {
+        let mut catch_up = CatchUp::new(
+            epoch_state.epoch(),
+            remote_height,
+            current_height,
+            self.config.catch_up_request_timeout,
+            to.clone(),
+        );
+        catch_up.target_from = target_from;
+        self.worker_state.catch_up = Some(catch_up);
+        self.request_catch_up_page(epoch_state, to).await
+    }
+
+    /// Asks `to` for the catch-up's next page. The page starts where the last one said to continue, or at this node's
+    /// highest certified block.
+    async fn request_catch_up_page(
+        &mut self,
+        epoch_state: &EpochState<TConsensusSpec::Addr>,
+        to: TConsensusSpec::Addr,
+    ) -> Result<(), HotStuffError> {
+        let request_id = self.worker_state.next_catch_up_request_id();
+        let Some(catch_up) = self.worker_state.catch_up.as_mut() else {
+            return Ok(());
+        };
+        catch_up.requested(to.clone(), request_id);
+        let from_height = catch_up.next_height;
+        let skip = catch_up.next_skip;
+        self.on_catch_up_sync
+            .request_page(
+                self.pacemaker.current_view(),
+                epoch_state.epoch(),
+                to,
+                request_id,
+                from_height,
+                skip,
+            )
+            .await
+    }
+
+    /// Imports a page that answers the catch-up's outstanding request: its transactions first, so that its blocks find
+    /// them, then its blocks in height order, then its leaf as a live proposal. It then asks for the next page, or
+    /// another peer for the rest, or finishes.
+    async fn on_catch_up_page(
+        &mut self,
+        epoch_state: &EpochState<TConsensusSpec::Addr>,
+        from: TConsensusSpec::Addr,
+        page: CatchUpPageMessage,
+    ) -> Result<(), HotStuffError> {
+        let Some(catch_up) = self
+            .worker_state
+            .catch_up
+            .as_mut()
+            .filter(|catch_up| catch_up.epoch == page.epoch)
+        else {
+            debug!(target: LOG_TARGET, "Ignoring catch-up page {} from {from}: no catch-up in {}", page.request_id, page.epoch);
+            return Ok(());
+        };
+        if !catch_up.take_page(page.request_id, &from) {
+            debug!(target: LOG_TARGET, "Ignoring catch-up page {} from {from}, which this node is not awaiting", page.request_id);
+            return Ok(());
         }
-        // We're the only committee member
-        Ok(None)
+        // A page that continues shows more blocks beyond it, so the catch-up runs at least as far as its continuation.
+        if let Some(next_height) = page.next_height {
+            catch_up.raise_target(next_height, None);
+        }
+
+        let end_height = page.end_height();
+        let CatchUpPageMessage {
+            epoch,
+            blocks,
+            leaf,
+            transactions,
+            next_height,
+            next_skip,
+            ..
+        } = page;
+        info!(
+            target: LOG_TARGET,
+            "🌐 Catch-up page from {from}: {} block(s), leaf: {}, {} transaction(s), next: {}",
+            blocks.len(),
+            leaf.is_some(),
+            transactions.len(),
+            next_height.display(),
+        );
+
+        if !self
+            .import_page_transactions(epoch_state, &from, epoch, &blocks, leaf.as_ref(), transactions)
+            .await?
+        {
+            return Ok(());
+        }
+        self.import_page_blocks(epoch_state, &from, blocks, leaf).await?;
+        self.continue_catch_up(epoch_state, from, next_height, next_skip, end_height)
+            .await
+    }
+
+    /// Stores the transactions a page carries, and returns whether the page is admitted: each transaction must be one
+    /// its blocks name.
+    async fn import_page_transactions(
+        &mut self,
+        epoch_state: &EpochState<TConsensusSpec::Addr>,
+        from: &TConsensusSpec::Addr,
+        epoch: Epoch,
+        blocks: &[ProposalMessage],
+        leaf: Option<&ProposalMessage>,
+        transactions: Vec<EncodedTransaction>,
+    ) -> Result<bool, HotStuffError> {
+        if transactions.is_empty() {
+            return Ok(true);
+        }
+        let named = blocks
+            .iter()
+            .chain(leaf)
+            .flat_map(|proposal| proposal.block.all_transaction_ids().copied())
+            .collect::<HashSet<_>>();
+        let transactions = match decode_named_transactions(
+            &named,
+            transactions,
+            self.config.consensus_constants.max_transaction_size_bytes,
+        ) {
+            Ok(transactions) => transactions,
+            Err(err) => {
+                warn!(
+                    target: LOG_TARGET,
+                    "⚠️ {from} sent a catch-up page with transactions its blocks do not name: {err}. Discarding the \
+                     page"
+                );
+                return Ok(false);
+            },
+        };
+        let block_id = blocks
+            .first()
+            .or(leaf)
+            .map(|proposal| *proposal.block.id())
+            .unwrap_or_else(BlockId::zero);
+        self.on_receive_new_transaction
+            .process_requested(
+                epoch,
+                from.clone(),
+                block_id,
+                transactions,
+                epoch_state.local_committee_info(),
+            )
+            .await?;
+        Ok(true)
+    }
+
+    /// Imports a page's certified blocks in height order, then admits its leaf as a live proposal by the view rule an
+    /// inbound proposal follows.
+    async fn import_page_blocks(
+        &mut self,
+        epoch_state: &EpochState<TConsensusSpec::Addr>,
+        from: &TConsensusSpec::Addr,
+        blocks: Vec<ProposalMessage>,
+        leaf: Option<ProposalMessage>,
+    ) -> Result<(), HotStuffError> {
+        for proposal in blocks {
+            let result = self
+                .on_message_validate
+                .validate_catch_up_block(
+                    self.pacemaker.current_epoch(),
+                    from.clone(),
+                    epoch_state,
+                    proposal,
+                    &self.on_receive_new_transaction,
+                )
+                .await?;
+            self.on_validation_result(epoch_state, self.pacemaker.current_height(), from.clone(), result)
+                .await?;
+        }
+
+        let Some(leaf) = leaf else {
+            return Ok(());
+        };
+        let current_height = self.pacemaker.current_height();
+        let Some(message) = self.on_inbound_message.admit(
+            epoch_state,
+            current_height,
+            self.worker_state.has_processed_first_block,
+            from.clone(),
+            HotstuffMessage::new_proposal(leaf),
+        ) else {
+            return Ok(());
+        };
+        let result = self
+            .on_message_validate
+            .handle(
+                self.pacemaker.current_epoch(),
+                current_height,
+                epoch_state,
+                from.clone(),
+                message,
+                &self.on_receive_new_transaction,
+                &mut self.on_receive_foreign_proposal,
+            )
+            .await?;
+        self.on_validation_result(epoch_state, current_height, from.clone(), result)
+            .await
+    }
+
+    /// Decides what follows an imported page from `from` that continues at `next_height`, past `next_skip` of its
+    /// blocks, and reached `end_height`.
+    async fn continue_catch_up(
+        &mut self,
+        epoch_state: &EpochState<TConsensusSpec::Addr>,
+        from: TConsensusSpec::Addr,
+        next_height: Option<NodeHeight>,
+        next_skip: u32,
+        end_height: Option<NodeHeight>,
+    ) -> Result<(), HotStuffError> {
+        let current_height = self.pacemaker.current_height();
+        let Some(catch_up) = self.worker_state.catch_up.as_mut() else {
+            return Ok(());
+        };
+        match catch_up.after_page(&from, next_height, next_skip, end_height, current_height) {
+            AfterPage::Finished => {
+                info!(
+                    target: LOG_TARGET,
+                    "✅ Finished catch up at height {current_height}. Resuming normal operation.",
+                );
+                self.worker_state.catch_up = None;
+                Ok(())
+            },
+            AfterPage::Importing => {
+                debug!(
+                    target: LOG_TARGET,
+                    "⏳ Catch-up from {from} reached {} (expected up to {}). Importing its blocks.",
+                    end_height.display(),
+                    catch_up.remote_height,
+                );
+                Ok(())
+            },
+            AfterPage::AwaitStall => {
+                debug!(
+                    target: LOG_TARGET,
+                    "⏳ {from} has no blocks beyond {} (expected up to {}). Waiting to ask another peer.",
+                    end_height.display(),
+                    catch_up.remote_height,
+                );
+                Ok(())
+            },
+            AfterPage::RequestFrom(to) => self.request_catch_up_page(epoch_state, to).await,
+        }
+    }
+
+    /// Asks another peer for the page that did not arrive, or for the blocks a catch-up has not advanced through.
+    async fn on_catch_up_stalled(
+        &mut self,
+        epoch_state: &EpochState<TConsensusSpec::Addr>,
+        current_height: NodeHeight,
+    ) -> Result<(), HotStuffError> {
+        let Some(catch_up) = self.worker_state.catch_up.as_ref() else {
+            return Ok(());
+        };
+        let from = catch_up.from.clone();
+        let remote_height = catch_up.remote_height;
+        let to = match &catch_up.target_from {
+            Some(proposer) if *proposer != from => Some(proposer.clone()),
+            _ => self.choose_catch_up_peer(epoch_state),
+        };
+        let Some(to) = to else {
+            return Ok(());
+        };
+        info!(
+            target: LOG_TARGET,
+            "⏳ Catch-up from {from} has not advanced past height {current_height} (expected up to {remote_height}). \
+             Asking {to}.",
+        );
+        self.request_catch_up_page(epoch_state, to).await
+    }
+
+    /// A committee member to catch up from: any but this node and, in a committee of more than two, the peer the
+    /// current catch-up last asked.
+    fn choose_catch_up_peer(&self, epoch_state: &EpochState<TConsensusSpec::Addr>) -> Option<TConsensusSpec::Addr> {
+        let current_addr = self.worker_state.catch_up.as_ref().map(|c| &c.from);
+        let committee_size = epoch_state.local_committee().len();
+        epoch_state
+            .local_committee()
+            .shuffled()
+            .find(|member| {
+                member.address != self.local_validator_addr &&
+                    (committee_size <= 2 || Some(&member.address) != current_addr)
+            })
+            .map(|member| member.address.clone())
     }
 
     async fn on_failure(&mut self, context: &str, err: &HotStuffError) {
@@ -1005,9 +1352,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             });
             error!(target: LOG_TARGET, "Error ({}): {}", context, err);
         }
-        if let Err(e) = self.pacemaker.stop().await {
-            error!(target: LOG_TARGET, "Error while stopping pacemaker: {}", e);
-        }
+        self.pacemaker.stop();
         self.on_inbound_message.clear_buffer();
     }
 
@@ -1033,7 +1378,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         &mut self,
         epoch_state: &EpochState<TConsensusSpec::Addr>,
         current_height: NodeHeight,
-        timeout: Option<LeaderTimeout>,
+        num_timeouts: Option<u32>,
     ) -> Result<(), HotStuffError> {
         self.hooks.on_leader_timeout(current_height);
         info!(
@@ -1042,7 +1387,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             self.local_validator_addr,
             epoch_state.epoch(),
             current_height,
-            timeout.as_ref().map(|t| t.num_timeouts).display(),
+            num_timeouts.display(),
         );
         self.on_next_sync_view
             .handle(epoch_state.epoch(), current_height, epoch_state.local_committee())
@@ -1051,14 +1396,14 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         self.publish_event(HotstuffEvent::LeaderTimeout { height: current_height });
 
         // If we've gone into 3 leader failures in a row, request a catch up sync
-        if !self.worker_state.is_active_catch_up() && timeout.is_some_and(|t| t.num_timeouts.is_multiple_of(3)) {
+        if !self.worker_state.is_active_catch_up() && num_timeouts.is_some_and(|n| n.is_multiple_of(3)) {
             warn!(
                 target: LOG_TARGET,
                 "⚠️ {} Leader timeout count is {}. Requesting catch up sync.",
                 self.local_validator_addr,
-                timeout.as_ref().map(|t| t.num_timeouts).display()
+                num_timeouts.display()
             );
-            let Some(sync_req_from) = self.request_catch_up_sync(epoch_state).await? else {
+            let Some(to) = self.choose_catch_up_peer(epoch_state) else {
                 warn!(
                     target: LOG_TARGET,
                     "⚠️ {} Cannot request catch up sync as there are no other committee members.",
@@ -1066,9 +1411,15 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 );
                 return Ok(());
             };
-            if let Some(ref mut catch_up) = self.worker_state.catch_up {
-                catch_up.reset_timeout(self.config.catch_up_request_timeout);
-                catch_up.from = sync_req_from;
+            match self.worker_state.catch_up {
+                Some(ref mut catch_up) if catch_up.epoch == epoch_state.epoch() => {
+                    catch_up.reset_timeout(self.config.catch_up_request_timeout);
+                    self.request_catch_up_page(epoch_state, to).await?;
+                },
+                _ => {
+                    self.start_catch_up(epoch_state, current_height, current_height, to, None)
+                        .await?;
+                },
             }
         }
 
@@ -1616,23 +1967,27 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         msg: HotstuffMessage,
     ) -> Result<(), HotStuffError> {
         match msg {
-            HotstuffMessage::NewView(message) => log_err(
-                "on_receive_new_view",
-                self.on_receive_new_view
-                    .handle(epoch_state, current_height, from, *message)
-                    .await,
-            ),
+            HotstuffMessage::NewView(message) => {
+                let result = self
+                    .on_receive_new_view
+                    .handle(&mut self.pacemaker_actions, epoch_state, current_height, from, *message)
+                    .await;
+                self.pacemaker.apply(&mut self.pacemaker_actions);
+                log_err("on_receive_new_view", result)
+            },
             HotstuffMessage::Proposal(msg) => log_err(
                 "on_receive_local_proposal",
                 self.on_proposal_message(epoch_state, current_height, *msg, ProposalOrigin::Live)
                     .await,
             ),
-            HotstuffMessage::ForeignProposal(msg) => log_err(
-                "on_receive_foreign_proposal (received)",
-                self.on_receive_foreign_proposal
-                    .handle_received(msg, epoch_state.local_committee_info())
-                    .await,
-            ),
+            HotstuffMessage::ForeignProposal(msg) => {
+                let result = self
+                    .on_receive_foreign_proposal
+                    .handle_received(&mut self.pacemaker_actions, msg, epoch_state.local_committee_info())
+                    .await;
+                self.pacemaker.apply(&mut self.pacemaker_actions);
+                log_err("on_receive_foreign_proposal (received)", result)
+            },
             HotstuffMessage::ForeignProposalNotification(msg) => log_err(
                 "on_receive_foreign_proposal (notification)",
                 self.on_receive_foreign_proposal
@@ -1643,12 +1998,14 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 "on_receive_foreign_proposal (request)",
                 self.on_receive_foreign_proposal.handle_requested(from, msg).await,
             ),
-            HotstuffMessage::Vote(msg) => log_err(
-                "on_receive_vote",
-                self.on_receive_vote
-                    .handle(from, current_height, epoch_state, msg)
-                    .await,
-            ),
+            HotstuffMessage::Vote(msg) => {
+                let result = self
+                    .on_receive_vote
+                    .handle(&mut self.pacemaker_actions, from, current_height, epoch_state, msg)
+                    .await;
+                self.pacemaker.apply(&mut self.pacemaker_actions);
+                log_err("on_receive_vote", result)
+            },
             HotstuffMessage::MissingTransactionsRequest(msg) => {
                 self.on_receive_request_missing_txs.handle(from, msg);
                 Ok(())
@@ -1675,6 +2032,11 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 self.on_proposal_message(epoch_state, current_height, *msg, ProposalOrigin::CatchUp)
                     .await,
             ),
+            // Pages are imported by `on_catch_up_page` before dispatch.
+            HotstuffMessage::CatchUpPage(page) => {
+                warn!(target: LOG_TARGET, "Ignoring catch-up page {} from {from} at dispatch", page.request_id);
+                Ok(())
+            },
         }
     }
 
@@ -1686,52 +2048,40 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         origin: ProposalOrigin,
     ) -> Result<(), HotStuffError> {
         let proposed_by = *msg.block.proposed_by();
-        match log_err(
-            "on_receive_local_proposal",
-            self.on_receive_local_proposal.handle(epoch_state, msg, origin).await,
-        ) {
+        let result = self
+            .on_receive_local_proposal
+            .handle(&mut self.pacemaker_actions, epoch_state, msg, origin)
+            .await;
+        self.pacemaker.apply(&mut self.pacemaker_actions);
+        match result {
             Ok(no_vote) => {
-                let current_height = self.pacemaker.current_view().get_height();
+                let current_height = self.pacemaker.current_height();
                 if let Some(mut catch_up) = self.worker_state.catch_up.take() {
-                    if current_height >= catch_up.expected_batch_height {
-                        if catch_up.set_next_batch(current_height, self.config.catch_up_request_timeout) {
-                            info!(
-                                target: LOG_TARGET,
-                                "⏳ Still catching up... current height: {}, expected up to: {}",
-                                current_height,
-                                catch_up.expected_batch_height,
-                            );
-                            self.on_catch_up_sync
-                                .request_sync(epoch_state.epoch(), catch_up.from.clone())
-                                .await?;
-                            self.worker_state.catch_up = Some(catch_up);
-                        } else {
-                            info!(
-                                target: LOG_TARGET,
-                                "✅ Finished catch up at height {}. Resuming normal operation.",
-                                current_height,
-                            );
-                        }
-                    } else {
+                    if catch_up.record_progress(current_height, self.config.catch_up_request_timeout) {
                         debug!(
                             target: LOG_TARGET,
                             "⏳ Still catching up... current height: {}, expected up to: {}",
                             current_height,
-                            catch_up.expected_batch_height,
+                            catch_up.remote_height,
                         );
                         self.worker_state.catch_up = Some(catch_up);
+                    } else {
+                        info!(
+                            target: LOG_TARGET,
+                            "✅ Finished catch up at height {}. Resuming normal operation.",
+                            current_height,
+                        );
                     }
                 }
 
-                match no_vote {
-                    None | Some(NoVoteReason::AlreadyVotedAtHeight) => {
+                if should_trigger_leader_timeout_on_no_vote(no_vote.as_ref(), origin) {
+                    // We decided NOVOTE, so we immediately send a NEWVIEW
+                    self.on_leader_timeout(epoch_state, current_height, None).await
+                } else {
+                    if matches!(no_vote, None | Some(NoVoteReason::AlreadyVotedAtHeight)) {
                         self.worker_state.has_processed_first_block = true;
-                        Ok(())
-                    },
-                    Some(_) => {
-                        // We decided NOVOTE, so we immediately send a NEWVIEW
-                        self.on_leader_timeout(epoch_state, current_height, None).await
-                    },
+                    }
+                    Ok(())
                 }
             },
             Err(err) => {
@@ -1763,6 +2113,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         );
     }
 
+    #[allow(clippy::too_many_lines)]
     async fn handle_hotstuff_error(
         &mut self,
         current_height: NodeHeight,
@@ -1841,12 +2192,24 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             return Err(err);
         }
 
-        if self.worker_state.is_active_catch_up() {
-            warn!(
-                target: LOG_TARGET,
-                "⏳ Already catching up. Ignoring additional catch up."
-            );
-            return Ok(());
+        let mut extends_catch_up = false;
+        if let Some(catch_up) = self.worker_state.active_catch_up_mut() {
+            let same_epoch = remote_epoch == catch_up.epoch;
+            if !same_epoch || catch_up.is_awaiting_page() || remote_height <= catch_up.remote_height {
+                if same_epoch {
+                    catch_up.raise_target(remote_height, None);
+                }
+                debug!(
+                    target: LOG_TARGET,
+                    "⏳ Already catching up from {} (expected up to {}). Not requesting {remote_epoch}/{remote_height} \
+                     separately.",
+                    catch_up.from,
+                    catch_up.remote_height,
+                );
+                return Ok(());
+            }
+            catch_up.raise_target(remote_height, None);
+            extends_catch_up = true;
         }
 
         // Otherwise, catch up
@@ -1872,18 +2235,11 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             "⚠️This node has fallen behind due to a missing justified block: {err}. Catching up"
         );
 
-        self.on_catch_up_sync
-            .request_sync(local_epoch_state.epoch(), vn.address.clone())
-            .await?;
-
-        self.worker_state.catch_up = Some(CatchUp::new(
-            remote_height,
-            current_height,
-            self.config.catch_up_request_timeout,
-            vn.address,
-        ));
-
-        Ok(())
+        if extends_catch_up {
+            return self.request_catch_up_page(local_epoch_state, vn.address).await;
+        }
+        self.start_catch_up(local_epoch_state, current_height, remote_height, vn.address, None)
+            .await
     }
 
     /// The exhaust burn rate `epoch` runs at, read off the genesis block that opened it.
@@ -1965,8 +2321,7 @@ impl<TConsensusSpec: ConsensusSpec> Debug for HotstuffWorker<TConsensusSpec> {
         f.debug_struct("HotstuffWorker")
             .field("validator_addr", &self.local_validator_addr)
             .field("epoch_manager", &"EpochManager")
-            .field("pacemaker_handle", &self.pacemaker)
-            .field("pacemaker", &"Pacemaker")
+            .field("pacemaker", &self.pacemaker)
             .field("shutdown", &self.shutdown)
             .finish()
     }
@@ -1981,20 +2336,34 @@ fn log_err<T>(context: &'static str, result: Result<T, HotStuffError>) -> Result
 
 #[derive(Debug)]
 struct WorkerState<TAddr> {
-    /// Keeps track of the active catch up. This can be None even if a catch-up request was sent. The main use of
-    /// this struct is to track timeouts and expected batch heights i.e. we've received a batch of blocks, and we need
-    /// to request more.
+    /// The catch-up in progress: its target, the page request it awaits, and when a stalled catch-up asks another
+    /// peer.
     pub catch_up: Option<CatchUp<TAddr>>,
     pub has_processed_first_block: bool,
     /// Last (epoch, local_hash, remote_hash) we raised an epoch-hash divergence alarm for, used to
     /// emit a single loud alarm per distinct divergence instead of once per rejected proposal.
     pub last_epoch_hash_alarm: Option<(Epoch, FixedHash, FixedHash)>,
     pub last_protocol_version_alarm: Option<(Epoch, ProtocolVersion, ProtocolVersion)>,
+    /// The id of the next catch-up page request.
+    pub next_catch_up_request_id: u32,
 }
 
 impl<TAddr> WorkerState<TAddr> {
+    /// Whether this node is importing blocks up to a catch-up target above its height. Proposing waits for the
+    /// catch-up to reach its target.
     pub fn is_active_catch_up(&self) -> bool {
-        self.catch_up.as_ref().is_some_and(|c| !c.has_timed_out())
+        self.catch_up.as_ref().is_some_and(|c| c.is_behind_target())
+    }
+
+    /// The catch-up that has not timed out.
+    pub fn active_catch_up_mut(&mut self) -> Option<&mut CatchUp<TAddr>> {
+        self.catch_up.as_mut().filter(|c| !c.has_timed_out())
+    }
+
+    pub fn next_catch_up_request_id(&mut self) -> u32 {
+        let request_id = self.next_catch_up_request_id;
+        self.next_catch_up_request_id = self.next_catch_up_request_id.wrapping_add(1);
+        request_id
     }
 }
 
@@ -2005,42 +2374,194 @@ impl<TAddr> Default for WorkerState<TAddr> {
             has_processed_first_block: false,
             last_epoch_hash_alarm: None,
             last_protocol_version_alarm: None,
+            next_catch_up_request_id: 0,
         }
     }
+}
+
+/// What a catch-up does once a page has been imported.
+#[derive(Debug, PartialEq, Eq)]
+enum AfterPage<TAddr> {
+    /// This node has reached the target.
+    Finished,
+    /// The pages reached the target. Their blocks are importing, or waiting on transactions.
+    Importing,
+    /// Ask this peer for the next page.
+    RequestFrom(TAddr),
+    /// The peer has no blocks beyond the page and no other peer is known to hold more. The stall deadline asks
+    /// another.
+    AwaitStall,
 }
 
 #[derive(Debug)]
 struct CatchUp<TAddr> {
+    /// Heights restart in each epoch, so a catch-up holds only for the epoch it started in.
+    pub epoch: Epoch,
     pub remote_height: NodeHeight,
-    pub expected_batch_height: NodeHeight,
-    pub timeout_at: Instant,
+    pub last_progress_height: NodeHeight,
+    pub timeout_at: time::Instant,
+    /// When the outstanding page was requested, or the catch-up last advanced. A page that has not arrived, or a
+    /// catch-up that has not advanced, by `stall_deadline` asks another peer.
+    pub stall_window_start: time::Instant,
+    /// The peer the last page request went to.
     pub from: TAddr,
+    /// The page request awaiting its reply.
+    pub pending_request: Option<u32>,
+    /// Where the next page starts, as the last page said. `None` starts at this node's highest certified block.
+    pub next_height: Option<NodeHeight>,
+    /// The blocks at `next_height` the next page skips, which an earlier page carried.
+    pub next_skip: u32,
+    /// The proposer whose proposal set `remote_height`, which holds the blocks up to it.
+    pub target_from: Option<TAddr>,
 }
 
 impl<TAddr> CatchUp<TAddr> {
-    pub fn new(remote_height: NodeHeight, current_height: NodeHeight, timeout: Duration, from: TAddr) -> Self {
+    pub fn new(
+        epoch: Epoch,
+        remote_height: NodeHeight,
+        current_height: NodeHeight,
+        timeout: Duration,
+        from: TAddr,
+    ) -> Self {
+        let now = time::Instant::now();
         Self {
+            epoch,
             remote_height,
-            // we get batches of 100 blocks which can only justify up to view h + 99
-            expected_batch_height: (current_height + NodeHeight(99)).min(remote_height),
-            timeout_at: Instant::now() + timeout,
+            last_progress_height: current_height,
+            timeout_at: now + timeout,
+            stall_window_start: now,
             from,
+            pending_request: None,
+            next_height: None,
+            next_skip: 0,
+            target_from: None,
         }
     }
 
-    pub fn set_next_batch(&mut self, current_height: NodeHeight, timeout: Duration) -> bool {
-        self.expected_batch_height = (current_height + NodeHeight(99)).min(self.remote_height);
-        self.reset_timeout(timeout);
-        self.expected_batch_height < self.remote_height
+    /// Records a page request to `from`. The timeout stays as it is, so a catch-up that makes no progress still times
+    /// out however often it asks again. The forks to skip count positions in the last responder's forks at
+    /// `next_height`, so a request to another peer skips none; a fork received twice is imported once.
+    pub fn requested(&mut self, from: TAddr, request_id: u32)
+    where TAddr: PartialEq {
+        if self.from != from {
+            self.next_skip = 0;
+        }
+        self.from = from;
+        self.pending_request = Some(request_id);
+        self.restart_stall_window();
+    }
+
+    /// Takes the outstanding request when `request_id` from `from` answers it.
+    pub fn take_page(&mut self, request_id: u32, from: &TAddr) -> bool
+    where TAddr: PartialEq {
+        if self.pending_request != Some(request_id) || self.from != *from {
+            return false;
+        }
+        self.pending_request = None;
+        true
+    }
+
+    /// Whether a page request is outstanding.
+    pub fn is_awaiting_page(&self) -> bool {
+        self.pending_request.is_some() && !self.has_timed_out()
+    }
+
+    /// Raises the target to `remote_height` when that is higher, remembering `proposer` as the peer that holds it.
+    pub fn raise_target(&mut self, remote_height: NodeHeight, proposer: Option<TAddr>) {
+        if remote_height > self.remote_height {
+            self.remote_height = remote_height;
+            if proposer.is_some() {
+                self.target_from = proposer;
+            }
+        }
+    }
+
+    pub fn is_behind_target(&self) -> bool {
+        !self.has_timed_out() && self.last_progress_height < self.remote_height
+    }
+
+    /// Decides what follows a page from `from` that continues at `next_height`, past `next_skip` of its blocks, and
+    /// reached `end_height`, with this node at `current_height`.
+    pub fn after_page(
+        &mut self,
+        from: &TAddr,
+        next_height: Option<NodeHeight>,
+        next_skip: u32,
+        end_height: Option<NodeHeight>,
+        current_height: NodeHeight,
+    ) -> AfterPage<TAddr>
+    where
+        TAddr: Clone + PartialEq,
+    {
+        self.next_height = next_height;
+        self.next_skip = if next_height.is_some() { next_skip } else { 0 };
+        if next_height.is_some() {
+            return AfterPage::RequestFrom(from.clone());
+        }
+        if current_height >= self.remote_height {
+            return AfterPage::Finished;
+        }
+        if end_height.is_some_and(|end| end >= self.remote_height) {
+            return AfterPage::Importing;
+        }
+        match &self.target_from {
+            Some(proposer) if proposer != from => AfterPage::RequestFrom(proposer.clone()),
+            _ => AfterPage::AwaitStall,
+        }
+    }
+
+    /// Updates catch-up progress to `current_height` and returns whether catch-up is still in progress: below its
+    /// target, or with a page outstanding. Only progress toward the target refreshes the timeout, so a catch-up at
+    /// its target whose page never arrives still lapses.
+    pub fn record_progress(&mut self, current_height: NodeHeight, timeout: Duration) -> bool {
+        if current_height > self.last_progress_height {
+            self.last_progress_height = current_height;
+            if current_height < self.remote_height {
+                self.reset_timeout(timeout);
+            }
+        }
+        current_height < self.remote_height || self.is_awaiting_page()
     }
 
     pub fn reset_timeout(&mut self, timeout: Duration) {
-        self.timeout_at = Instant::now() + timeout;
+        let now = time::Instant::now();
+        self.timeout_at = now + timeout;
+        self.stall_window_start = now;
+    }
+
+    /// When this catch-up asks another peer if its page has not arrived or it has not advanced. A peer may drop a
+    /// request it has no slot for, or fail to send its page, so asking again resumes well before `timeout` ends the
+    /// catch-up.
+    pub fn stall_deadline(&self, timeout: Duration) -> time::Instant {
+        self.stall_window_start + timeout / CATCH_UP_STALL_WINDOWS_PER_TIMEOUT
+    }
+
+    pub fn restart_stall_window(&mut self) {
+        self.stall_window_start = time::Instant::now();
     }
 
     pub fn has_timed_out(&self) -> bool {
-        Instant::now() >= self.timeout_at
+        time::Instant::now() >= self.timeout_at
     }
+}
+
+/// A catch-up that has not advanced asks for its page again this many times within `catch_up_request_timeout` before
+/// the catch-up times out.
+const CATCH_UP_STALL_WINDOWS_PER_TIMEOUT: u32 = 4;
+
+/// Completes at `deadline`, or never when there is none.
+async fn sleep_until_deadline(deadline: Option<time::Instant>) {
+    match deadline {
+        Some(deadline) => time::sleep_until(deadline).await,
+        None => std::future::pending().await,
+    }
+}
+
+/// Whether a `NoVoteReason` returned from processing a proposal should trigger an immediate leader timeout (`NEWVIEW`)
+/// on the current view. Catch-up responses are historical or unsolicited block imports that bypass the view filter, so
+/// a non-voting catch-up block must never force a leader timeout on the current view.
+fn should_trigger_leader_timeout_on_no_vote(no_vote: Option<&NoVoteReason>, origin: ProposalOrigin) -> bool {
+    !origin.is_catch_up() && !matches!(no_vote, None | Some(NoVoteReason::AlreadyVotedAtHeight))
 }
 
 /// The epoch consensus resumes in, or `None` for a node with no consensus state, which opens the birthday epoch.
@@ -2053,6 +2574,74 @@ impl<TAddr> CatchUp<TAddr> {
 fn select_starting_epoch(last_finalised_epoch: Option<Epoch>, leaf_epoch: Option<Epoch>) -> Option<Epoch> {
     let after_checkpoint = last_finalised_epoch.map(|epoch| epoch + Epoch(1));
     after_checkpoint.max(leaf_epoch)
+}
+
+/// Advances the worker's target epoch for proposing `EndEpoch` when `candidate_epoch` is ahead of `current_epoch`.
+///
+/// Ignores candidates at or behind `current_epoch`, never regresses an already-recorded future target epoch, and
+/// preserves the activation timestamp of an active future target so duplicate or subsequent `EpochChanged` events do
+/// not restart the `epoch_end_grace_period` or `epoch_end_drain_period` timers for ending `current_epoch`.
+fn update_next_epoch_target(
+    next_epoch: &mut Option<(Epoch, Instant)>,
+    current_epoch: Epoch,
+    candidate_epoch: Epoch,
+    activated_at: Instant,
+) {
+    if candidate_epoch <= current_epoch {
+        return;
+    }
+    *next_epoch = match *next_epoch {
+        Some((existing_epoch, existing_at)) if existing_epoch > current_epoch => {
+            Some((existing_epoch.max(candidate_epoch), existing_at))
+        },
+        _ => Some((candidate_epoch, activated_at)),
+    };
+}
+
+/// Clears `next_epoch` once `current_epoch` reaches or passes it, returning any remaining future target epoch.
+fn clear_reached_next_epoch(next_epoch: &mut Option<(Epoch, Instant)>, current_epoch: Epoch) -> Option<Epoch> {
+    match next_epoch.as_ref() {
+        Some((target_epoch, _)) if *target_epoch <= current_epoch => {
+            *next_epoch = None;
+            None
+        },
+        Some((target_epoch, _)) => Some(*target_epoch),
+        None => None,
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EpochChangedOutcome {
+    /// Event is for an epoch strictly older than `current_epoch`; ignored without side effects.
+    IgnoredStale,
+    /// Event is for `current_epoch` and this validator is not registered for it.
+    NotRegisteredForCurrentEpoch,
+    /// Event is for a future epoch (`epoch > current_epoch`) in which this validator is not registered; `next_epoch`
+    /// is updated so the worker can finish and checkpoint `current_epoch` before exiting.
+    RotatingOutAfterCurrentEpoch,
+    /// Event is for `current_epoch` or a future epoch in which this validator is registered.
+    Registered,
+}
+
+fn apply_epoch_changed(
+    next_epoch: &mut Option<(Epoch, Instant)>,
+    current_epoch: Epoch,
+    event_epoch: Epoch,
+    is_registered: bool,
+    activated_at: Instant,
+) -> EpochChangedOutcome {
+    if event_epoch < current_epoch {
+        return EpochChangedOutcome::IgnoredStale;
+    }
+    if !is_registered {
+        if current_epoch < event_epoch {
+            update_next_epoch_target(next_epoch, current_epoch, event_epoch, activated_at);
+            return EpochChangedOutcome::RotatingOutAfterCurrentEpoch;
+        }
+        return EpochChangedOutcome::NotRegisteredForCurrentEpoch;
+    }
+    update_next_epoch_target(next_epoch, current_epoch, event_epoch, activated_at);
+    EpochChangedOutcome::Registered
 }
 
 #[cfg(test)]
@@ -2082,6 +2671,329 @@ mod tests {
         #[test]
         fn a_checkpoint_synced_past_the_leaf_wins() {
             assert_eq!(select_starting_epoch(Some(Epoch(3)), Some(Epoch(1))), Some(Epoch(4)));
+        }
+    }
+
+    mod catch_up {
+        use super::*;
+
+        #[test]
+        fn catch_up_stays_active_across_batch_boundaries_until_remote_height_is_reached() {
+            let timeout = Duration::from_secs(15);
+            let mut catch_up = CatchUp::new(Epoch(1), NodeHeight(250), NodeHeight(0), timeout, "peer-a");
+
+            for height in [1, 99, 100, 150, 198, 249] {
+                assert!(
+                    catch_up.record_progress(NodeHeight(height), timeout),
+                    "catch-up should stay active at height {height} < 250"
+                );
+                assert_eq!(catch_up.last_progress_height, NodeHeight(height));
+            }
+
+            assert!(!catch_up.record_progress(NodeHeight(250), timeout));
+        }
+
+        #[test]
+        fn a_stalled_catch_up_requests_the_rest_of_the_range_before_it_times_out() {
+            let timeout = Duration::from_secs(20);
+            let mut catch_up = CatchUp::new(Epoch(1), NodeHeight(250), NodeHeight(0), timeout, "peer-a");
+            assert!(catch_up.stall_deadline(timeout) < catch_up.timeout_at);
+
+            let timeout_at = catch_up.timeout_at;
+            catch_up.restart_stall_window();
+            assert_eq!(
+                catch_up.timeout_at, timeout_at,
+                "a re-request must not extend the catch-up"
+            );
+            assert_eq!(
+                catch_up.stall_deadline(timeout),
+                catch_up.stall_window_start + timeout / CATCH_UP_STALL_WINDOWS_PER_TIMEOUT
+            );
+
+            let stall_window_start = catch_up.stall_window_start;
+            assert!(catch_up.record_progress(NodeHeight(10), timeout));
+            assert!(catch_up.stall_window_start >= stall_window_start);
+            assert!(catch_up.timeout_at >= timeout_at);
+        }
+
+        #[test]
+        fn a_page_answers_only_the_outstanding_request_from_its_peer() {
+            let mut catch_up = CatchUp::new(
+                Epoch(1),
+                NodeHeight(20),
+                NodeHeight(10),
+                Duration::from_secs(15),
+                "peer-a",
+            );
+            catch_up.requested("peer-a", 5);
+            assert!(!catch_up.take_page(4, &"peer-a"), "a stale request id");
+            assert!(!catch_up.take_page(5, &"peer-b"), "a peer that was not asked");
+            assert!(catch_up.take_page(5, &"peer-a"));
+            assert!(!catch_up.take_page(5, &"peer-a"), "a page is taken once");
+        }
+
+        #[test]
+        fn an_empty_startup_page_finishes_the_catch_up() {
+            let mut catch_up = CatchUp::new(
+                Epoch(1),
+                NodeHeight(0),
+                NodeHeight(0),
+                Duration::from_secs(15),
+                "peer-a",
+            );
+            catch_up.requested("peer-a", 0);
+            assert!(catch_up.take_page(0, &"peer-a"));
+            assert_eq!(
+                catch_up.after_page(&"peer-a", None, 0, None, NodeHeight(0)),
+                AfterPage::Finished
+            );
+        }
+
+        #[test]
+        fn a_page_that_continues_asks_the_same_peer_for_the_next() {
+            let mut catch_up = CatchUp::new(
+                Epoch(1),
+                NodeHeight(50),
+                NodeHeight(10),
+                Duration::from_secs(15),
+                "peer-a",
+            );
+            assert_eq!(
+                catch_up.after_page(&"peer-a", Some(NodeHeight(30)), 0, Some(NodeHeight(29)), NodeHeight(20)),
+                AfterPage::RequestFrom("peer-a")
+            );
+            assert_eq!(catch_up.next_height, Some(NodeHeight(30)));
+        }
+
+        #[test]
+        fn a_request_to_another_peer_skips_no_forks() {
+            let mut catch_up = CatchUp::new(
+                Epoch(1),
+                NodeHeight(50),
+                NodeHeight(10),
+                Duration::from_secs(15),
+                "peer-a",
+            );
+            assert_eq!(
+                catch_up.after_page(&"peer-a", Some(NodeHeight(30)), 2, Some(NodeHeight(30)), NodeHeight(20)),
+                AfterPage::RequestFrom("peer-a")
+            );
+            catch_up.requested("peer-a", 1);
+            assert_eq!(catch_up.next_skip, 2, "the same peer resumes past the forks it sent");
+            catch_up.requested("peer-b", 2);
+            assert_eq!(catch_up.next_skip, 0);
+            assert_eq!(catch_up.next_height, Some(NodeHeight(30)));
+        }
+
+        #[test]
+        fn a_peer_without_blocks_up_to_the_target_hands_over_to_the_proposer() {
+            let timeout = Duration::from_secs(15);
+            let mut catch_up = CatchUp::new(Epoch(1), NodeHeight(50), NodeHeight(10), timeout, "peer-a");
+            catch_up.raise_target(NodeHeight(60), Some("peer-b"));
+            assert_eq!(
+                catch_up.after_page(&"peer-a", None, 0, Some(NodeHeight(40)), NodeHeight(40)),
+                AfterPage::RequestFrom("peer-b")
+            );
+            assert_eq!(
+                catch_up.next_height, None,
+                "the proposer's page starts at this node's certified block"
+            );
+
+            assert_eq!(
+                catch_up.after_page(&"peer-b", None, 0, Some(NodeHeight(45)), NodeHeight(45)),
+                AfterPage::AwaitStall,
+                "the proposer itself is not asked again at once"
+            );
+        }
+
+        #[test]
+        fn a_page_that_reached_the_target_imports_its_blocks() {
+            let mut catch_up = CatchUp::new(
+                Epoch(1),
+                NodeHeight(50),
+                NodeHeight(10),
+                Duration::from_secs(15),
+                "peer-a",
+            );
+            assert_eq!(
+                catch_up.after_page(&"peer-a", None, 0, Some(NodeHeight(55)), NodeHeight(40)),
+                AfterPage::Importing
+            );
+            assert!(
+                catch_up.is_behind_target(),
+                "proposing waits until the blocks are imported"
+            );
+        }
+
+        #[test]
+        fn a_catch_up_at_its_target_stays_open_while_its_page_is_outstanding() {
+            let timeout = Duration::from_secs(15);
+            let mut state = WorkerState {
+                catch_up: Some(CatchUp::new(
+                    Epoch(1),
+                    NodeHeight(10),
+                    NodeHeight(10),
+                    timeout,
+                    "peer-a",
+                )),
+                ..WorkerState::default()
+            };
+            state.catch_up.as_mut().unwrap().requested("peer-a", 0);
+            assert!(
+                !state.is_active_catch_up(),
+                "a catch-up at its target holds back no proposal"
+            );
+
+            let catch_up = state.active_catch_up_mut().unwrap();
+            assert!(
+                catch_up.record_progress(NodeHeight(11), timeout),
+                "an imported block keeps a catch-up whose page is outstanding"
+            );
+            catch_up.raise_target(NodeHeight(40), Some("peer-b"));
+            assert!(state.is_active_catch_up());
+            let catch_up = state.active_catch_up_mut().unwrap();
+            catch_up.raise_target(NodeHeight(20), Some("peer-c"));
+            assert_eq!(catch_up.remote_height, NodeHeight(40), "a target is never lowered");
+            assert_eq!(catch_up.target_from, Some("peer-b"));
+        }
+
+        #[test]
+        fn a_catch_up_at_its_target_lapses_with_its_page() {
+            let mut catch_up = CatchUp::new(Epoch(1), NodeHeight(10), NodeHeight(10), Duration::ZERO, "peer-a");
+            catch_up.requested("peer-a", 0);
+            assert!(!catch_up.is_awaiting_page());
+            assert!(!catch_up.record_progress(NodeHeight(11), Duration::ZERO));
+        }
+
+        #[test]
+        fn a_catch_up_no_vote_never_triggers_a_leader_timeout() {
+            assert!(!should_trigger_leader_timeout_on_no_vote(None, ProposalOrigin::CatchUp));
+            assert!(!should_trigger_leader_timeout_on_no_vote(
+                Some(&NoVoteReason::AlreadyVotedAtHeight),
+                ProposalOrigin::CatchUp
+            ));
+            assert!(!should_trigger_leader_timeout_on_no_vote(
+                Some(&NoVoteReason::StateMerkleRootMismatch),
+                ProposalOrigin::CatchUp
+            ));
+
+            assert!(!should_trigger_leader_timeout_on_no_vote(None, ProposalOrigin::Live));
+            assert!(!should_trigger_leader_timeout_on_no_vote(
+                Some(&NoVoteReason::AlreadyVotedAtHeight),
+                ProposalOrigin::Live
+            ));
+            assert!(should_trigger_leader_timeout_on_no_vote(
+                Some(&NoVoteReason::StateMerkleRootMismatch),
+                ProposalOrigin::Live
+            ));
+        }
+    }
+
+    mod update_next_epoch_target {
+        use super::*;
+
+        #[test]
+        fn ignores_candidates_at_or_behind_current_epoch() {
+            let t0 = Instant::now();
+            let mut next_epoch = None;
+            update_next_epoch_target(&mut next_epoch, Epoch(2), Epoch(1), t0);
+            assert_eq!(next_epoch, None);
+            update_next_epoch_target(&mut next_epoch, Epoch(2), Epoch(2), t0);
+            assert_eq!(next_epoch, None);
+        }
+
+        #[test]
+        fn preserves_future_target_and_activation_timestamp_across_duplicate_or_older_events() {
+            let t0 = Instant::now();
+            let t1 = t0 + Duration::from_secs(5);
+            let mut next_epoch = None;
+
+            update_next_epoch_target(&mut next_epoch, Epoch(1), Epoch(3), t0);
+            assert_eq!(next_epoch, Some((Epoch(3), t0)));
+
+            // An older or duplicate future event must not regress the target epoch or reset `t0`.
+            update_next_epoch_target(&mut next_epoch, Epoch(1), Epoch(2), t1);
+            assert_eq!(next_epoch, Some((Epoch(3), t0)));
+            update_next_epoch_target(&mut next_epoch, Epoch(1), Epoch(3), t1);
+            assert_eq!(next_epoch, Some((Epoch(3), t0)));
+
+            // A higher future target advances the target epoch while preserving `t0` for the current epoch.
+            update_next_epoch_target(&mut next_epoch, Epoch(1), Epoch(4), t1);
+            assert_eq!(next_epoch, Some((Epoch(4), t0)));
+        }
+
+        #[test]
+        fn replaces_stale_target_once_current_epoch_reaches_it() {
+            let t0 = Instant::now();
+            let t1 = t0 + Duration::from_secs(5);
+            let mut next_epoch = Some((Epoch(2), t0));
+
+            update_next_epoch_target(&mut next_epoch, Epoch(2), Epoch(3), t1);
+            assert_eq!(next_epoch, Some((Epoch(3), t1)));
+        }
+
+        #[test]
+        fn clears_reached_or_surpassed_target_epoch() {
+            let t0 = Instant::now();
+            let mut next_epoch = Some((Epoch(3), t0));
+
+            assert_eq!(clear_reached_next_epoch(&mut next_epoch, Epoch(2)), Some(Epoch(3)));
+            assert_eq!(next_epoch, Some((Epoch(3), t0)));
+
+            assert_eq!(clear_reached_next_epoch(&mut next_epoch, Epoch(3)), None);
+            assert_eq!(next_epoch, None);
+
+            let mut stale_target = Some((Epoch(2), t0));
+            assert_eq!(clear_reached_next_epoch(&mut stale_target, Epoch(3)), None);
+            assert_eq!(stale_target, None);
+        }
+
+        #[test]
+        fn apply_epoch_changed_handles_rotating_out_and_stale_unregistered_events() {
+            let t0 = Instant::now();
+            let t1 = t0 + Duration::from_secs(5);
+            let mut next_epoch = None;
+
+            // A delayed unregistered event from an older epoch must not stop a validator running at Epoch(2).
+            assert_eq!(
+                apply_epoch_changed(&mut next_epoch, Epoch(2), Epoch(1), false, t0),
+                EpochChangedOutcome::IgnoredStale
+            );
+            assert_eq!(next_epoch, None);
+
+            // An unregistered event for the current epoch stops consensus immediately.
+            assert_eq!(
+                apply_epoch_changed(&mut next_epoch, Epoch(2), Epoch(2), false, t0),
+                EpochChangedOutcome::NotRegisteredForCurrentEpoch
+            );
+            assert_eq!(next_epoch, None);
+
+            // An unregistered event for a future epoch records `next_epoch` so the rotating-out validator can finish
+            // and checkpoint `current_epoch`, and preserves `t0` on duplicate delivery.
+            assert_eq!(
+                apply_epoch_changed(&mut next_epoch, Epoch(2), Epoch(3), false, t0),
+                EpochChangedOutcome::RotatingOutAfterCurrentEpoch
+            );
+            assert_eq!(next_epoch, Some((Epoch(3), t0)));
+            assert_eq!(
+                apply_epoch_changed(&mut next_epoch, Epoch(2), Epoch(3), false, t1),
+                EpochChangedOutcome::RotatingOutAfterCurrentEpoch
+            );
+            assert_eq!(next_epoch, Some((Epoch(3), t0)));
+
+            // A registered event at the current epoch does not pollute `next_epoch`, while a higher future registered
+            // event advances the target epoch and preserves `t0`.
+            let mut registered_next = None;
+            assert_eq!(
+                apply_epoch_changed(&mut registered_next, Epoch(2), Epoch(2), true, t0),
+                EpochChangedOutcome::Registered
+            );
+            assert_eq!(registered_next, None);
+            assert_eq!(
+                apply_epoch_changed(&mut next_epoch, Epoch(2), Epoch(4), true, t1),
+                EpochChangedOutcome::Registered
+            );
+            assert_eq!(next_epoch, Some((Epoch(4), t0)));
         }
     }
 }

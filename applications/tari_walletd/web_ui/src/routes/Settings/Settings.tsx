@@ -32,7 +32,6 @@ import SettingsTabs from "@routes/Settings/Components/SettingsTabs";
 import ViewVaultBalance from "@routes/Settings/Components/ViewVaultBalance";
 import AccessTokens from "@routes/Wallet/Components/AccessTokens";
 import Accounts from "@routes/Wallet/Components/Accounts";
-import Keys from "@routes/Wallet/Components/Keys";
 
 export interface ISettingsMenu {
   label: string;
@@ -54,11 +53,6 @@ function SettingsPage() {
       label: "Accounts",
       title: "Manage Accounts",
       content: <Accounts />,
-    },
-    {
-      label: "Keys",
-      title: "Manage Keys",
-      content: <Keys />,
     },
     {
       label: "Access Tokens",

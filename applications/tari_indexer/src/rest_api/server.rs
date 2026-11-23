@@ -55,6 +55,7 @@ const REQUEST_BODY_LIMIT: usize = 4 * 1024 * 1024; // 4 MB
     handlers::network::get_connections,
     handlers::substates::get_substate,
     handlers::substates::fetch_substates,
+    handlers::substates::get_substate_versions,
     handlers::resources::get_tari,
     handlers::resources::get_resource,
     handlers::indexer_events::sse_events,
@@ -227,6 +228,8 @@ fn api_routes(rate_limits: &IndexerRateLimitsConfig, sse_metrics: &SseConnection
             // ----------------------------------------------------------------
             .nest("/substates", Router::new()
                 .route("/fetch", post(handlers::substates::fetch_substates)
+                    .route_layer(middleware::from_fn_with_state(substates_fetch_limiter.clone(), rate_limit_middleware)))
+                .route("/versions", post(handlers::substates::get_substate_versions)
                     .route_layer(middleware::from_fn_with_state(substates_fetch_limiter.clone(), rate_limit_middleware)))
                 .route("/watched", get(handlers::watched::list_watched_substates)
                     .route_layer(middleware::from_fn_with_state(substates_fetch_limiter.clone(), rate_limit_middleware)))

@@ -65,7 +65,7 @@ pub fn builder<P: AsRef<Path>>(
             // instead of colliding on a duplicate substate.
             let (random_secret, random_public) = RistrettoPublicKey::random_keypair(&mut rand::rng());
             builder
-                .add_signer(&random_public.to_byte_type(), &signer_secret_key)
+                .authorize(&random_public.to_byte_type(), [&signer_secret_key])
                 .seal(&random_secret)
         } else {
             builder.build_and_seal(&signer_secret_key)

@@ -88,7 +88,7 @@ use crate::{
     hotstuff::{
         block_change_set::ProposedBlockChangeSet,
         command_derivation::pin_new_transaction,
-        command_sequencer::{BlockTotals, CommandSequencer},
+        command_sequencer::{BlockTotals, CommandSequencer, Sequencing},
         substate_store::PendingSubstateStore,
         transaction_manager::{
             ConsensusTransactionManager,
@@ -272,6 +272,7 @@ fn component_value() -> SubstateValue {
             access_rules: Default::default(),
             entity_id: EntityId::default(),
             upgrade_rule: Default::default(),
+            rules_updater: None,
         },
         body: ComponentBody {
             state: tari_bor::Value::Null,
@@ -737,7 +738,7 @@ impl Replica {
                 let mut rec = change_set
                     .get_transaction_pool_record(tx, substate_store.parent_chain(), id)
                     .unwrap();
-                pin_new_transaction(&mut rec, &block.to_locked_epoch(), self.committee.shard_group()).unwrap();
+                pin_new_transaction(&mut rec, None, &block.to_locked_epoch(), self.committee.shard_group()).unwrap();
                 let prepared = self
                     .manager
                     .prepare_for_proposal(&mut substate_store, &self.committee, &rec, block.as_leaf(), &change_set)
@@ -901,7 +902,7 @@ mod local_only {
                 let mut rec = changes
                     .get_transaction_pool_record(tx, store.parent_chain(), &id)
                     .unwrap();
-                pin_new_transaction(&mut rec, &replica.candidate.to_locked_epoch(), local).unwrap();
+                pin_new_transaction(&mut rec, None, &replica.candidate.to_locked_epoch(), local).unwrap();
                 let prepared = replica
                     .manager
                     .prepare_for_proposal(&mut store, &replica.committee, &rec, block, &changes)
@@ -2767,9 +2768,200 @@ mod locked_epoch {
             evaluation.no_vote
         );
     }
+
+    #[test]
+    fn sequencing_a_new_transaction_before_its_min_epoch_is_refused() {
+        let replica = Replica::new();
+        let input = component_id(0x20);
+        replica.add_substate(&input);
+        let block_epoch = replica.candidate.epoch();
+        let min_epoch = block_epoch + Epoch(1);
+
+        let transaction = (0u64..)
+            .map(|attempt| {
+                Transaction::builder_localnet(Epoch(100))
+                    .with_min_epoch(Some(min_epoch))
+                    .add_input(SubstateRequirement::unversioned(input.clone()))
+                    .build_and_seal(&PrivateKey::from(9_000 + attempt))
+            })
+            .find(|tx| {
+                let receipt = SubstateId::TransactionReceipt(TransactionReceiptAddress::from(tx.calculate_id()));
+                replica.committee.includes_substate_id(&receipt)
+            })
+            .unwrap();
+        let id = transaction.calculate_id();
+        replica.executor.script(id, commits());
+        replica
+            .store
+            .with_write_tx(|tx| {
+                TransactionRecord::new(transaction).insert(tx)?;
+                tx.transaction_pool_insert_new(id, Decision::Commit, &Evidence::empty(), true, false, Epoch(100), 0)
+            })
+            .unwrap();
+
+        let rec = replica
+            .store
+            .with_read_tx(|tx| tx.transaction_pool_get_all(usize::MAX))
+            .unwrap()
+            .into_iter()
+            .find(|r| r.id() == &id)
+            .unwrap();
+        replica
+            .store
+            .with_read_tx(|tx| {
+                let mut substate_store = PendingSubstateStore::init(tx, replica.candidate.as_leaf(), NUM_PRESHARDS)?;
+                let change_set = ProposedBlockChangeSet::new(replica.candidate.as_leaf());
+                let sequencer = CommandSequencer::for_proposal(
+                    &replica.manager,
+                    &replica.committee,
+                    replica.candidate.as_leaf(),
+                    replica.candidate.epoch(),
+                    replica.candidate.to_locked_epoch(),
+                    usize::MAX,
+                );
+                let res = sequencer
+                    .sequence(rec, false, &mut substate_store, &change_set)
+                    .unwrap();
+                assert!(
+                    matches!(
+                        &res,
+                        Err(refusal) if matches!(
+                            refusal.reason,
+                            NoVoteReason::MinEpochAfterBlock {
+                                transaction_id,
+                                min_epoch: m,
+                                block_epoch: b,
+                            } if transaction_id == id && m == min_epoch && b == block_epoch
+                        )
+                    ),
+                    "expected proposer CommandSequencer to refuse with MinEpochAfterBlock, got {res:?}",
+                );
+                Ok::<_, StorageError>(())
+            })
+            .unwrap();
+
+        let evaluation = replica.evaluate_local_only(&[committing(id)]);
+
+        assert!(
+            matches!(
+                evaluation.no_vote,
+                Some(NoVoteReason::MinEpochAfterBlock {
+                    transaction_id,
+                    min_epoch: m,
+                    block_epoch: b,
+                }) if transaction_id == id && m == min_epoch && b == block_epoch
+            ),
+            "expected MinEpochAfterBlock, got {:?}",
+            evaluation.no_vote
+        );
+    }
+
+    /// Pools a transaction that writes `input` and may not run before `min_epoch`.
+    fn pool_with_min_epoch(replica: &Replica, input: &SubstateId, min_epoch: Epoch) -> TransactionId {
+        let transaction = (0u64..)
+            .map(|attempt| {
+                Transaction::builder_localnet(Epoch(100))
+                    .with_min_epoch(Some(min_epoch))
+                    .add_input(SubstateRequirement::unversioned(input.clone()))
+                    .build_and_seal(&PrivateKey::from(9_500 + attempt))
+            })
+            .find(|tx| {
+                let receipt = SubstateId::TransactionReceipt(TransactionReceiptAddress::from(tx.calculate_id()));
+                replica.committee.includes_substate_id(&receipt)
+            })
+            .unwrap();
+        let id = transaction.calculate_id();
+        replica.executor.script(id, commits());
+        replica
+            .store
+            .with_write_tx(|tx| {
+                TransactionRecord::new(transaction).insert(tx)?;
+                tx.transaction_pool_insert_new(id, Decision::Commit, &Evidence::empty(), true, false, Epoch(100), 0)
+            })
+            .unwrap();
+        id
+    }
+
+    /// Sequences pooled transaction `id` as the proposer of a block pinned to `block_pin`.
+    fn sequence_pinned_to(replica: &Replica, id: &TransactionId, block_pin: &LockedEpoch) -> Sequencing {
+        replica
+            .store
+            .with_read_tx(|tx| {
+                let rec = tx
+                    .transaction_pool_get_all(usize::MAX)?
+                    .into_iter()
+                    .find(|r| r.id() == id)
+                    .unwrap();
+                let mut substate_store = PendingSubstateStore::init(tx, replica.candidate.as_leaf(), NUM_PRESHARDS)?;
+                let change_set = ProposedBlockChangeSet::new(replica.candidate.as_leaf());
+                let sequencer = CommandSequencer::for_proposal(
+                    &replica.manager,
+                    &replica.committee,
+                    replica.candidate.as_leaf(),
+                    block_pin.epoch(),
+                    block_pin.clone(),
+                    usize::MAX,
+                );
+                Ok::<_, StorageError>(
+                    sequencer
+                        .sequence(rec, false, &mut substate_store, &change_set)
+                        .unwrap(),
+                )
+            })
+            .unwrap()
+    }
+
+    #[test]
+    fn a_new_transaction_is_sequenced_in_its_min_epoch() {
+        let replica = Replica::new();
+        let input = component_id(0x21);
+        replica.add_substate(&input);
+        let block_pin = replica.candidate.to_locked_epoch();
+        let id = pool_with_min_epoch(&replica, &input, block_pin.epoch());
+
+        let derived = sequence_pinned_to(&replica, &id, &block_pin).expect("sequenced in its min epoch");
+        assert_eq!(derived.pool_record.locked_epoch(), Some(&block_pin));
+    }
+
+    #[test]
+    fn a_transaction_waiting_for_its_min_epoch_is_sequenced_once_the_epoch_arrives() {
+        let replica = Replica::new();
+        let input = component_id(0x22);
+        replica.add_substate(&input);
+        let block_pin = replica.candidate.to_locked_epoch();
+        let min_epoch = block_pin.epoch() + Epoch(1);
+        let id = pool_with_min_epoch(&replica, &input, min_epoch);
+
+        let refusal = sequence_pinned_to(&replica, &id, &block_pin).expect_err("refused before its min epoch");
+        assert!(
+            matches!(refusal.reason, NoVoteReason::MinEpochAfterBlock { min_epoch: m, .. } if m == min_epoch),
+            "{:?}",
+            refusal.reason
+        );
+
+        let next_pin = pinned_to(&block_pin, min_epoch, block_pin.exhaust_burn_rate().as_bps());
+        let derived = sequence_pinned_to(&replica, &id, &next_pin).expect("sequenced once its min epoch arrives");
+        assert_eq!(derived.pool_record.locked_epoch(), Some(&next_pin));
+    }
 }
 
 mod some_accept {
+    use tari_ootle_storage::consensus_models::{
+        BlockHeaderMetadata,
+        BlockPledge,
+        CommandOrHash,
+        CommandsCommitProof,
+        ForeignProposal,
+    };
+    use tari_sidechain::{
+        CommitProofElement,
+        QcSignatures,
+        QuorumCertificate,
+        SidechainBlockCommitProof,
+        SidechainBlockHeader,
+        SignerBitmap,
+    };
+
     use super::*;
 
     fn aborted_after_local_accept() -> (Replica, TransactionPoolRecord) {
@@ -2935,6 +3127,153 @@ mod some_accept {
             "{:?}",
             evaluation.no_vote
         );
+    }
+
+    /// A foreign proposal from `foreign` whose only command is a LocalAccept of `atom`.
+    fn foreign_local_accept_proposal(foreign: ShardGroup, atom: MultiShardAtom) -> ForeignProposal {
+        let metadata = BlockHeaderMetadata {
+            total_leader_fee: 0,
+            timestamp: 0,
+            extra_data: ExtraData::new(),
+            timeout_certificate_id: None,
+            is_dummy: false,
+        };
+        let header = SidechainBlockHeader {
+            network: NETWORK.as_byte(),
+            protocol_version: 0,
+            parent_id: Default::default(),
+            justify_id: Default::default(),
+            height: 1,
+            epoch: 0,
+            epoch_hash: Default::default(),
+            shard_group: tari_sidechain::ShardGroup {
+                start: foreign.start().as_u32(),
+                end_inclusive: foreign.end().as_u32(),
+            },
+            proposed_by: Default::default(),
+            state_merkle_root: Default::default(),
+            command_merkle_root: Default::default(),
+            transaction_merkle_root: Default::default(),
+            signature: Default::default(),
+            accumulated_data: Default::default(),
+            metadata_hash: metadata.calculate_hash(),
+        };
+        let proof_elements = vec![CommitProofElement::QuorumCertificate(QuorumCertificate {
+            header_hash: header.calculate_hash(),
+            parent_id: header.parent_id,
+            protocol_version: header.protocol_version,
+            epoch: header.epoch,
+            height: header.height,
+            signatures: QcSignatures::Schnorr {
+                signers: SignerBitmap::from_indices(1, [0]).unwrap(),
+                signatures: vec![],
+            },
+            decision: QuorumDecision::Accept,
+        })];
+        let commit_proof = CommandsCommitProof::new_latest(
+            vec![CommandOrHash::Command(Command::LocalAccept(atom))],
+            SidechainBlockCommitProof { header, proof_elements },
+        );
+        ForeignProposal::new(commit_proof, BlockPledge::default(), metadata)
+    }
+
+    #[test]
+    fn a_some_accept_in_the_block_of_a_foreign_local_accept_commit_is_voted_for() {
+        let (mut replica, rec, abort) = prepared_cross_shard_creating_an_existing_output();
+        let id = *rec.id();
+        let prepared_evidence = rec.evidence().clone();
+        let (_, foreign) = local_and_foreign_halves();
+        let foreign_input = component_id_in(foreign);
+
+        replica
+            .store
+            .with_write_tx(|tx| {
+                tx.transaction_pool_add_pending_update(
+                    &replica.parent.as_leaf(),
+                    &TransactionPoolStatusUpdate::new(rec, true),
+                )
+            })
+            .unwrap();
+        replica.extend();
+        replica.accept_in_parent(&abort);
+
+        let mut foreign_evidence = prepared_evidence;
+        let foreign_sg_ev = foreign_evidence.add_shard_group(foreign);
+        foreign_sg_ev.insert_from_lock_intent(
+            VersionedSubstateIdLockIntent::write(
+                VersionedSubstateId::new(foreign_input.clone(), SubstateVersion::ZERO),
+                true,
+            )
+            .with_pledged_value(&component_value()),
+        );
+        foreign_sg_ev.insert_output(foreign_input, SubstateVersion::from(1));
+        let involved = NonZeroU64::new(foreign_evidence.num_shard_groups() as u64).unwrap();
+        let foreign_proposal = foreign_local_accept_proposal(foreign, MultiShardAtom {
+            id,
+            decision: Decision::Commit,
+            evidence: foreign_evidence,
+            transaction_fee: FEE,
+            leader_fee: Some(calculate_leader_fee(FEE, exhaust_burn(), involved)),
+            fee_intent_only: false,
+            locked_epoch: abort.locked_epoch.clone(),
+        });
+
+        let block = &replica.candidate;
+        let mut proposer_rec = replica.pending_record(&id);
+        let (proposed, replica_rec, no_vote) = replica
+            .store
+            .with_read_tx(|tx| {
+                // The proposer derives its SomeAccept from the stored record with the foreign proposal's update
+                // applied.
+                let mut substate_store = PendingSubstateStore::init(tx, block.as_leaf(), NUM_PRESHARDS)?;
+                let mut change_set = ProposedBlockChangeSet::new(block.as_leaf());
+                crate::hotstuff::foreign_proposal_processor::process_foreign_block(
+                    tx,
+                    &foreign_proposal,
+                    &replica.committee,
+                    &mut substate_store,
+                    &mut change_set,
+                )
+                .unwrap();
+                change_set.apply_transaction_update(&mut proposer_rec);
+                let proposed = proposer_rec.get_current_multi_shard_atom().unwrap();
+
+                // A replica reads the record from the change set the same foreign proposal updated.
+                let validator = LocalCommandValidator::new(&replica.manager, &replica.public_key);
+                let mut substate_store = PendingSubstateStore::init(tx, block.as_leaf(), NUM_PRESHARDS)?;
+                let mut change_set = ProposedBlockChangeSet::new(block.as_leaf());
+                crate::hotstuff::foreign_proposal_processor::process_foreign_block(
+                    tx,
+                    &foreign_proposal,
+                    &replica.committee,
+                    &mut substate_store,
+                    &mut change_set,
+                )
+                .unwrap();
+                let replica_rec = change_set
+                    .get_transaction_pool_record(tx, substate_store.parent_chain(), &id)
+                    .unwrap();
+                let no_vote = validator
+                    .evaluate_some_accept_command(
+                        tx,
+                        block,
+                        &proposed,
+                        &replica.committee,
+                        &mut substate_store,
+                        &mut change_set,
+                        &mut BlockTotals::default(),
+                    )
+                    .unwrap();
+                Ok::<_, StorageError>((proposed, replica_rec, no_vote))
+            })
+            .unwrap();
+
+        assert_eq!(proposed.decision, Decision::Abort(AbortReason::LockOutputsFailed));
+        assert!(no_vote.is_none(), "{no_vote:?}");
+        let foreign_ev = replica_rec.evidence().get(&foreign).unwrap();
+        assert!(foreign_ev.inputs().values().all(Option::is_none), "{foreign_ev:?}");
+        assert!(foreign_ev.outputs().is_empty(), "{foreign_ev:?}");
+        assert_eq!(*replica_rec.evidence(), proposed.evidence);
     }
 }
 

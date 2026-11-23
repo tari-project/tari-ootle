@@ -153,24 +153,6 @@ impl WalletStoreReader for ReadTransaction<'_> {
             .collect())
     }
 
-    fn key_manager_get_active_index(&mut self, branch: &str) -> Result<u64, WalletStorageError> {
-        use crate::schema::key_manager_states;
-
-        key_manager_states::table
-            .select(key_manager_states::index)
-            .filter(key_manager_states::branch_seed.eq(branch))
-            .filter(key_manager_states::is_active.eq(true))
-            .first(self.connection())
-            .optional()
-            .map_err(|e| WalletStorageError::general("key_manager_get_active_index", e))?
-            .map(|index: i64| index as u64)
-            .ok_or_else(|| WalletStorageError::NotFound {
-                operation: "key_manager_get_active_index",
-                entity: "key_manager_state".to_string(),
-                key: branch.to_string(),
-            })
-    }
-
     fn key_manager_get_last_index(&mut self, branch: &str) -> Result<u64, WalletStorageError> {
         use crate::schema::key_manager_states;
 
@@ -1502,6 +1484,40 @@ impl WalletStoreReader for ReadTransaction<'_> {
                     details: format!("Corrupt db: invalid owner account address '{address}': {e}"),
                 })?;
                 row.try_convert(address)
+            })
+            .collect()
+    }
+
+    fn stealth_outputs_get_live_resources(
+        &mut self,
+        account: &ComponentAddress,
+    ) -> Result<HashSet<ResourceAddress>, WalletStorageError> {
+        const OPERATION: &str = "stealth_outputs_get_live_resources";
+        use crate::schema::{accounts, stealth_outputs};
+
+        let resources = stealth_outputs::table
+            .inner_join(accounts::table.on(accounts::id.eq(stealth_outputs::owner_account_id)))
+            .select(stealth_outputs::resource_address)
+            .distinct()
+            .filter(accounts::address.eq(account.to_string()))
+            .filter(stealth_outputs::status.eq_any([
+                OutputStatus::Unspent.as_key_str(),
+                OutputStatus::LockedForSpend.as_key_str(),
+                OutputStatus::LockedUnconfirmed.as_key_str(),
+            ]))
+            .load_iter::<String, _>(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+
+        resources
+            .map(|row| {
+                row.map_err(|e| WalletStorageError::general(OPERATION, e))
+                    .and_then(|resource| {
+                        resource.parse().map_err(|e| WalletStorageError::DecodingError {
+                            operation: OPERATION,
+                            item: "resource_address",
+                            details: format!("Corrupt db: invalid resource address '{resource}': {e}"),
+                        })
+                    })
             })
             .collect()
     }

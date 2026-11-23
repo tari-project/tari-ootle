@@ -280,6 +280,13 @@ pub enum RuntimeError {
     AccessDeniedOwnerRequired { action: ActionIdent },
     #[error("Component {component} cannot be upgraded: its upgrade rule is Locked")]
     ComponentUpgradesLocked { component: ComponentAddress },
+    #[error("The access rules and owner rule of component {component} cannot change: its rules updater is Locked")]
+    ComponentRulesLocked { component: ComponentAddress },
+    #[error(
+        "The access rules and owner rule of component {component} are changed only by its own template code: its \
+         rules updater is TemplateManaged"
+    )]
+    ComponentRulesTemplateManaged { component: ComponentAddress },
     #[error("Write attempted in a read-only execution context")]
     WriteInReadOnlyContext,
     #[error("Host operation '{operation}' is forbidden inside a read-only (spend-script) context")]
@@ -615,6 +622,8 @@ impl RuntimeError {
             Self::AccessDeniedAuthHook { .. } |
             Self::AccessDeniedOwnerRequired { .. } |
             Self::ComponentUpgradesLocked { .. } |
+            Self::ComponentRulesLocked { .. } |
+            Self::ComponentRulesTemplateManaged { .. } |
             Self::WriteInReadOnlyContext |
             Self::ForbiddenInReadOnlyContext { .. } |
             Self::WriteOutsideOwnComponent { .. } |
@@ -719,6 +728,7 @@ impl LimitError {
         match self {
             Self::SubstateSizeExceeded { .. } |
             Self::TransactionOutputSizeExceeded { .. } |
+            Self::SubstateOutputsExceeded { .. } |
             Self::LogSizeExceeded { .. } |
             Self::MaxLogsExceeded |
             Self::MaxEventsExceeded |
@@ -835,6 +845,8 @@ pub enum LimitError {
     SubstateSizeExceeded { id: SubstateId, size: usize },
     #[error("Transaction writes {size} bytes of state, exceeding the maximum of {} bytes per transaction", limits::ENGINE_LIMITS.max_transaction_output_bytes)]
     TransactionOutputSizeExceeded { size: usize },
+    #[error("Transaction persists {count} substates, exceeding the maximum of {} per transaction", limits::ENGINE_LIMITS.max_substate_outputs)]
+    SubstateOutputsExceeded { count: usize },
     #[error("Log entry of {size} bytes exceeds maximum size of {} bytes", limits::ENGINE_LIMITS.max_log_size_bytes)]
     LogSizeExceeded { size: usize },
     #[error("Exceeded maximum number of logs per transaction: {}", limits::ENGINE_LIMITS.max_logs)]

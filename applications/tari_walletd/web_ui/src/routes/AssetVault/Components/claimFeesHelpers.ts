@@ -4,28 +4,35 @@
 import type { AccountInfo, FeePoolDetails } from "@tari-project/ootle-ts-bindings";
 import { substateIdToString } from "@tari-project/ootle-ts-bindings";
 
+export interface ClaimKey {
+  index: bigint;
+  account: AccountInfo["account"];
+}
+
 export type ParsedOptionalFee = { kind: "empty" } | { kind: "valid"; value: bigint } | { kind: "invalid" };
+
+/**
+ * Extract derived account keys eligible for claiming validator fees.
+ */
+export function getAccountClaimKeys(accounts: readonly AccountInfo[] | undefined): ClaimKey[] {
+  if (!accounts) {
+    return [];
+  }
+  return accounts.flatMap((info): ClaimKey[] => {
+    const keyId = info.account.owner_key_id;
+    if (keyId !== null && "Derived" in keyId && keyId.Derived.key_branch === "account") {
+      return [{ index: BigInt(keyId.Derived.index), account: info.account }];
+    }
+    return [];
+  });
+}
 
 /**
  * Find the component address of the account whose derived account key matches `keyIndex`.
  */
-export function findAccountAddressForClaimKey(
-  accounts: readonly AccountInfo[] | undefined,
-  keyIndex: number,
-): string | null {
-  if (!accounts) {
-    return null;
-  }
+export function findAccountAddressForClaimKey(claimKeys: readonly ClaimKey[], keyIndex: number): string | null {
   const targetIndex = BigInt(keyIndex);
-  const match = accounts.find((info) => {
-    const keyId = info.account.owner_key_id;
-    return (
-      keyId !== null &&
-      "Derived" in keyId &&
-      keyId.Derived.key_branch === "account" &&
-      BigInt(keyId.Derived.index) === targetIndex
-    );
-  });
+  const match = claimKeys.find((entry) => entry.index === targetIndex);
   return match?.account.component_address ? substateIdToString(match.account.component_address) : null;
 }
 

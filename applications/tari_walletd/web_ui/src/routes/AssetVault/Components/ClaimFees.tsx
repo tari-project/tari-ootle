@@ -40,7 +40,6 @@ import { useTheme } from "@mui/material/styles";
 import TextField from "@mui/material/TextField";
 import useAccountStore from "@store/accountStore";
 import {
-  AccountInfo,
   getRejectReasonFromTransactionResult,
   GetValidatorFeesResponse,
   rejectReasonToString,
@@ -54,6 +53,7 @@ import { Form } from "react-router-dom";
 import {
   canSubmitClaimFees,
   findAccountAddressForClaimKey,
+  getAccountClaimKeys,
   parseOptionalFee,
   sumScannedFees,
 } from "./claimFeesHelpers";
@@ -64,11 +64,6 @@ interface FormState {
   shards: Array<number>;
   keyIndex: number | null;
   outputToRevealed: boolean;
-}
-
-interface ClaimKey {
-  index: bigint;
-  account: AccountInfo["account"];
 }
 
 const INITIAL_VALUES: FormState = {
@@ -90,6 +85,8 @@ export default function ClaimFees() {
 
   const theme = useTheme();
 
+  // A validator's fees are claimed with the key of a derived account
+  const claimKeys = getAccountClaimKeys(dataAccountsList?.accounts);
   const parsedFee = parseOptionalFee(formState.fee);
   const canSubmit = canSubmitClaimFees(formState.keyIndex, formState.shards, formState.fee);
 
@@ -101,7 +98,7 @@ export default function ClaimFees() {
     if (keyIndex === formState.keyIndex) {
       return;
     }
-    const account = findAccountAddressForClaimKey(dataAccountsList.accounts, keyIndex);
+    const account = findAccountAddressForClaimKey(claimKeys, keyIndex);
     setScannedFees(null);
     setFormState({
       ...formState,
@@ -176,6 +173,7 @@ export default function ClaimFees() {
   };
 
   const handleClose = () => {
+    setFormState(INITIAL_VALUES);
     setScannedFees(null);
     setOpen(false);
   };
@@ -204,15 +202,6 @@ export default function ClaimFees() {
       setIsLoading(false);
     }
   };
-
-  // A validator's fees are claimed with the key of a derived account
-  const claimKeys: ClaimKey[] = (dataAccountsList?.accounts ?? []).flatMap((info: AccountInfo): ClaimKey[] => {
-    const keyId = info.account.owner_key_id;
-    if (keyId && "Derived" in keyId && keyId.Derived.key_branch === "account") {
-      return [{ index: BigInt(keyId.Derived.index), account: info.account }];
-    }
-    return [];
-  });
 
   return (
     <div>

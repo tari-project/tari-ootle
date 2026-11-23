@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import {
   canSubmitClaimFees,
   findAccountAddressForClaimKey,
+  getAccountClaimKeys,
   parseOptionalFee,
   sumScannedFees,
 } from "./claimFeesHelpers";
@@ -26,17 +27,19 @@ function makeAccountInfo(componentAddress: string, ownerKeyId: AccountInfo["acco
   };
 }
 
-describe("findAccountAddressForClaimKey", () => {
-  it("matches derived account keys regardless of index representation (number, bigint, string)", () => {
+describe("getAccountClaimKeys and findAccountAddressForClaimKey", () => {
+  it("extracts and matches derived account keys regardless of index representation (number, bigint, string)", () => {
     const accounts = [
       makeAccountInfo("component_0000", { Derived: { key_branch: "account", index: 0 } }),
       makeAccountInfo("component_0001", { Derived: { key_branch: "account", index: 1n } }),
       makeAccountInfo("component_0002", { Derived: { key_branch: "account", index: "2" } }),
     ];
 
-    expect(findAccountAddressForClaimKey(accounts, 0)).toBe("component_0000");
-    expect(findAccountAddressForClaimKey(accounts, 1)).toBe("component_0001");
-    expect(findAccountAddressForClaimKey(accounts, 2)).toBe("component_0002");
+    const claimKeys = getAccountClaimKeys(accounts);
+    expect(claimKeys.map((k) => k.index)).toEqual([0n, 1n, 2n]);
+    expect(findAccountAddressForClaimKey(claimKeys, 0)).toBe("component_0000");
+    expect(findAccountAddressForClaimKey(claimKeys, 1)).toBe("component_0001");
+    expect(findAccountAddressForClaimKey(claimKeys, 2)).toBe("component_0002");
   });
 
   it("ignores imported keys, non-account branches, and null owner_key_id", () => {
@@ -47,9 +50,12 @@ describe("findAccountAddressForClaimKey", () => {
       makeAccountInfo("component_match", { Derived: { key_branch: "account", index: 1 } }),
     ];
 
-    expect(findAccountAddressForClaimKey(accounts, 1)).toBe("component_match");
-    expect(findAccountAddressForClaimKey(accounts, 99)).toBeNull();
-    expect(findAccountAddressForClaimKey(undefined, 0)).toBeNull();
+    const claimKeys = getAccountClaimKeys(accounts);
+    expect(claimKeys).toHaveLength(1);
+    expect(findAccountAddressForClaimKey(claimKeys, 1)).toBe("component_match");
+    expect(findAccountAddressForClaimKey(claimKeys, 99)).toBeNull();
+    expect(getAccountClaimKeys(undefined)).toEqual([]);
+    expect(findAccountAddressForClaimKey([], 0)).toBeNull();
   });
 });
 

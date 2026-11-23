@@ -81,7 +81,6 @@ export default function Passkeys() {
 
   const handleAddPasskey = async (e: FormEvent) => {
     e.preventDefault();
-    if (adding) return;
     setAdding(true);
     setDialogError(null);
     try {
@@ -113,7 +112,7 @@ export default function Passkeys() {
 
   const handleRenameSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    if (!renameTarget || renameMutation.isPending) return;
+    if (!renameTarget) return;
     const trimmed = renameValue.trim();
     if (!trimmed) {
       setDialogError("Passkey label must not be empty");
@@ -140,7 +139,7 @@ export default function Passkeys() {
   };
 
   const handleConfirmRemove = async () => {
-    if (!removeTarget || removeMutation.isPending) return;
+    if (!removeTarget) return;
     setDialogError(null);
     try {
       await removeMutation.mutateAsync(removeTarget.id);

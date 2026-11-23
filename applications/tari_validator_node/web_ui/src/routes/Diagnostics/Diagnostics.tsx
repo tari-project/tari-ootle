@@ -203,13 +203,10 @@ export default function Diagnostics() {
   const [confirmClear, setConfirmClear] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now());
-  const mountedRef = useRef(true);
   const requestIdRef = useRef(0);
 
   useEffect(() => {
-    mountedRef.current = true;
     return () => {
-      mountedRef.current = false;
       requestIdRef.current += 1;
     };
   }, []);
@@ -311,25 +308,17 @@ export default function Diagnostics() {
     setIsLoadingMore(false);
     clearDiagnosticEvents(filter)
       .then((response) => {
-        if (!mountedRef.current) {
-          return;
-        }
         setNotice(`Cleared ${response.deleted} event${response.deleted === 1 ? "" : "s"}.`);
         if (requestIdRef.current === clearRequestId) {
           return load();
         }
       })
       .catch((reason) => {
-        if (!mountedRef.current) {
-          return;
-        }
         console.error(reason);
         setError("Failed to clear diagnostic events. Check the console for details.");
       })
       .finally(() => {
-        if (mountedRef.current) {
-          setIsClearing(false);
-        }
+        setIsClearing(false);
       });
   };
 
@@ -474,15 +463,17 @@ export default function Diagnostics() {
                 <CircularProgress />
               </Box>
             ) : events.length === 0 ? (
-              <Stack alignItems="center" spacing={1.5} sx={{ py: 6, opacity: 0.6 }}>
-                <IoCheckmarkCircleOutline size={48} color={theme.palette.primary.main} />
-                <Typography variant="h5">Nothing to report</Typography>
-                <Typography variant="body2">
-                  {isFiltered
-                    ? "No events match the current filters."
-                    : "This node has not recorded any diagnostic events."}
-                </Typography>
-              </Stack>
+              error === null && (
+                <Stack alignItems="center" spacing={1.5} sx={{ py: 6, opacity: 0.6 }}>
+                  <IoCheckmarkCircleOutline size={48} color={theme.palette.primary.main} />
+                  <Typography variant="h5">Nothing to report</Typography>
+                  <Typography variant="body2">
+                    {isFiltered
+                      ? "No events match the current filters."
+                      : "This node has not recorded any diagnostic events."}
+                  </Typography>
+                </Stack>
+              )
             ) : (
               <>
                 <TableContainer>

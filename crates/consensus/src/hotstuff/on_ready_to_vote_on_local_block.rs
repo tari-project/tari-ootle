@@ -29,7 +29,6 @@ use tari_ootle_storage::{
         ForeignProposalRecord,
         ForeignProposalStatus,
         NoVoteReason,
-        ProposalOrigin,
         SubstateRecord,
         TransactionPool,
         TransactionPoolRecord,
@@ -111,6 +110,7 @@ where
         self.transaction_manager.uncommitted_templates()
     }
 
+    #[expect(clippy::too_many_lines)]
     pub fn handle(
         &mut self,
         tx: &mut TStateStore::WriteTransaction<'_>,
@@ -126,7 +126,6 @@ where
         // a transaction from LocalPrepared (see `abort_local_prepared_for_epoch_end`) and requires the end-of-epoch
         // block to leave none there (see `check_epoch_end_drained`).
         next_epoch_changes_layout: bool,
-        origin: ProposalOrigin,
         change_set: &mut ProposedBlockChangeSet,
     ) -> Result<BlockDecision, HotStuffError> {
         let _timer =
@@ -181,10 +180,8 @@ where
 
         // A block at a height this node has already voted at may still be the one the committee certifies, and
         // committing it applies its change set. It is therefore decided on, and its change set saved, whether or not
-        // this node may vote for it. Blocks first imported through catch-up have already been certified by the
-        // committee and are never voted on by the caller, so their decision is reported even at or below
-        // `last_voted`.
-        let may_vote = origin.is_catch_up() || self.should_vote(&**tx, valid_block.block())?;
+        // this node may vote for it; `local_decision` is reported only for blocks above `last_voted`.
+        let may_vote = self.should_vote(&**tx, valid_block.block())?;
         let parent = valid_block.block().get_parent(&**tx)?;
         self.decide_what_to_vote(
             &**tx,
@@ -229,6 +226,12 @@ where
         }
 
         let (local_decision, no_vote_reason) = if !may_vote {
+            // The caller sees only `AlreadyVotedAtHeight`, so the block's own no-vote reason is kept in diagnostics.
+            if let Some(reason) = change_set.no_vote_reason() &&
+                let Err(err) = tx.diagnostics_add_no_vote(*valid_block.id(), reason.clone())
+            {
+                error!(target: LOG_TARGET, "Failed to save no vote reason: {err}");
+            }
             (None, Some(NoVoteReason::AlreadyVotedAtHeight))
         } else if let Some(reason) = change_set.no_vote_reason() {
             (None, Some(reason.clone()))
@@ -960,12 +963,12 @@ where
     }
 }
 
-/// The inclusion of each of `finalized`, the transactions `block` finalizes, storing the block's commit proof for them
+/// The inclusion of each transaction in `finalized` that `block` aborts, storing the block's commit proof for them
 /// unless `commit_proof_stored`. Each inclusion cites the block once recorded, so the commit proof is stored only when
 /// there is an inclusion to cite it.
 ///
 /// A block whose header disagrees with its commands, or whose commit proof cannot be generated, is logged, and its
-/// transactions are recorded without inclusions.
+/// aborts are recorded without inclusions.
 fn finalized_transaction_inclusions<TTx>(
     tx: &mut TTx,
     commit_qc: &ProposalCertificate,
@@ -977,12 +980,12 @@ where
     TTx: StateStoreWriteTransaction + Deref,
     TTx::Target: StateStoreReadTransaction,
 {
-    let mut proofs = match block.compute_transaction_proofs() {
+    let mut proofs = match block.compute_abort_proofs() {
         Ok(proofs) => proofs,
         Err(err) => {
             error!(
                 target: LOG_TARGET,
-                "BUG: cannot prove the decisions {block} finalized, so they are recorded unproven: {err}"
+                "BUG: cannot prove the aborts {block} finalized, so they are recorded unproven: {err}"
             );
             return Ok(HashMap::new());
         },
@@ -1724,6 +1727,7 @@ mod tests {
                     epoch_end_grace_period: std::time::Duration::from_secs(5),
                     epoch_end_drain_period: std::time::Duration::from_secs(5),
                     catch_up_request_timeout: std::time::Duration::from_secs(15),
+                    catch_up_page_bytes: crate::hotstuff::DEFAULT_CATCH_UP_PAGE_BYTES,
                 };
                 let (tx_events, _rx_events) = broadcast::channel(16);
                 let manager = ConsensusTransactionManager::new(NoopExecutor, 2160, usize::MAX, usize::MAX);
@@ -1812,7 +1816,6 @@ mod tests {
                             false,
                             LocalNextEpochView::default(),
                             false,
-                            ProposalOrigin::Live,
                             &mut change_set,
                         )
                     })
@@ -2374,6 +2377,65 @@ mod tests {
                 decision.no_vote_reason
             );
             assert_eq!(decision.local_decision, Some(QuorumDecision::Accept));
+        }
+
+        #[test]
+        fn a_block_at_or_below_last_voted_reports_already_voted_at_height() {
+            let mut fixture = VoterFixture::new();
+            fixture
+                .store
+                .with_write_tx(|tx| {
+                    fixture.genesis.as_last_executed().set(tx)?;
+                    LastVoted {
+                        block_id: *fixture.genesis.id(),
+                        height: NodeHeight(2),
+                        epoch: Epoch::zero(),
+                    }
+                    .set(tx)
+                })
+                .unwrap();
+
+            let block_1 = fixture.make_block(
+                &fixture.genesis,
+                &fixture.genesis,
+                NodeHeight(1),
+                BlockCommands::empty(),
+                FixedHash::zero(),
+                10,
+            );
+            let decision_1 = fixture.handle_block(&block_1);
+            assert!(decision_1.local_decision.is_none());
+            assert!(matches!(
+                decision_1.no_vote_reason,
+                Some(NoVoteReason::AlreadyVotedAtHeight)
+            ));
+
+            let block_2 = fixture.make_block(
+                &block_1,
+                &block_1,
+                NodeHeight(2),
+                BlockCommands::empty(),
+                FixedHash::zero(),
+                20,
+            );
+            let decision_2 = fixture.handle_block(&block_2);
+            assert!(decision_2.local_decision.is_none());
+            assert!(matches!(
+                decision_2.no_vote_reason,
+                Some(NoVoteReason::AlreadyVotedAtHeight)
+            ));
+
+            let block_3 = fixture.make_block(
+                &block_2,
+                &block_2,
+                NodeHeight(3),
+                BlockCommands::empty(),
+                FixedHash::zero(),
+                30,
+            );
+            let decision_3 = fixture.handle_block(&block_3);
+            assert_eq!(decision_3.local_decision, Some(QuorumDecision::Accept));
+            assert!(decision_3.no_vote_reason.is_none());
         }
     }
 

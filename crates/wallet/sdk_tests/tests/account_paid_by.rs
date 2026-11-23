@@ -13,8 +13,7 @@ use crate::support::{PanicNetworkInterface, Test, random_key};
 
 fn wallet_with_account() -> (Test, AccountWithAddress) {
     let test = Test::without_accounts(PanicNetworkInterface);
-    let address = test.sdk().key_manager_api().next_account_address().unwrap();
-    let account = test.sdk().accounts_api().create_account(None, true, address).unwrap();
+    let account = test.sdk().accounts_api().create_next_account(None, true).unwrap();
     (test, account)
 }
 

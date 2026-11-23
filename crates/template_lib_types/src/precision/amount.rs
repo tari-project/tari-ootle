@@ -91,6 +91,11 @@ impl<'b, C> minicbor::Decode<'b, C> for PrecisionAmount {
             },
             Type::String => {
                 let s = d.str()?;
+                if s.len() > PrecisionAmount::MAX_DECIMAL_STR_LEN {
+                    return Err(minicbor::decode::Error::message(
+                        "PrecisionAmount: decimal string exceeds maximum length",
+                    ));
+                }
                 s.parse::<PrecisionAmount>().map_err(|e| {
                     minicbor::decode::Error::message(format!("PrecisionAmount: invalid string '{}': {}", s, e))
                 })
@@ -98,7 +103,13 @@ impl<'b, C> minicbor::Decode<'b, C> for PrecisionAmount {
             Type::StringIndef => {
                 let mut s = String::new();
                 for chunk in d.str_iter()? {
-                    s.push_str(chunk?);
+                    let chunk = chunk?;
+                    if s.len().saturating_add(chunk.len()) > PrecisionAmount::MAX_DECIMAL_STR_LEN {
+                        return Err(minicbor::decode::Error::message(
+                            "PrecisionAmount: decimal string exceeds maximum length",
+                        ));
+                    }
+                    s.push_str(chunk);
                 }
                 s.parse::<PrecisionAmount>().map_err(|e| {
                     minicbor::decode::Error::message(format!("PrecisionAmount: invalid string '{}': {}", s, e))
@@ -145,6 +156,8 @@ impl PrecisionAmount {
     pub const BYTE_SIZE: usize = I192::BYTES as usize;
     /// The maximum value that an `Amount` can hold.
     pub const MAX: Self = Self(I192::MAX);
+    /// The longest decimal string the CBOR decoder parses: the 58 digits of `I192::MIN` plus `-`.
+    pub(crate) const MAX_DECIMAL_STR_LEN: usize = 59;
     /// The minimum value that an `Amount` can hold.
     pub const MIN: Self = Self(I192::MIN);
     /// The number of u64 digits used to represent a Amount i.e. 3

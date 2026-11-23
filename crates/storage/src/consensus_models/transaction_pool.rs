@@ -893,7 +893,9 @@ impl TransactionPoolRecord {
         // Only set remote_decision to ABORT, or COMMIT if it is not already ABORT
         let decision = self.remote_decision().map(|d| d.and(decision)).unwrap_or(decision);
         self.remote_decision = Some(decision);
-        if decision.is_abort() {
+        // Represents that no substates are locked/pledged when the overall decision is ABORT. A remote COMMIT on a
+        // locally aborted record must also abort any foreign evidence merged alongside it.
+        if self.current_decision().is_abort() {
             self.evidence.abort();
         }
         self
@@ -1479,6 +1481,44 @@ mod tests {
             let mut rec = record_with_weight_and_stage(1, TransactionPoolStage::LocalPrepared);
             rec.set_local_decision(Decision::Abort(AbortReason::ExecutionFailure));
             assert!(!rec.is_local_prepared_expired_at(Epoch(100)));
+        }
+    }
+
+    mod set_remote_decision {
+        use tari_engine_types::commit_result::AbortReason;
+        use tari_ootle_common_types::VersionedSubstateId;
+        use tari_template_lib_types::ComponentAddress;
+
+        use super::{proposal_weight::record_with_weight_and_stage, *};
+        use crate::consensus_models::{TransactionPoolStatusUpdate, VersionedSubstateIdLockIntent};
+
+        #[test]
+        fn a_remote_commit_on_a_locally_aborted_record_aborts_the_merged_evidence() {
+            let local = ShardGroup::new(0, 127);
+            let foreign = ShardGroup::new(128, 255);
+            let foreign_input = SubstateId::from(ComponentAddress::from_array([2; 32]));
+            let mut rec = record_with_weight_and_stage(1, TransactionPoolStage::LocalAccepted);
+            rec.evidence_mut()
+                .add_shard_group(local)
+                .insert_unpledged_input(ComponentAddress::from_array([1; 32]).into());
+            rec.set_local_decision(Decision::Abort(AbortReason::LockOutputsFailed));
+
+            let foreign_ev = rec.evidence_mut().add_shard_group(foreign);
+            foreign_ev.insert_from_lock_intent(VersionedSubstateIdLockIntent::write(
+                VersionedSubstateId::new(foreign_input.clone(), SubstateVersion::ZERO),
+                true,
+            ));
+            foreign_ev.insert_output(foreign_input, SubstateVersion::from(1));
+            rec.set_remote_decision(Decision::Commit);
+
+            assert_eq!(rec.current_decision(), Decision::Abort(AbortReason::LockOutputsFailed));
+            let foreign_ev = rec.evidence().get(&foreign).unwrap();
+            assert!(foreign_ev.inputs().values().all(Option::is_none), "{foreign_ev:?}");
+            assert!(foreign_ev.outputs().is_empty(), "{foreign_ev:?}");
+
+            let mut applied = rec.clone();
+            TransactionPoolStatusUpdate::new(rec.clone(), true).apply(&mut applied);
+            assert_eq!(applied.evidence(), rec.evidence());
         }
     }
 

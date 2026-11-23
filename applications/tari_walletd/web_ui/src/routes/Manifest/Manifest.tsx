@@ -23,6 +23,7 @@
 import { useAccountsList } from "@api/hooks/useAccounts";
 import { useListTemplatesAuthored } from "@api/hooks/useTemplatesAuthored";
 import { useSubmitManifest } from "@api/hooks/useTransactions";
+import ComponentRulesChangeWarning from "@components/ComponentRulesChangeWarning";
 import ComponentUpgradeWarning from "@components/ComponentUpgradeWarning";
 import PageHeading from "@components/PageHeading";
 import { DataTableCell, StyledPaper } from "@components/StyledComponents";
@@ -62,7 +63,12 @@ import Grid from "@mui/material/Grid";
 import TextField from "@mui/material/TextField";
 import type { ManifestTab } from "@store/manifestStore";
 import useManifestCodeStore from "@store/manifestStore";
-import type { ComponentUpgrade, KeyId, UpgradableComponent } from "@tari-project/ootle-ts-bindings";
+import type {
+  ComponentRulesChange,
+  ComponentUpgrade,
+  KeyId,
+  UpgradableComponent,
+} from "@tari-project/ootle-ts-bindings";
 import { rejectReasonToString, substateIdToString } from "@tari-project/ootle-ts-bindings";
 import { Highlight, themes } from "prism-react-renderer";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -130,6 +136,7 @@ function ManifestEditor() {
   const [finalizeError, setFinalizeError] = useState<string | null>(null);
   const [upgradableComponents, setUpgradableComponents] = useState<UpgradableComponent[]>([]);
   const [componentUpgrades, setComponentUpgrades] = useState<ComponentUpgrade[]>([]);
+  const [componentRulesChanges, setComponentRulesChanges] = useState<ComponentRulesChange[]>([]);
   const theme = useTheme();
 
   const { mutateAsync: submitManifest, isPending: isSubmittingManifest, error } = useSubmitManifest();
@@ -143,6 +150,7 @@ function ManifestEditor() {
     dryRunGeneration.current += 1;
     setUpgradableComponents([]);
     setComponentUpgrades([]);
+    setComponentRulesChanges([]);
   }, [manifest.code, manifest.activeTabId]);
 
   const handleSave = useCallback(() => {
@@ -201,6 +209,7 @@ function ManifestEditor() {
     const generation = ++dryRunGeneration.current;
     setUpgradableComponents([]);
     setComponentUpgrades([]);
+    setComponentRulesChanges([]);
     console.log("Manifest code submitted:", manifest.code);
     console.log("Fee submitted:", fee);
     submitManifest({
@@ -222,6 +231,7 @@ function ManifestEditor() {
         }
         setUpgradableComponents(response.upgradable_components ?? []);
         setComponentUpgrades(response.component_upgrades ?? []);
+        setComponentRulesChanges(response.component_rules_changes ?? []);
         const finalize = response.result?.finalize;
         if (!finalize && isDryRun) {
           throw new Error("No result returned for dry run");
@@ -344,6 +354,7 @@ function ManifestEditor() {
             </Box>
           )}
           <ComponentUpgradeWarning upgrades={componentUpgrades} />
+          <ComponentRulesChangeWarning changes={componentRulesChanges} />
           {upgradableComponents.length > 0 && (
             <Alert severity="warning" sx={{ mt: 2 }}>
               This transaction calls components whose code can be changed after this estimate, so what runs on

@@ -687,6 +687,39 @@ impl From<AccessRule> for UpdateRule {
 pub const LOCKED: UpdateRule = UpdateRule::Locked;
 pub const OWNER: UpdateRule = UpdateRule::Owner;
 
+/// Who may replace a component's method access rules and its owner rule. Fixed when the component is created.
+///
+/// The setting governs every change, whether it comes from a `SetComponentAccessRules`/`SetComponentOwnerRule`
+/// transaction instruction or from the component's own code through `ComponentManager`.
+#[derive(Debug, Clone, Default, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub enum RulesUpdater {
+    /// Nobody may change the rules, the component's own code included.
+    #[n(0)]
+    #[default]
+    Locked,
+    /// Only the component's own code may change the rules, and only while the caller satisfies the owner rule. A
+    /// transaction instruction cannot change them. Use this only when the template must run its own logic around a
+    /// change; otherwise prefer `Owner` or `AccessRule`. Components created before this setting existed behave this
+    /// way.
+    #[n(1)]
+    TemplateManaged,
+    /// Whoever satisfies the component's current owner rule, by instruction or from the component's own code.
+    #[n(2)]
+    Owner,
+    /// Whoever satisfies the rule, by instruction or from the component's own code, independent of the owner rule.
+    #[n(3)]
+    AccessRule(#[n(0)] AccessRule),
+}
+
+impl From<AccessRule> for RulesUpdater {
+    fn from(rule: AccessRule) -> Self {
+        Self::AccessRule(rule)
+    }
+}
+
 /// Information needed to specify access rules to a resource
 #[derive(Debug, Clone, Encode, Decode, CborLen)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -1133,15 +1166,15 @@ macro_rules! __rule_requirement {
 macro_rules! __build_vec {
     () => (Vec::new());
 
-    (@ {$item_fn:ident} $a:ident($b:expr), $($tail:tt)*) => {{
+    (@ {$item_fn:ident} $a:ident($($b:tt)*), $($tail:tt)*) => {{
         let mut items = Vec::with_capacity(1 + $crate::__expr_counter!($($tail)*));
-        $crate::__build_vec_inner!(@ { items, $item_fn } $a($b), $($tail)*);
+        $crate::__build_vec_inner!(@ { items, $item_fn } $a($($b)*), $($tail)*);
         items
     }};
 
-    (@ {$item_fn:ident} $a:ident($b:expr) $(,)?) => {{
+    (@ {$item_fn:ident} $a:ident($($b:tt)*) $(,)?) => {{
         let mut items = Vec::new();
-        $crate::__build_vec_inner!(@ { items, $item_fn } $a($b),);
+        $crate::__build_vec_inner!(@ { items, $item_fn } $a($($b)*),);
         items
     }};
 
@@ -1162,12 +1195,12 @@ macro_rules! __build_vec {
 macro_rules! __build_vec_inner {
     // Terminator: a no-address item recurses with an empty tail once it is the last in the list.
     (@ { $this:ident, $item_fn:ident }) => {};
-    (@ { $this:ident, $item_fn:ident } $a:ident($e:expr), $($tail:tt)*) => {
-        $crate::access_rules::__push(&mut $this, $crate::$item_fn!($a($e)));
+    (@ { $this:ident, $item_fn:ident } $a:ident($($e:tt)*), $($tail:tt)*) => {
+        $crate::access_rules::__push(&mut $this, $crate::$item_fn!($a($($e)*)));
         $crate::__build_vec_inner!(@ {$this, $item_fn } $($tail)*);
     };
-    (@ { $this:ident, $item_fn:ident } $a:ident($e:expr) $(,)*) => {
-        $crate::access_rules::__push(&mut $this, $crate::$item_fn!($a($e)));
+    (@ { $this:ident, $item_fn:ident } $a:ident($($e:tt)*) $(,)*) => {
+        $crate::access_rules::__push(&mut $this, $crate::$item_fn!($a($($e)*)));
     };
     (@ { $this:ident, $item_fn:ident } $a:ident, $($tail:tt)*) => {
         $crate::access_rules::__push(&mut $this, $crate::$item_fn!($a));
@@ -1275,6 +1308,30 @@ mod tests {
                     RuleRequirement::Resource(resource_address),
                 ])
             )))
+        );
+
+        // nested combinators inside any_of / all_of
+        let nested_rule = rule!(any_of(
+            all_of(component(component_address), resource(resource_address)),
+            m_of_n(1, component(component_address), resource(resource_address))
+        ));
+        assert_eq!(
+            nested_rule,
+            AccessRule::Restricted(RestrictedAccessRule::AnyOf(Box::new([
+                RestrictedAccessRule::AllOf(Box::new([
+                    RestrictedAccessRule::Require(RequireRule::Require(RuleRequirement::ScopedToComponent(
+                        component_address
+                    ))),
+                    RestrictedAccessRule::Require(RequireRule::Require(RuleRequirement::Resource(resource_address))),
+                ])),
+                RestrictedAccessRule::Require(RequireRule::MOfN(
+                    1,
+                    Box::new([
+                        RuleRequirement::ScopedToComponent(component_address),
+                        RuleRequirement::Resource(resource_address),
+                    ])
+                )),
+            ])))
         );
     }
 

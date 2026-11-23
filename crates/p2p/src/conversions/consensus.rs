@@ -25,12 +25,14 @@ use std::convert::{TryFrom, TryInto};
 use anyhow::{Context, anyhow};
 use tari_common_types::types::CompressedPublicKey;
 use tari_consensus::messages::{
+    CatchUpPageMessage,
     CatchUpRequestMessage,
     EncodedTransaction,
     ForeignProposalMessage,
     ForeignProposalNotificationMessage,
     ForeignProposalRequestMessage,
     HotstuffMessage,
+    MAX_CATCH_UP_PAGE_BLOCKS,
     MAX_REQUESTED_TRANSACTIONS,
     MissingTransactionsRequest,
     MissingTransactionsResponse,
@@ -128,6 +130,9 @@ impl From<&HotstuffMessage> for proto::consensus::HotStuffMessage {
             HotstuffMessage::CatchUpSyncResponse(msg) => {
                 proto::consensus::hot_stuff_message::Message::CatchUpSyncResponse((&**msg).into())
             },
+            HotstuffMessage::CatchUpPage(msg) => {
+                proto::consensus::hot_stuff_message::Message::CatchUpPage((&**msg).into())
+            },
         };
         Self { message: Some(message) }
     }
@@ -164,6 +169,9 @@ impl TryFrom<proto::consensus::HotStuffMessage> for HotstuffMessage {
             },
             proto::consensus::hot_stuff_message::Message::CatchUpSyncResponse(msg) => {
                 HotstuffMessage::new_catch_up_sync_response(msg.try_into()?)
+            },
+            proto::consensus::hot_stuff_message::Message::CatchUpPage(msg) => {
+                HotstuffMessage::CatchUpPage(Box::new(msg.try_into()?))
             },
         })
     }
@@ -1304,7 +1312,9 @@ impl From<&CatchUpRequestMessage> for proto::consensus::SyncRequest {
     fn from(value: &CatchUpRequestMessage) -> Self {
         Self {
             epoch: value.epoch.as_u64(),
-            block_height: value.block_height.as_u64(),
+            from_height: value.from_height.as_u64(),
+            request_id: value.request_id,
+            skip: value.skip,
         }
     }
 }
@@ -1314,8 +1324,70 @@ impl TryFrom<proto::consensus::SyncRequest> for CatchUpRequestMessage {
 
     fn try_from(value: proto::consensus::SyncRequest) -> Result<Self, Self::Error> {
         Ok(Self {
+            request_id: value.request_id,
             epoch: Epoch(value.epoch),
-            block_height: NodeHeight(value.block_height),
+            from_height: NodeHeight(value.from_height),
+            skip: value.skip,
+        })
+    }
+}
+
+// -------------------------------- CatchUpPage -------------------------------- //
+
+impl From<&CatchUpPageMessage> for proto::consensus::CatchUpPage {
+    fn from(value: &CatchUpPageMessage) -> Self {
+        Self {
+            request_id: value.request_id,
+            epoch: value.epoch.as_u64(),
+            blocks: value.blocks.iter().map(Into::into).collect(),
+            leaf: value.leaf.as_ref().map(Into::into),
+            transactions: value
+                .transactions
+                .iter()
+                .map(|tx| proto::transaction::Transaction {
+                    bor_encoded: tx.as_bytes().to_vec(),
+                })
+                .collect(),
+            next_height: value.next_height.map(|height| height.as_u64()),
+            next_skip: value.next_skip,
+        }
+    }
+}
+
+impl TryFrom<proto::consensus::CatchUpPage> for CatchUpPageMessage {
+    type Error = anyhow::Error;
+
+    fn try_from(value: proto::consensus::CatchUpPage) -> Result<Self, Self::Error> {
+        if value.blocks.len() > MAX_CATCH_UP_PAGE_BLOCKS {
+            return Err(anyhow!(
+                "CatchUpPage carries {} blocks, the maximum is {}",
+                value.blocks.len(),
+                MAX_CATCH_UP_PAGE_BLOCKS
+            ));
+        }
+        if value.transactions.len() > MAX_REQUESTED_TRANSACTIONS {
+            return Err(anyhow!(
+                "CatchUpPage carries {} transactions, the maximum is {}",
+                value.transactions.len(),
+                MAX_REQUESTED_TRANSACTIONS
+            ));
+        }
+        Ok(Self {
+            request_id: value.request_id,
+            epoch: Epoch(value.epoch),
+            blocks: value
+                .blocks
+                .into_iter()
+                .map(TryInto::try_into)
+                .collect::<Result<_, _>>()?,
+            leaf: value.leaf.map(TryInto::try_into).transpose()?,
+            transactions: value
+                .transactions
+                .into_iter()
+                .map(|tx| EncodedTransaction::from_bytes(tx.bor_encoded))
+                .collect(),
+            next_height: value.next_height.map(NodeHeight),
+            next_skip: value.next_skip,
         })
     }
 }

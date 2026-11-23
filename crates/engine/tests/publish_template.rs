@@ -207,11 +207,46 @@ fn a_module_refused_before_the_compile_is_not_charged_for_it() {
 
 /// A module of `count` empty functions: the most functions a binary of its size can hold.
 fn module_of_empty_functions(count: usize) -> Vec<u8> {
-    let mut wat = String::from("(module (type (func))");
-    wat.extend(iter::repeat_n("(func (type 0))", count));
-    wat.push(')');
-    wat::parse_str(wat).unwrap()
+    wat::parse_str(format!("(module {})", empty_functions(count))).unwrap()
 }
+
+fn empty_functions(count: usize) -> String {
+    let mut wat = String::from("(type (func))");
+    wat.extend(iter::repeat_n("(func (type 0))", count));
+    wat
+}
+
+/// A template around `parts` that passes every template consensus rule and is refused by the
+/// compile, which refuses a passive data segment. By then the publish has been charged for the
+/// compile, so a test can read what `parts` was billed.
+fn refused_by_the_compile(parts: &str) -> Vec<u8> {
+    use tari_template_abi::{TemplateDef, TemplateDefV2};
+
+    let def = TemplateDef::V2(TemplateDefV2 {
+        template_name: "Buggy".to_string(),
+        abi_version: 0,
+        functions: vec![],
+    })
+    .encode_for_wasm_embedding()
+    .unwrap();
+    let escaped: String = def.iter().map(|b| format!("\\{b:02x}")).collect();
+    wat::parse_str(format!(
+        r#"
+        (module
+          {parts}
+          (memory (export "memory") 1)
+          (func (export "tari_alloc") (param i32) (result i32) (i32.const 1024))
+          (func (export "tari_free") (param i32))
+          (func (export "Buggy_main") (param i32 i32) (result i32) (i32.const 0))
+          (data "passive")
+          (@custom "tari_tdef" "{escaped}")
+        )
+        "#
+    ))
+    .unwrap()
+}
+
+const REFUSED_BY_THE_COMPILE: &str = "passive data segments are not allowed";
 
 /// Cranelift's cost per function is far above what an empty function's four bytes are priced at, so
 /// a module dense in functions is billed by its function count rather than its size.
@@ -220,14 +255,13 @@ fn a_module_dense_in_functions_is_charged_for_each_function() {
     use tari_engine_types::limits::{CompileCounts, template_compile_points};
 
     let functions = 1024;
-    let code = module_of_empty_functions(functions);
+    let code = refused_by_the_compile(&empty_functions(functions));
 
     let mut test = TemplateTest::new(CRATE_PATH, &[] as &[&str]);
     let (account, owner_proof, key, _) = test.create_funded_account_with_keypair();
     test.enable_fees();
 
-    // Refused after the compile for lacking a template definition, by which point the compile has
-    // been charged.
+    // Refused by the compile, by which point the compile has been charged.
     let result = test
         .try_execute(
             Transaction::builder_localnet(Epoch(1))
@@ -241,7 +275,7 @@ fn a_module_dense_in_functions_is_charged_for_each_function() {
         .finalize
         .fee_accept_transaction_reject()
         .expect("the publish should fail after the fee is paid");
-    assert_reject_reason(reason, TEMPLATE_DEF_CUSTOM_SECTION);
+    assert_reject_reason(reason, REFUSED_BY_THE_COMPILE);
 
     // Each function's closing `end` is followed by its one metering check.
     let compile = template_compile_points(code.len() as u64, &CompileCounts {
@@ -306,11 +340,12 @@ fn a_module_with_too_many_functions_is_refused_before_the_compile() {
 /// A module of `functions` functions each declaring `locals` locals, in a single `(count, type)` run
 /// of a few bytes. Valid while `locals` is within wasmparser's per-function limit of 50,000.
 fn module_of_functions_with_locals(functions: usize, locals: usize) -> Vec<u8> {
+    wat::parse_str(format!("(module {})", functions_with_locals(functions, locals))).unwrap()
+}
+
+fn functions_with_locals(functions: usize, locals: usize) -> String {
     let func = format!("(func (local{}))", " i64".repeat(locals));
-    let mut wat = String::from("(module");
-    wat.extend(iter::repeat_n(func.as_str(), functions));
-    wat.push(')');
-    wat::parse_str(wat).unwrap()
+    iter::repeat_n(func.as_str(), functions).collect()
 }
 
 /// Cranelift declares every parameter and local as a variable of its own, which the few bytes of a
@@ -321,14 +356,13 @@ fn a_module_dense_in_locals_is_charged_for_each_local() {
 
     let functions = 8;
     let locals = functions * 25_000;
-    let code = module_of_functions_with_locals(functions, locals / functions);
+    let code = refused_by_the_compile(&functions_with_locals(functions, locals / functions));
 
     let mut test = TemplateTest::new(CRATE_PATH, &[] as &[&str]);
     let (account, owner_proof, key, _) = test.create_funded_account_with_keypair();
     test.enable_fees();
 
-    // Refused after the compile for lacking a template definition, by which point the compile has
-    // been charged.
+    // Refused by the compile, by which point the compile has been charged.
     let result = test
         .try_execute(
             Transaction::builder_localnet(Epoch(1))
@@ -342,7 +376,7 @@ fn a_module_dense_in_locals_is_charged_for_each_local() {
         .finalize
         .fee_accept_transaction_reject()
         .expect("the publish should fail after the fee is paid");
-    assert_reject_reason(reason, TEMPLATE_DEF_CUSTOM_SECTION);
+    assert_reject_reason(reason, REFUSED_BY_THE_COMPILE);
 
     let compile = template_compile_points(code.len() as u64, &CompileCounts {
         functions: functions as u64,
@@ -407,11 +441,12 @@ fn a_module_with_too_many_locals_is_refused_before_the_compile() {
 
 /// A module of `functions` functions whose body is `body`.
 fn module_of_functions(functions: usize, body: &str) -> Vec<u8> {
+    wat::parse_str(format!("(module {})", functions_of(functions, body))).unwrap()
+}
+
+fn functions_of(functions: usize, body: &str) -> String {
     let func = format!("(func {body})");
-    let mut wat = String::from("(module");
-    wat.extend(iter::repeat_n(func.as_str(), functions));
-    wat.push(')');
-    wat::parse_str(wat).unwrap()
+    iter::repeat_n(func.as_str(), functions).collect()
 }
 
 /// Publishes `code` with fees on, expecting it refused with `error` after the fee is paid and
@@ -548,7 +583,7 @@ fn a_large_function_is_charged_for_compiling_on_one_thread() {
     use tari_engine_types::limits::{CompileCounts, template_compile_points};
 
     let checks = 4_000;
-    let code = module_of_functions(1, &"(return)".repeat(checks - 1));
+    let code = refused_by_the_compile(&functions_of(1, &"(return)".repeat(checks - 1)));
 
     let mut test = TemplateTest::new(CRATE_PATH, &[] as &[&str]);
     let (account, owner_proof, key, _) = test.create_funded_account_with_keypair();
@@ -567,7 +602,7 @@ fn a_large_function_is_charged_for_compiling_on_one_thread() {
         .finalize
         .fee_accept_transaction_reject()
         .expect("the publish should fail after the fee is paid");
-    assert_reject_reason(reason, TEMPLATE_DEF_CUSTOM_SECTION);
+    assert_reject_reason(reason, REFUSED_BY_THE_COMPILE);
 
     let summed = CompileCounts {
         functions: 1,
@@ -600,14 +635,13 @@ fn a_module_dense_in_metering_checks_is_charged_for_each_check() {
 
     let functions = 16;
     let checks_per_function = 2_000;
-    let code = module_of_functions(functions, &"(return)".repeat(checks_per_function - 1));
+    let code = refused_by_the_compile(&functions_of(functions, &"(return)".repeat(checks_per_function - 1)));
 
     let mut test = TemplateTest::new(CRATE_PATH, &[] as &[&str]);
     let (account, owner_proof, key, _) = test.create_funded_account_with_keypair();
     test.enable_fees();
 
-    // Refused after the compile for lacking a template definition, by which point the compile has
-    // been charged.
+    // Refused by the compile, by which point the compile has been charged.
     let result = test
         .try_execute(
             Transaction::builder_localnet(Epoch(1))
@@ -621,7 +655,7 @@ fn a_module_dense_in_metering_checks_is_charged_for_each_check() {
         .finalize
         .fee_accept_transaction_reject()
         .expect("the publish should fail after the fee is paid");
-    assert_reject_reason(reason, TEMPLATE_DEF_CUSTOM_SECTION);
+    assert_reject_reason(reason, REFUSED_BY_THE_COMPILE);
 
     let compile = template_compile_points(code.len() as u64, &CompileCounts {
         functions: functions as u64,
@@ -640,5 +674,186 @@ fn a_module_dense_in_metering_checks_is_charged_for_each_check() {
         "a publish of {} metering checks charged {} native points, under the {compile} its compile costs",
         functions * checks_per_function,
         result.native_execution_points
+    );
+}
+
+#[test]
+fn publish_template_rejects_duplicate_function_names_and_colliding_function_idents() {
+    use tari_engine::wasm::WasmValidationError;
+    use tari_template_abi::{FunctionDef, FunctionKind, Receiver, TemplateDef, TemplateDefV2, Type, func_hasher};
+
+    let colliding_ident = func_hasher::hash_function_name("admin_90260");
+    assert_eq!(colliding_ident, func_hasher::hash_function_name("public_13865"));
+
+    let module_with_functions = |functions: Vec<FunctionDef>| {
+        let def_bytes = TemplateDef::V2(TemplateDefV2 {
+            template_name: "Buggy".to_string(),
+            abi_version: 0,
+            functions,
+        })
+        .encode_for_wasm_embedding()
+        .unwrap();
+        let escaped: String = def_bytes.iter().map(|b| format!("\\{b:02x}")).collect();
+        wat::parse_str(format!(
+            r#"
+            (module
+              (memory (export "memory") 1)
+              (func (export "tari_alloc") (param i32) (result i32) (i32.const 1024))
+              (func (export "tari_free") (param i32))
+              (func (export "Buggy_main") (param i32 i32) (result i32) (i32.const 0))
+              (@custom "tari_tdef" "{escaped}")
+            )
+            "#
+        ))
+        .unwrap()
+    };
+
+    let duplicate_code = module_with_functions(vec![
+        FunctionDef {
+            name: "transfer".to_string(),
+            kind: FunctionKind::Method(Receiver::RefMut),
+            arguments: vec![],
+            output: Type::Unit,
+        },
+        FunctionDef {
+            name: "transfer".to_string(),
+            kind: FunctionKind::Function,
+            arguments: vec![],
+            output: Type::Unit,
+        },
+    ]);
+    let colliding_code = module_with_functions(vec![
+        FunctionDef {
+            name: "admin_90260".to_string(),
+            kind: FunctionKind::Method(Receiver::RefMut),
+            arguments: vec![],
+            output: Type::Unit,
+        },
+        FunctionDef {
+            name: "public_13865".to_string(),
+            kind: FunctionKind::Method(Receiver::Ref),
+            arguments: vec![],
+            output: Type::Unit,
+        },
+    ]);
+
+    let mut test = TemplateTest::new(CRATE_PATH, &[] as &[&str]);
+    let (account, owner_proof, key, _) = test.create_funded_account_with_keypair();
+
+    for (code, expected) in [
+        (duplicate_code, WasmValidationError::DuplicateFunctionName {
+            name: "transfer".to_string(),
+        }),
+        (colliding_code, WasmValidationError::FunctionIdentCollision {
+            first: "admin_90260".to_string(),
+            second: "public_13865".to_string(),
+            ident: colliding_ident,
+        }),
+    ] {
+        let reason = test.execute_expect_failure(
+            Transaction::builder_localnet(Epoch(1))
+                .pay_fee_from_component(account, 200_000u64)
+                .publish_template(code)
+                .build_and_seal(&key),
+            vec![owner_proof.clone()],
+        );
+        assert_reject_reason_with_code(reason, expected, ExecutionFailureCode::TemplateError);
+    }
+}
+
+/// The template consensus rules on a module's `TemplateDef` and exports read the module bytes, so a
+/// module refused by one of them pays nothing for cranelift.
+#[test]
+fn a_module_refused_by_its_definition_or_exports_is_not_charged_for_the_compile() {
+    use tari_engine::wasm::{WasmExecutionError, WasmValidationError};
+    use tari_template_abi::{FunctionDef, FunctionKind, TemplateDef, TemplateDefV2, Type};
+
+    let module = |functions: Vec<FunctionDef>, extra_export: &str| {
+        let def_bytes = TemplateDef::V2(TemplateDefV2 {
+            template_name: "Buggy".to_string(),
+            abi_version: 0,
+            functions,
+        })
+        .encode_for_wasm_embedding()
+        .unwrap();
+        let escaped: String = def_bytes.iter().map(|b| format!("\\{b:02x}")).collect();
+        wat::parse_str(format!(
+            r#"
+            (module
+              (memory (export "memory") 1)
+              (func (export "tari_alloc") (param i32) (result i32) (i32.const 1024))
+              (func (export "tari_free") (param i32))
+              (func (export "Buggy_main") (param i32 i32) (result i32) (i32.const 0))
+              {extra_export}
+              (@custom "tari_tdef" "{escaped}")
+            )
+            "#
+        ))
+        .unwrap()
+    };
+    let function = |name: &str| FunctionDef {
+        name: name.to_string(),
+        kind: FunctionKind::Function,
+        arguments: vec![],
+        output: Type::Unit,
+    };
+
+    assert_refused_before_the_compile(
+        module(vec![function("transfer"), function("transfer")], ""),
+        WasmValidationError::DuplicateFunctionName {
+            name: "transfer".to_string(),
+        }
+        .to_string(),
+    );
+    assert_refused_before_the_compile(
+        module(vec![function("transfer")], r#"(func (export "unexpected"))"#),
+        WasmExecutionError::UnexpectedAbiFunction {
+            name: "unexpected".to_string(),
+        }
+        .to_string(),
+    );
+}
+
+/// The compiled module keeps only the last of several same-named custom sections, so a load decodes
+/// one `tari_tdef` whatever the bytes carry. Publishing reads every copy from the bytes and refuses
+/// a second, before the compile is charged for.
+#[test]
+fn a_module_with_two_template_definitions_is_refused_before_the_compile() {
+    use tari_template_abi::{FunctionDef, FunctionKind, TemplateDef, TemplateDefV2, Type};
+
+    let definition = |name: &str| {
+        let def = TemplateDef::V2(TemplateDefV2 {
+            template_name: "Buggy".to_string(),
+            abi_version: 0,
+            functions: vec![FunctionDef {
+                name: name.to_string(),
+                kind: FunctionKind::Function,
+                arguments: vec![],
+                output: Type::Unit,
+            }],
+        })
+        .encode_for_wasm_embedding()
+        .unwrap();
+        def.iter().map(|b| format!("\\{b:02x}")).collect::<String>()
+    };
+    let code = wat::parse_str(format!(
+        r#"
+        (module
+          (memory (export "memory") 1)
+          (func (export "tari_alloc") (param i32) (result i32) (i32.const 1024))
+          (func (export "tari_free") (param i32))
+          (func (export "Buggy_main") (param i32 i32) (result i32) (i32.const 0))
+          (@custom "tari_tdef" "{}")
+          (@custom "tari_tdef" "{}")
+        )
+        "#,
+        definition("transfer"),
+        definition("withdraw"),
+    ))
+    .unwrap();
+
+    assert_refused_before_the_compile(
+        code,
+        format!("module contains more than one `{TEMPLATE_DEF_CUSTOM_SECTION}` custom section"),
     );
 }

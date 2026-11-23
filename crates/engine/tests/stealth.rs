@@ -121,7 +121,7 @@ fn basic_transfer() {
         Transaction::builder_localnet(Epoch(1))
             .stealth_transfer(faucet_resx, transfer.statement)
             .finish()
-            .add_signer(&test.to_public_key_bytes(), &mint.output_masks[0])
+            .authorize(&test.to_public_key_bytes(), [&mint.output_masks[0]])
             .seal(test.secret_key()),
         vec![],
     );
@@ -179,8 +179,10 @@ fn fee_intent_rejects_a_second_stealth_transfer() {
                     .stealth_transfer(faucet_resx, second.statement)
             })
             .finish()
-            .add_signer(&test.to_public_key_bytes(), &mint.output_masks[0])
-            .add_signer(&test.to_public_key_bytes(), &mint.output_masks[1])
+            .authorize(&test.to_public_key_bytes(), [
+                &mint.output_masks[0],
+                &mint.output_masks[1],
+            ])
             .seal(test.secret_key()),
         vec![],
     );
@@ -209,8 +211,10 @@ fn fee_intent_counts_a_stealth_transfer_performed_from_wasm() {
                 )
             })
             .finish()
-            .add_signer(&test.to_public_key_bytes(), &mint.output_masks[0])
-            .add_signer(&test.to_public_key_bytes(), &mint.output_masks[1])
+            .authorize(&test.to_public_key_bytes(), [
+                &mint.output_masks[0],
+                &mint.output_masks[1],
+            ])
             .seal(test.secret_key()),
         vec![],
     );
@@ -231,8 +235,10 @@ fn main_intent_may_transfer_after_the_fee_intent_has() {
             .with_fee_instructions_builder(|builder| builder.stealth_transfer(faucet_resx, first.statement))
             .stealth_transfer(faucet_resx, second.statement)
             .finish()
-            .add_signer(&test.to_public_key_bytes(), &mint.output_masks[0])
-            .add_signer(&test.to_public_key_bytes(), &mint.output_masks[1])
+            .authorize(&test.to_public_key_bytes(), [
+                &mint.output_masks[0],
+                &mint.output_masks[1],
+            ])
             .seal(test.secret_key()),
         vec![],
     );
@@ -263,7 +269,7 @@ fn programmatic_transfer() {
         Transaction::builder_localnet(Epoch(1))
             .call_method(faucet, "programmatic_transfer", args![transfer.statement])
             .finish()
-            .add_signer(&test.to_public_key_bytes(), &mint.output_masks[0])
+            .authorize(&test.to_public_key_bytes(), [&mint.output_masks[0]])
             .seal(test.secret_key()),
         vec![],
     );
@@ -302,7 +308,7 @@ fn transfer_with_revealed_outputs() {
             .put_last_instruction_output_on_workspace("bucket")
             .call_method(account, "deposit", args![Workspace("bucket")])
             .finish()
-            .add_signer(&test.to_public_key_bytes(), &mint.output_masks[1])
+            .authorize(&test.to_public_key_bytes(), [&mint.output_masks[1]])
             .seal(test.secret_key()),
         vec![],
     );
@@ -352,7 +358,7 @@ fn a_lifted_statement_cannot_reveal_to_another_submitter() {
             .put_last_instruction_output_on_workspace("bucket")
             .call_method(mallory, "deposit", args![Workspace("bucket")])
             .finish()
-            .add_signer(&test.to_public_key_bytes(), &mint.output_masks[1])
+            .authorize(&test.to_public_key_bytes(), [&mint.output_masks[1]])
             .seal(&mallory_sk),
         vec![],
     );
@@ -412,8 +418,7 @@ fn transfer_revealed_between_accounts() {
             .call_method(bob, "deposit", args![Workspace("transfer_to_bob")])
             .finish()
             // In tests, we set the spend condition to require the mask as a signer
-            .add_signer(&test.to_public_key_bytes(), &mint.output_masks[1])
-            .add_signer(&test.to_public_key_bytes(), &mint.output_masks[2])
+            .authorize(&test.to_public_key_bytes(), [&mint.output_masks[1], &mint.output_masks[2]])
             .seal(&alice_sk),
         vec![],
     );
@@ -490,9 +495,7 @@ fn transfer_rejects_a_revealed_funds_bucket_with_locked_funds() {
             .drop_all_proofs_in_workspace()
             .finish()
             // In tests, we set the spend condition to require the mask as a signer
-            .add_signer(&test.to_public_key_bytes(), &mint.output_masks[0])
-            .add_signer(&test.to_public_key_bytes(), &mint.output_masks[1])
-            .add_signer(&test.to_public_key_bytes(), &mint.output_masks[2])
+            .authorize(&test.to_public_key_bytes(), [&mint.output_masks[0], &mint.output_masks[1], &mint.output_masks[2]])
             .seal(&alice_sk),
         vec![],
     );
@@ -524,7 +527,7 @@ fn transfer_invalid_balance_in_statement() {
             .put_last_instruction_output_on_workspace("bucket")
             .call_method(alice, "deposit", args![Workspace("bucket")])
             .finish()
-            .add_signer(&test.to_public_key_bytes(), &mint.output_masks[0])
+            .authorize(&test.to_public_key_bytes(), [&mint.output_masks[0]])
             .seal(test.secret_key()),
         vec![],
     );
@@ -597,7 +600,7 @@ fn transfer_invalid_range_proof_in_statement() {
             .put_last_instruction_output_on_workspace("bucket")
             .call_method(alice, "deposit", args![Workspace("bucket")])
             .finish()
-            .add_signer(&test.to_public_key_bytes(), &mint.output_masks[0])
+            .authorize(&test.to_public_key_bytes(), [&mint.output_masks[0]])
             .seal(test.secret_key()),
         vec![],
     );
@@ -641,7 +644,7 @@ fn many_outputs_in_one_transfer() {
         Transaction::builder_localnet(Epoch(1))
             .stealth_transfer(faucet_resx, transfer_from_faucet.statement)
             .finish()
-            .add_signer(&test.to_public_key_bytes(), &mint.output_masks[0])
+            .authorize(&test.to_public_key_bytes(), [&mint.output_masks[0]])
             .seal(test.secret_key()),
         vec![],
     );
@@ -695,7 +698,7 @@ fn mint_with_view_key() {
         Transaction::builder_localnet(Epoch(1))
             .stealth_transfer(faucet_resx, withdraw_proof.statement)
             .finish()
-            .add_signer(&test.to_public_key_bytes(), &mint.output_masks[0])
+            .authorize(&test.to_public_key_bytes(), [&mint.output_masks[0]])
             .seal(test.secret_key()),
         vec![],
     );
@@ -765,8 +768,10 @@ fn freeze_then_attempt_spend() {
         Transaction::builder_localnet(Epoch(1))
             .stealth_transfer(faucet_resx, transfer.statement.clone())
             .finish()
-            .add_signer(&test.to_public_key_bytes(), &mint.output_masks[0])
-            .add_signer(&test.to_public_key_bytes(), &mint.output_masks[1])
+            .authorize(&test.to_public_key_bytes(), [
+                &mint.output_masks[0],
+                &mint.output_masks[1],
+            ])
             .seal(test.secret_key()),
         vec![],
     );
@@ -785,8 +790,10 @@ fn freeze_then_attempt_spend() {
         Transaction::builder_localnet(Epoch(1))
             .stealth_transfer(faucet_resx, transfer.statement)
             .finish()
-            .add_signer(&test.to_public_key_bytes(), &mint.output_masks[0])
-            .add_signer(&test.to_public_key_bytes(), &mint.output_masks[1])
+            .authorize(&test.to_public_key_bytes(), [
+                &mint.output_masks[0],
+                &mint.output_masks[1],
+            ])
             .seal(test.secret_key()),
         vec![],
     );
@@ -841,8 +848,10 @@ fn burn_then_attempt_spend() {
         Transaction::builder_localnet(Epoch(1))
             .call_method(faucet, "burn_utxos", args![utxos_and_proofs.clone()])
             .finish()
-            .add_signer(&test.to_public_key_bytes(), &mint.output_masks[0])
-            .add_signer(&test.to_public_key_bytes(), &mint.output_masks[1])
+            .authorize(&test.to_public_key_bytes(), [
+                &mint.output_masks[0],
+                &mint.output_masks[1],
+            ])
             .seal(test.secret_key()),
         // A mask-knowledge burn needs each UTXO's spend-key badge alongside the owner badge the burn rule requires.
         mint.output_masks
@@ -1092,8 +1101,7 @@ fn transfer_restricted_by_access_rules_n_of_m() {
         Transaction::builder_localnet(Epoch(1))
             .stealth_transfer(faucet_resx, transfer.statement.clone())
             .finish()
-            .add_signer(&test_pk, &sk2)
-            .add_signer(&test_pk, &sk3)
+            .authorize(&test_pk, [&sk2, &sk3])
             .seal(test.secret_key()),
         vec![],
     );
@@ -1104,9 +1112,7 @@ fn transfer_restricted_by_access_rules_n_of_m() {
         Transaction::builder_localnet(Epoch(1))
             .stealth_transfer(faucet_resx, transfer.statement)
             .finish()
-            .add_signer(&test_pk, &sk2)
-            .add_signer(&test_pk, &sk3)
-            .add_signer(&test_pk, &sk4)
+            .authorize(&test_pk, [&sk2, &sk3, &sk4])
             .seal(test.secret_key()),
         vec![],
     );
@@ -1236,7 +1242,7 @@ fn duplicate_inputs_in_one_statement_are_rejected() {
         test.transaction()
             .stealth_transfer(faucet_resx, statement)
             .finish()
-            .add_signer(&test.to_public_key_bytes(), &mint.output_masks[0])
+            .authorize(&test.to_public_key_bytes(), [&mint.output_masks[0]])
             .seal(test.secret_key()),
         vec![],
     );
@@ -1262,7 +1268,7 @@ fn two_statements_may_not_spend_the_same_utxo() {
             .stealth_transfer(faucet_resx, first.statement)
             .stealth_transfer(faucet_resx, second.statement)
             .finish()
-            .add_signer(&test.to_public_key_bytes(), &mint.output_masks[0])
+            .authorize(&test.to_public_key_bytes(), [&mint.output_masks[0]])
             .seal(test.secret_key()),
         vec![],
     );
@@ -1327,7 +1333,7 @@ fn stealth_transfer_instruction_invokes_the_auth_hook() {
         test.transaction()
             .stealth_transfer(faucet_resx, transfer.statement)
             .finish()
-            .add_signer(&test.to_public_key_bytes(), &mint.output_masks[0])
+            .authorize(&test.to_public_key_bytes(), [&mint.output_masks[0]])
             .seal(test.secret_key()),
         vec![],
     );
@@ -1372,7 +1378,7 @@ fn a_hook_reached_from_a_native_instruction_carries_no_signer_badge() {
         test.transaction()
             .stealth_transfer(faucet_resx, transfer.statement)
             .finish()
-            .add_signer(&test.to_public_key_bytes(), &mint.output_masks[0])
+            .authorize(&test.to_public_key_bytes(), [&mint.output_masks[0]])
             .seal(test.secret_key()),
         vec![],
     );
@@ -1402,7 +1408,7 @@ fn programmatic_stealth_transfer_invokes_the_auth_hook() {
                 transfer.statement
             ])
             .finish()
-            .add_signer(&test.to_public_key_bytes(), &mint.output_masks[0])
+            .authorize(&test.to_public_key_bytes(), [&mint.output_masks[0]])
             .seal(test.secret_key()),
         vec![],
     );
@@ -1446,7 +1452,7 @@ fn burning_a_utxo_invokes_the_auth_hook() {
         test.transaction()
             .call_function(template_addr, "burn_utxo_of", args![faucet_resx, utxo_id, proof])
             .finish()
-            .add_signer(&test.to_public_key_bytes(), &mint.output_masks[0])
+            .authorize(&test.to_public_key_bytes(), [&mint.output_masks[0]])
             .seal(test.secret_key()),
         vec![],
     );
@@ -1562,7 +1568,7 @@ fn burn_rejects_an_invalid_value_proof_without_supply_tracking() {
         test.transaction()
             .call_function(template_addr, "burn_utxo_of", args![faucet_resx, utxo_id, proof])
             .finish()
-            .add_signer(&test.to_public_key_bytes(), &mint.output_masks[0])
+            .authorize(&test.to_public_key_bytes(), [&mint.output_masks[0]])
             .seal(test.secret_key()),
         vec![],
     );
@@ -1604,7 +1610,7 @@ fn a_utxo_spent_in_this_transaction_cannot_also_be_burnt() {
             .stealth_transfer(faucet_resx, transfer.statement)
             .call_method(faucet, "burn_utxos", args![vec![(utxo_id, value_proof)]])
             .finish()
-            .add_signer(&test.to_public_key_bytes(), &mint.output_masks[0])
+            .authorize(&test.to_public_key_bytes(), [&mint.output_masks[0]])
             .seal(test.secret_key()),
         vec![],
     );
@@ -1639,7 +1645,7 @@ fn pay_key_and_script_outputs(
         test.transaction()
             .stealth_transfer(resource, payment.statement.clone())
             .finish()
-            .add_signer(&test.to_public_key_bytes(), &mint.output_masks[0])
+            .authorize(&test.to_public_key_bytes(), [&mint.output_masks[0]])
             .seal(test.secret_key()),
         vec![],
     );
@@ -1686,7 +1692,7 @@ fn a_mask_proof_burn_requires_the_utxo_spend_key_signature() {
         test.transaction()
             .call_function(template_addr, "burn_utxo_of", args![faucet_resx, utxo_id, proof])
             .finish()
-            .add_signer(&test.to_public_key_bytes(), &recipient_sk)
+            .authorize(&test.to_public_key_bytes(), [&recipient_sk])
             .seal(test.secret_key()),
         vec![],
     );
@@ -1717,7 +1723,7 @@ fn a_mask_proof_burn_of_a_script_only_utxo_is_rejected() {
         test.transaction()
             .call_function(template_addr, "burn_utxo_of", args![faucet_resx, utxo_id, proof])
             .finish()
-            .add_signer(&test.to_public_key_bytes(), &recipient_sk)
+            .authorize(&test.to_public_key_bytes(), [&recipient_sk])
             .seal(test.secret_key()),
         vec![],
     );

@@ -202,8 +202,8 @@ pub trait StateStoreReadTransaction: Sized {
         tx_id: &TransactionId,
     ) -> Result<PrimitiveDateTime, StorageError>;
     /// Where the decision this node finalized for `tx_id` is proven, or `None` if the transaction is not finalized or
-    /// was finalized without one. The commit proof of the inclusion's block is held by
-    /// [`StateStoreReadTransaction::block_commit_proofs_get`].
+    /// was finalized without one, as a commit is: its receipt proves it. The commit proof of the inclusion's block is
+    /// held by [`StateStoreReadTransaction::block_commit_proofs_get`].
     fn finalized_transaction_inclusion_get(
         &self,
         tx_id: &TransactionId,
@@ -548,6 +548,8 @@ pub trait StateStoreReadTransaction: Sized {
     ) -> Result<SubstatePledges, StorageError>;
     // -------------------------------- Parked blocks / Missing Transactions -------------------------------- //
     fn parked_block_exists(&self, block_id: &BlockId) -> Result<bool, StorageError>;
+    /// The transactions a parked block is still waiting on. Empty when the block is not parked.
+    fn parked_block_missing_transactions(&self, block_id: &BlockId) -> Result<Vec<TransactionId>, StorageError>;
     fn parked_blocks_count_by_proposer(
         &self,
         epoch: Epoch,
@@ -763,6 +765,10 @@ pub trait StateStoreWriteTransaction {
 
     /// Commits the batch's transitions, recording each state version's transitions with the shard's
     /// [`TransitionAccumulator`] extended by them.
+    ///
+    /// Each state version in the batch must hold all of its transitions. A substate's head becomes the highest version
+    /// the batch writes for it, and DOWN if the batch puts that version down, whatever order the transitions are listed
+    /// in.
     fn substates_commit_batch(&mut self, update_batch: SubstateUpdateBatch) -> Result<(), StorageError>;
     /// Clears the values of substates downed in or before `epoch`, stopping at the first index entry that takes the
     /// count to `limit` or more. Returns the number of values cleared; a result below `limit` means none remain.

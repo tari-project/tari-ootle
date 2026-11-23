@@ -21,6 +21,8 @@ log = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
+tari_ootle_transaction = { workspace = true, features = ["test-v1-signing"] }
 indexmap = { workspace = true }
 tari_common_types = { workspace = true }
 tari_crypto = { workspace = true }
+rand = { workspace = true }

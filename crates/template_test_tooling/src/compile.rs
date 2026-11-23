@@ -71,7 +71,7 @@ where
             "wasm32-unknown-unknown",
             "--release",
             // Strip the `name`, `producers` and `target_features` custom sections the wasm
-            // toolchain emits. `WasmModule::validate_code` rejects a published template that
+            // toolchain emits. `WasmModule::validate` rejects a published template that
             // carries any custom section other than `tari_tdef`, so templates must ship stripped.
             "--config",
             "profile.release.strip=\"symbols\"",

@@ -103,6 +103,7 @@ tempfile = { workspace = true }
 # test-util drives the clock, so the write lock timeout tests do not wait in real time
 tokio = { workspace = true, features = ["test-util"] }
 toml = { workspace = true }
+tracing = { workspace = true }
 
 [features]
 default = ["web_ui", "metrics"]

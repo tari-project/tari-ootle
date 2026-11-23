@@ -29,7 +29,7 @@ use tari_template_lib::types::{
     ObjectKey,
     SubstateOwnerRule,
     TemplateAddress,
-    access_rules::{ComponentAccessRules, UpdateRule},
+    access_rules::{ComponentAccessRules, RulesUpdater, UpdateRule},
     crypto::RistrettoPublicKeyBytes,
 };
 
@@ -83,7 +83,30 @@ pub struct ComponentHeader {
     /// Who may swap this component's template. Fixed when the component is created.
     #[n(4)]
     pub upgrade_rule: UpdateRule,
+    /// Who may replace the access rules and the owner rule. Fixed when the component is created. `None` only on a
+    /// component created before the setting existed, and means [`RulesUpdater::TemplateManaged`]. Read it through
+    /// [`Component::rules_updater`].
+    #[n(5)]
+    #[borsh(serialize_with = "serialize_rules_updater")]
+    pub rules_updater: Option<RulesUpdater>,
 }
+
+/// A component created before the rules updater existed has none, and its header hash must not change: write nothing
+/// for `None` rather than borsh's `0` tag.
+fn serialize_rules_updater<W: borsh::io::Write>(
+    rules_updater: &Option<RulesUpdater>,
+    writer: &mut W,
+) -> Result<(), borsh::io::Error> {
+    match rules_updater {
+        Some(rules_updater) => {
+            borsh::BorshSerialize::serialize(&1u8, writer)?;
+            borsh::BorshSerialize::serialize(rules_updater, writer)
+        },
+        None => Ok(()),
+    }
+}
+
+static LEGACY_RULES_UPDATER: RulesUpdater = RulesUpdater::TemplateManaged;
 
 impl Component {
     pub fn into_component(self) -> ComponentBody {
@@ -134,6 +157,12 @@ impl Component {
 
     pub fn upgrade_rule(&self) -> &UpdateRule {
         &self.header.upgrade_rule
+    }
+
+    /// Who may replace the access rules and the owner rule. A component created before the setting existed is
+    /// [`RulesUpdater::TemplateManaged`].
+    pub fn rules_updater(&self) -> &RulesUpdater {
+        self.header.rules_updater.as_ref().unwrap_or(&LEGACY_RULES_UPDATER)
     }
 
     pub fn set_access_rules(&mut self, access_rules: ComponentAccessRules) -> &mut Self {

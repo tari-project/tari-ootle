@@ -21,14 +21,15 @@ use crate::{
     Blobs,
     Instruction,
     MainSigner,
+    SchemaVersion,
     TransactionId,
-    TransactionIntent,
     TransactionSealSignature,
     TransactionSignature,
     TransactionV1,
     UnsealedTransactionV1,
     UnsignedTransactionV1,
     v1::{
+        authorizers::is_canonical_authorization_list,
         intent::calculate_intent_commitment_v1,
         signature::{TransactionSignatureFields, verify_sealed_batch},
     },
@@ -91,10 +92,6 @@ fn decode_blob_sizes<'b, C>(d: &mut minicbor::Decoder<'b>, ctx: &mut C) -> Resul
 }
 
 impl PrunedUnsignedTransactionV1 {
-    pub const fn schema_version(&self) -> u16 {
-        1
-    }
-
     pub fn fee_instructions(&self) -> &[Instruction] {
         &self.fee_instructions
     }
@@ -145,10 +142,6 @@ pub struct PrunedUnsealedTransactionV1 {
 }
 
 impl PrunedUnsealedTransactionV1 {
-    pub const fn schema_version(&self) -> u16 {
-        self.transaction.schema_version()
-    }
-
     pub fn unsigned_transaction(&self) -> &PrunedUnsignedTransactionV1 {
         &self.transaction
     }
@@ -173,16 +166,24 @@ impl PrunedUnsealedTransactionV1 {
         &self.transaction.inputs
     }
 
-    /// Verify all extra signatures against the seal signer.
+    /// Verify all extra signatures against the seal signer under `schema`.
     #[must_use]
-    pub fn verify_all_signatures(&self, seal_signer: &RistrettoPublicKeyBytes) -> bool {
+    pub fn verify_all_signatures(&self, schema: SchemaVersion, seal_signer: &RistrettoPublicKeyBytes) -> bool {
         if self.signatures.is_empty() {
             return true;
         }
+        if schema.binds_authorizer_set() && !is_canonical_authorization_list(&self.signatures) {
+            return false;
+        }
         // Derived once and reused: every signature over this transaction signs the same message, and
         // deriving it hashes the whole body.
-        let message =
-            TransactionSignature::create_message_v1_pruned(seal_signer, &self.transaction, self.blob_hashes());
+        let message = TransactionSignature::create_pruned_message_for_list(
+            schema,
+            seal_signer,
+            &self.transaction,
+            self.blob_hashes(),
+            &self.signatures,
+        );
         TransactionSignature::verify_all_against_message(&self.signatures, message)
     }
 }
@@ -212,17 +213,6 @@ pub struct PrunedTransactionV1 {
     seal_signature: TransactionSealSignature,
 }
 
-impl TransactionIntent for PrunedTransactionV1 {
-    /// Identical to the full form's commitment.
-    fn calculate_intent_commitment(&self) -> Hash32 {
-        calculate_intent_commitment_v1(
-            self.schema_version(),
-            &TransactionSignatureFields::from(&self.body.transaction),
-            self.blob_hashes(),
-        )
-    }
-}
-
 #[derive(Debug, thiserror::Error, PartialEq, Eq, Clone)]
 pub enum BlobRehydrationError {
     #[error("blob count mismatch: pruned has {expected}, hydration provided {got}")]
@@ -232,8 +222,13 @@ pub enum BlobRehydrationError {
 }
 
 impl PrunedTransactionV1 {
-    pub const fn schema_version(&self) -> u16 {
-        self.body.schema_version()
+    /// The intent commitment under `schema`. Identical to the full form's commitment.
+    pub fn calculate_intent_commitment(&self, schema: SchemaVersion) -> Hash32 {
+        calculate_intent_commitment_v1(
+            schema,
+            &TransactionSignatureFields::from(&self.body.transaction),
+            self.blob_hashes(),
+        )
     }
 
     pub fn unsealed_transaction(&self) -> &PrunedUnsealedTransactionV1 {
@@ -288,11 +283,11 @@ impl PrunedTransactionV1 {
         self.body.transaction.dry_run
     }
 
-    /// Compute the deterministic transaction id. Identical to the full form's id — see
-    /// [`calculate_id_v1`](super::transaction::calculate_id_v1) for the projection invariants.
-    pub fn calculate_id(&self) -> TransactionId {
+    /// Compute the deterministic transaction id under `schema`. Identical to the full form's id —
+    /// see [`calculate_id_v1`](super::transaction::calculate_id_v1) for the projection invariants.
+    pub fn calculate_id(&self, schema: SchemaVersion) -> TransactionId {
         super::transaction::calculate_id_v1(
-            self.schema_version(),
+            schema,
             TransactionSignatureFields::from(&self.body.transaction),
             self.blob_hashes(),
             self.signatures(),
@@ -300,14 +295,25 @@ impl PrunedTransactionV1 {
         )
     }
 
-    /// Verify the seal and all extra signatures.
+    /// Verify the seal and all extra signatures under `schema`.
     #[must_use]
-    pub fn verify_all_signatures(&self) -> bool {
-        let seal_message = TransactionSealSignature::create_message_v1_pruned(&self.body);
-        let authorization_message = TransactionSignature::create_message_v1_pruned(
+    pub fn verify_all_signatures(&self, schema: SchemaVersion) -> bool {
+        if schema.binds_authorizer_set() && !is_canonical_authorization_list(self.body.signatures()) {
+            debug!(
+                target: LOG_TARGET,
+                "Pruned transaction signatures are invalid: the {} authorizations are not strictly ascending by \
+                 public key",
+                self.body.signatures().len(),
+            );
+            return false;
+        }
+        let seal_message = TransactionSealSignature::create_pruned_message_for_schema(schema, &self.body);
+        let authorization_message = TransactionSignature::create_pruned_message_for_list(
+            schema,
             self.seal_signature.public_key(),
             &self.body.transaction,
             self.body.blob_hashes(),
+            self.body.signatures(),
         );
 
         if verify_sealed_batch(
@@ -400,7 +406,7 @@ mod tests {
     use tari_template_lib_types::ComponentAddress;
 
     use super::*;
-    use crate::{Blob, Blobs, TransactionSealSignature, TransactionSignature};
+    use crate::{Blob, Blobs, TransactionSealSignature};
 
     fn sample_unsigned_with_blobs(blobs: Blobs) -> UnsignedTransactionV1 {
         let mut inputs = IndexSet::new();
@@ -424,10 +430,9 @@ mod tests {
 
     fn sealed(unsigned: UnsignedTransactionV1, sealer: &RistrettoSecretKey) -> TransactionV1 {
         let seal_signer = RistrettoPublicKey::from_secret_key(sealer).to_byte_type();
-        let extra_sk = RistrettoSecretKey::random(&mut rand::rng());
-        let sig = TransactionSignature::sign_v1(&extra_sk, &seal_signer, &unsigned);
-        let unsealed = UnsealedTransactionV1::new(unsigned, vec![sig]);
-        let seal = TransactionSealSignature::sign_v1(sealer, &unsealed);
+        let authorizers: Vec<_> = (0..3).map(|_| RistrettoSecretKey::random(&mut rand::rng())).collect();
+        let unsealed = UnsealedTransactionV1::authorize(unsigned, &seal_signer, &authorizers);
+        let seal = TransactionSealSignature::sign(sealer, &unsealed);
         TransactionV1::new(unsealed, seal)
     }
 
@@ -437,9 +442,9 @@ mod tests {
         let unsigned = sample_unsigned_with_blobs(blobs);
         let sealer = RistrettoSecretKey::random(&mut rand::rng());
         let full = sealed(unsigned, &sealer);
-        let id_full = full.calculate_id();
+        let id_full = full.calculate_id(SchemaVersion::CURRENT);
         let pruned = PrunedTransactionV1::from(full);
-        let id_pruned = pruned.calculate_id();
+        let id_pruned = pruned.calculate_id(SchemaVersion::CURRENT);
         assert_eq!(id_full, id_pruned);
     }
 
@@ -448,9 +453,9 @@ mod tests {
         let unsigned = sample_unsigned_with_blobs(Blobs::empty());
         let sealer = RistrettoSecretKey::random(&mut rand::rng());
         let full = sealed(unsigned, &sealer);
-        let id_full = full.calculate_id();
+        let id_full = full.calculate_id(SchemaVersion::CURRENT);
         let pruned = PrunedTransactionV1::from(full);
-        assert_eq!(id_full, pruned.calculate_id());
+        assert_eq!(id_full, pruned.calculate_id(SchemaVersion::CURRENT));
     }
 
     #[test]
@@ -459,9 +464,37 @@ mod tests {
         let unsigned = sample_unsigned_with_blobs(blobs);
         let sealer = RistrettoSecretKey::random(&mut rand::rng());
         let full = sealed(unsigned, &sealer);
-        assert!(full.verify_all_signatures());
+        assert!(full.verify_all_signatures(SchemaVersion::CURRENT));
         let pruned = PrunedTransactionV1::from(full);
-        assert!(pruned.verify_all_signatures());
+        assert!(pruned.verify_all_signatures(SchemaVersion::CURRENT));
+    }
+
+    /// Both forms refuse an authorization list out of canonical order, even when every signature in
+    /// it is valid over the set and the seal covers the reordered list.
+    #[test]
+    fn both_forms_reject_a_non_canonical_authorization_list() {
+        let unsigned = sample_unsigned_with_blobs(Blobs::from_vec(vec![Blob::from(vec![1, 2, 3])]));
+        let sealer = RistrettoSecretKey::random(&mut rand::rng());
+        let canonical = sealed(unsigned, &sealer);
+        let (unsigned, mut signatures) = canonical.unsealed_transaction().clone().into_parts();
+        signatures.reverse();
+        let unsealed = UnsealedTransactionV1::new(unsigned, signatures);
+        let seal = TransactionSealSignature::sign(&sealer, &unsealed);
+        let full = TransactionV1::new(unsealed, seal);
+
+        assert!(!full.verify_all_signatures(SchemaVersion::CURRENT));
+        assert!(
+            !full
+                .unsealed_transaction()
+                .verify_all_signatures(SchemaVersion::CURRENT, full.seal_signature().public_key())
+        );
+        let pruned = PrunedTransactionV1::from(full);
+        assert!(!pruned.verify_all_signatures(SchemaVersion::CURRENT));
+        assert!(
+            !pruned
+                .unsealed_transaction()
+                .verify_all_signatures(SchemaVersion::CURRENT, pruned.seal_signature().public_key())
+        );
     }
 
     #[test]
@@ -470,11 +503,11 @@ mod tests {
         let unsigned = sample_unsigned_with_blobs(blobs.clone());
         let sealer = RistrettoSecretKey::random(&mut rand::rng());
         let full = sealed(unsigned, &sealer);
-        let id = full.calculate_id();
+        let id = full.calculate_id(SchemaVersion::CURRENT);
         let pruned = PrunedTransactionV1::from(full);
         let rehydrated = pruned.rehydrate(blobs).expect("rehydrate");
-        assert_eq!(rehydrated.calculate_id(), id);
-        assert!(rehydrated.verify_all_signatures());
+        assert_eq!(rehydrated.calculate_id(SchemaVersion::CURRENT), id);
+        assert!(rehydrated.verify_all_signatures(SchemaVersion::CURRENT));
     }
 
     #[test]
@@ -509,7 +542,7 @@ mod tests {
         let mut pruned = PrunedTransactionV1::from(full);
         // Tamper a field — seal verification must fail.
         pruned.body.transaction.dry_run = !pruned.body.transaction.dry_run;
-        assert!(!pruned.verify_all_signatures());
+        assert!(!pruned.verify_all_signatures(SchemaVersion::CURRENT));
     }
 
     #[test]
@@ -521,6 +554,6 @@ mod tests {
         let mut pruned = PrunedTransactionV1::from(full);
         // Replace the stored blob_hashes with hashes of different data.
         pruned.body.transaction.blob_hashes = Blobs::from_vec(vec![Blob::from(vec![9, 9, 9])]).hashes();
-        assert!(!pruned.verify_all_signatures());
+        assert!(!pruned.verify_all_signatures(SchemaVersion::CURRENT));
     }
 }

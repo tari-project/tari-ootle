@@ -629,18 +629,31 @@ function nextAccountVarName(variables: Record<string, string>): string {
   return `account_${i}`;
 }
 
-function EditableKeyCell({ varKey, onRename }: { varKey: string; onRename: (oldKey: string, newKey: string) => void }) {
+function EditableKeyCell({
+  varKey,
+  onRename,
+}: {
+  varKey: string;
+  onRename: (oldKey: string, newKey: string) => boolean;
+}) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(varKey);
+  const [renameError, setRenameError] = useState<string | null>(null);
 
   const commit = () => {
-    setEditing(false);
     const trimmed = draft.trim();
     if (trimmed && trimmed !== varKey) {
-      onRename(varKey, trimmed);
+      if (!onRename(varKey, trimmed)) {
+        setDraft(varKey);
+        setRenameError(`Variable "${trimmed}" already exists`);
+        setEditing(false);
+        return;
+      }
     } else {
       setDraft(varKey);
     }
+    setRenameError(null);
+    setEditing(false);
   };
 
   if (editing) {
@@ -665,8 +678,18 @@ function EditableKeyCell({ varKey, onRename }: { varKey: string; onRename: (oldK
   }
 
   return (
-    <Box onClick={() => setEditing(true)} sx={{ "cursor": "pointer", "&:hover": { textDecoration: "underline" } }}>
-      {varKey}
+    <Box>
+      <Box
+        onClick={() => {
+          setRenameError(null);
+          setDraft(varKey);
+          setEditing(true);
+        }}
+        sx={{ "cursor": "pointer", "&:hover": { textDecoration: "underline" } }}
+      >
+        {varKey}
+      </Box>
+      {renameError && <Box sx={{ color: "error.main", fontSize: "0.75rem", mt: 0.25 }}>{renameError}</Box>}
     </Box>
   );
 }
@@ -735,7 +758,7 @@ function VariableEditor({
   variables: Record<string, string>;
   onAdd: (key: string, value: string) => void;
   onRemove: (key: string) => void;
-  onRename: (oldKey: string, newKey: string) => void;
+  onRename: (oldKey: string, newKey: string) => boolean;
   onAddSigningKey: (key: KeyId) => void;
 }) {
   const [showInputs, setShowInputs] = useState(false);

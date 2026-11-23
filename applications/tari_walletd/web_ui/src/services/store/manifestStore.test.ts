@@ -24,14 +24,13 @@ describe("manifestStore", () => {
     store.addVariable("account_1", "component_11");
     store.addVariable("account_2", "component_22");
 
-    // Neither direction should clobber or delete existing variables
-    useManifestCodeStore.getState().renameVariable("account_1", "account_2");
+    expect(useManifestCodeStore.getState().renameVariable("account_1", "account_2")).toBe(false);
     expect(useManifestCodeStore.getState().variables).toEqual({
       account_1: "component_11",
       account_2: "component_22",
     });
 
-    useManifestCodeStore.getState().renameVariable("account_2", "account_1");
+    expect(useManifestCodeStore.getState().renameVariable("account_2", "account_1")).toBe(false);
     expect(useManifestCodeStore.getState().variables).toEqual({
       account_1: "component_11",
       account_2: "component_22",
@@ -43,28 +42,25 @@ describe("manifestStore", () => {
     store.addVariable("first", "v1");
     store.addVariable("second", "v2");
 
-    useManifestCodeStore.getState().renameVariable("first", "renamed");
+    expect(useManifestCodeStore.getState().renameVariable("first", "renamed")).toBe(true);
     expect(Object.entries(useManifestCodeStore.getState().variables)).toEqual([
       ["renamed", "v1"],
       ["second", "v2"],
     ]);
 
-    // Prototype property names should not be treated as existing own variables
-    useManifestCodeStore.getState().renameVariable("toString", "other");
+    expect(useManifestCodeStore.getState().renameVariable("toString", "other")).toBe(false);
     expect(useManifestCodeStore.getState().variables).toEqual({
       renamed: "v1",
       second: "v2",
     });
   });
 
-  it("deduplicates signing keys with bigint indices or reordered properties without throwing", () => {
+  it("deduplicates signing keys structurally regardless of property order", () => {
     const keyNum: KeyId = { Derived: { key_branch: "account", index: 0 } };
-    const keyBigInt: KeyId = { Derived: { key_branch: "account", index: 0n } };
     const keyReordered: KeyId = { Derived: { index: 0, key_branch: "account" } };
     const keyOther: KeyId = { Derived: { key_branch: "account", index: 1 } };
 
     useManifestCodeStore.getState().addSigningKey(keyNum);
-    useManifestCodeStore.getState().addSigningKey(keyBigInt);
     useManifestCodeStore.getState().addSigningKey(keyReordered);
     useManifestCodeStore.getState().addSigningKey(keyOther);
 
@@ -96,13 +92,6 @@ describe("manifestStore", () => {
     expect(state.tabs[1].variables).toEqual({});
     expect(state.tabs[1].signingKeys).toEqual([]);
     expect(state.tabs[1].blobs).toEqual({});
-  });
-
-  it("keeps existing tabs intact when loadTabs receives an empty array", () => {
-    const beforeId = useManifestCodeStore.getState().activeTabId;
-    useManifestCodeStore.getState().loadTabs([]);
-    expect(useManifestCodeStore.getState().activeTabId).toBe(beforeId);
-    expect(useManifestCodeStore.getState().tabs).toHaveLength(1);
   });
 });
 

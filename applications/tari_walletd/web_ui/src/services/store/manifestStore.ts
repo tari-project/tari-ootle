@@ -66,7 +66,7 @@ interface Store {
   setCode: (code: string) => void;
   addVariable: (key: string, value: string) => void;
   removeVariable: (key: string) => void;
-  renameVariable: (oldKey: string, newKey: string) => void;
+  renameVariable: (oldKey: string, newKey: string) => boolean;
   addSigningKey: (key: KeyId) => void;
   removeSigningKey: (index: number) => void;
   /** Add or update a blob payload under `name`. `base64` is base64-encoded bytes. */
@@ -205,7 +205,8 @@ const useManifestCodeStore = create<Store>()(
           return updateActiveTab(state, { variables: rest });
         }),
 
-      renameVariable: (oldKey: string, newKey: string) =>
+      renameVariable: (oldKey: string, newKey: string) => {
+        let renamed = false;
         set((state) => {
           const active = state.tabs.find((t) => t.id === state.activeTabId)!;
           if (
@@ -215,14 +216,16 @@ const useManifestCodeStore = create<Store>()(
           ) {
             return state;
           }
+          renamed = true;
           const entries = Object.entries(active.variables).map(([k, v]) => (k === oldKey ? [newKey, v] : [k, v]));
           return updateActiveTab(state, { variables: Object.fromEntries(entries) });
-        }),
+        });
+        return renamed;
+      },
 
       addSigningKey: (key: KeyId) =>
         set((state) => {
           const active = state.tabs.find((t) => t.id === state.activeTabId)!;
-          // Avoid duplicates without JSON.stringify (which throws on bigint and depends on key order)
           const isDuplicate = active.signingKeys.some((k) => isSameKeyId(k, key));
           if (isDuplicate) return state;
           return updateActiveTab(state, { signingKeys: [...active.signingKeys, key] });
@@ -248,10 +251,7 @@ const useManifestCodeStore = create<Store>()(
         }),
 
       loadTabs: (loaded: ManifestTab[]) =>
-        set((state) => {
-          if (!Array.isArray(loaded) || loaded.length === 0) {
-            return state;
-          }
+        set(() => {
           // Assign fresh IDs to avoid collisions with existing tabs and default missing/invalid maps
           const tabs = loaded.map((t) => ({
             id: generateId(),

@@ -19,6 +19,7 @@ import {
 import PlaceHolder from "@routes/StealthUtxoList/components/PlaceHolder";
 import SortableHeader from "@routes/StealthUtxoList/components/SortableHeader";
 import StatusChip from "@routes/StealthUtxoList/components/StatusChip";
+import { clampPageIndex } from "@routes/StealthUtxoList/paginationHelpers";
 import { Account, OutputStatus, TARI_TOKEN } from "@tari-project/ootle-ts-bindings";
 import {
   bigintToDecimalString,
@@ -28,7 +29,7 @@ import {
   shortenString,
   substateIdToString,
 } from "@utils/helpers";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 
 function ConfidentialOutputList({ account }: { account: Account }) {
@@ -62,6 +63,24 @@ function ConfidentialOutputList({ account }: { account: Account }) {
     statusFilter === "all" ? null : statusFilter,
   );
 
+  const outputs = data?.outputs ?? [];
+  const currentPage = clampPageIndex(page, rowsPerPage, outputs.length);
+
+  useEffect(() => {
+    setPage(0);
+  }, [account.component_address, resourceAddress]);
+
+  useEffect(() => {
+    if (data !== undefined && page !== currentPage) {
+      setPage(currentPage);
+    }
+  }, [data, page, currentPage]);
+
+  const handleStatusFilterChange = (status: OutputStatus | "all") => {
+    setStatusFilter(status);
+    setPage(0);
+  };
+
   const columnWidths = {
     1: "30%",
     2: "20%",
@@ -82,7 +101,7 @@ function ConfidentialOutputList({ account }: { account: Account }) {
                   <SortableHeader
                     title="Status"
                     currentFilter={statusFilter}
-                    onFilterChange={setStatusFilter}
+                    onFilterChange={handleStatusFilterChange}
                     getDisplayName={getStatusDisplayName}
                   />
                 </TableCell>
@@ -90,29 +109,31 @@ function ConfidentialOutputList({ account }: { account: Account }) {
               </TableRow>
             </TableHead>
             <TableBody>
-              {data?.outputs && data.outputs.length > 0 ? (
+              {outputs.length > 0 ? (
                 <>
-                  {data.outputs.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage).map((output, index) => (
-                    <TableRow key={`${output.address.commitment}-${index}`}>
-                      <DataTableCell>
-                        {shortenString(output.address.commitment)}
-                        <CopyToClipboard copy={output.address.commitment} />
-                      </DataTableCell>
-                      <DataTableCell>
-                        {bigintToDecimalString(output.value, divisibility)} {currencySymbol}
-                      </DataTableCell>
-                      <DataTableCell>
-                        <StatusChip status={output.status} />
-                      </DataTableCell>
-                      <DataTableCell>
-                        <Memo memo={output.memo} />
-                      </DataTableCell>
-                    </TableRow>
-                  ))}
-                  {emptyRows(page, rowsPerPage, data.outputs) > 0 && (
+                  {outputs
+                    .slice(currentPage * rowsPerPage, currentPage * rowsPerPage + rowsPerPage)
+                    .map((output, index) => (
+                      <TableRow key={`${output.address.commitment}-${index}`}>
+                        <DataTableCell>
+                          {shortenString(output.address.commitment)}
+                          <CopyToClipboard copy={output.address.commitment} />
+                        </DataTableCell>
+                        <DataTableCell>
+                          {bigintToDecimalString(output.value, divisibility)} {currencySymbol}
+                        </DataTableCell>
+                        <DataTableCell>
+                          <StatusChip status={output.status} />
+                        </DataTableCell>
+                        <DataTableCell>
+                          <Memo memo={output.memo} />
+                        </DataTableCell>
+                      </TableRow>
+                    ))}
+                  {emptyRows(currentPage, rowsPerPage, outputs) > 0 && (
                     <TableRow
                       style={{
-                        height: 57 * emptyRows(page, rowsPerPage, data.outputs),
+                        height: 57 * emptyRows(currentPage, rowsPerPage, outputs),
                       }}
                     >
                       <TableCell colSpan={4} />
@@ -135,13 +156,13 @@ function ConfidentialOutputList({ account }: { account: Account }) {
               )}
             </TableBody>
           </Table>
-          {data?.outputs && data.outputs.length > 0 && (
+          {outputs.length > 0 && (
             <TablePagination
               rowsPerPageOptions={[10, 25, 50]}
               component="div"
-              count={data.outputs.length}
+              count={outputs.length}
               rowsPerPage={rowsPerPage}
-              page={page}
+              page={currentPage}
               onPageChange={(event, newPage) => handleChangePage(event, newPage, setPage)}
               onRowsPerPageChange={(event) => handleChangeRowsPerPage(event, setRowsPerPage, setPage)}
             />

@@ -47,28 +47,12 @@ import {
 import { Currency } from "@utils/currency";
 import { formatCurrency, handleChangePage, handleChangeRowsPerPage } from "@utils/helpers";
 import { accountsAssociateStealthResource } from "@utils/json_rpc";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { IoAdd } from "react-icons/io5";
 import { Form, useParams } from "react-router-dom";
 import { useErrorNotification } from "../../contexts/ErrorNotificationContext";
 import { useAccountsGet, useAccountsGetBalances } from "../../services/api/hooks/useAccounts";
 import { BalanceChangeHistory, BalanceChangeHistoryAction } from "./BalanceChangeHistory";
-
-function getErrorMessage(error: unknown, fallback: string): string {
-  if (error instanceof Error && error.message) {
-    return error.message;
-  }
-  if (
-    typeof error === "object" &&
-    error !== null &&
-    "message" in error &&
-    typeof error.message === "string" &&
-    error.message
-  ) {
-    return error.message;
-  }
-  return fallback;
-}
 
 function BalanceRow({ balance, accountAddress }: { balance: BalanceEntry; accountAddress: ComponentAddress }) {
   const currency = {
@@ -97,7 +81,11 @@ function BalanceRow({ balance, accountAddress }: { balance: BalanceEntry; accoun
 
 function AccountDetailsLayout() {
   const { id: accountAddr } = useParams();
-  const accountAddress = substateIdToString(accountAddr!) as ComponentAddress;
+  return <AccountDetailsContent key={accountAddr} accountAddr={accountAddr!} />;
+}
+
+function AccountDetailsContent({ accountAddr }: { accountAddr: string }) {
+  const accountAddress = substateIdToString(accountAddr) as ComponentAddress;
   const [showAddStealth, setShowAddStealth] = useState(false);
   const [stealthResource, setStealthResource] = useState({ newResourceAddress: "" });
   const [isAddingStealth, setIsAddingStealth] = useState(false);
@@ -105,25 +93,19 @@ function AccountDetailsLayout() {
   const [nftRowsPerPage, setNftRowsPerPage] = useState(12);
   const { showError, showSuccess } = useErrorNotification();
 
-  useEffect(() => {
-    setNftPage(0);
-    setShowAddStealth(false);
-    setStealthResource({ newResourceAddress: "" });
-  }, [accountAddr]);
-
   const {
     data: balancesData,
     isLoading: balancesIsLoading,
     isError: balancesIsError,
     error: balancesError,
-  } = useAccountsGetBalances(substateIdToString(accountAddr!));
+  } = useAccountsGetBalances(accountAddress);
 
   const {
     data: accountsData,
     isLoading: accountsIsLoading,
     isError: accountsIsError,
     error: accountsError,
-  } = useAccountsGet(accountAddr!);
+  } = useAccountsGet(accountAddr);
 
   const offset = nftPage * nftRowsPerPage;
   const {
@@ -131,7 +113,7 @@ function AccountDetailsLayout() {
     isLoading: nftsListIsFetching,
     isError: nftsListIsError,
     error: nftsListError,
-  } = useNFTsList(substateIdToString(accountAddr!), offset, nftRowsPerPage);
+  } = useNFTsList(accountAddress, offset, nftRowsPerPage);
 
   const currentNfts = nftsListData?.nfts || [];
   const hasMore = currentNfts.length === nftRowsPerPage;
@@ -149,7 +131,7 @@ function AccountDetailsLayout() {
   const onSubmitAddStealthResource = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const resourceAddress = stealthResource.newResourceAddress.trim();
-    if (isAddingStealth || !resourceAddress || !accountAddr) {
+    if (isAddingStealth || !resourceAddress) {
       return;
     }
     setIsAddingStealth(true);
@@ -160,10 +142,10 @@ function AccountDetailsLayout() {
       });
       setStealthResource({ newResourceAddress: "" });
       setShowAddStealth(false);
-      await queryClient.invalidateQueries({ queryKey: [`accounts_balances_${accountAddress}`] });
       showSuccess("Stealth resource associated with account");
+      void queryClient.invalidateQueries({ queryKey: [`accounts_balances_${accountAddress}`] });
     } catch (error: unknown) {
-      showError(getErrorMessage(error, "Failed to associate stealth resource"));
+      showError(error instanceof Error && error.message ? error.message : "Failed to associate stealth resource");
     } finally {
       setIsAddingStealth(false);
     }

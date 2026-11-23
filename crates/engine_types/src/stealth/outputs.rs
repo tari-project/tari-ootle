@@ -4,10 +4,7 @@
 use std::collections::BTreeSet;
 
 use ootle_byte_type::ConvertFromByteType;
-use tari_crypto::{
-    extended_range_proof::Statement,
-    ristretto::{RistrettoPublicKey, pedersen::PedersenCommitment},
-};
+use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_template_lib::types::{
     crypto::UtxoTag,
     stealth::{SpendAuthorization, StealthOutputsStatement},
@@ -16,10 +13,10 @@ use tari_template_lib::types::{
 use crate::{
     UtxoOutput,
     crypto::{
+        DecodedOutput,
         MAX_LAZY_BP_AGG_FACTORS,
         ValidateOutputBody,
         range_proof::validate_bullet_proof_statements,
-        validate_elgamal_verifiable_balance_proof,
     },
     resource_container::ResourceError,
 };
@@ -68,7 +65,7 @@ pub fn validate_stealth_outputs_statement(
     }
 
     let mut seen_commitments = BTreeSet::new();
-    let mut decompressed = Vec::with_capacity(stmt.outputs.len());
+    let mut decoded = Vec::with_capacity(stmt.outputs.len());
     for statement in &stmt.outputs {
         let output = &statement.output;
         if !seen_commitments.insert(output.commitment) {
@@ -80,18 +77,7 @@ pub fn validate_stealth_outputs_statement(
             });
         }
 
-        let output_commitment = PedersenCommitment::convert_from_byte_type(&output.commitment).map_err(|_| {
-            ResourceError::InvalidConfidentialProof {
-                details: "Invalid commitment".to_string(),
-            }
-        })?;
-
-        let output_public_nonce =
-            RistrettoPublicKey::convert_from_byte_type(&output.sender_public_nonce).map_err(|_| {
-                ResourceError::InvalidConfidentialProof {
-                    details: "Invalid sender public nonce".to_string(),
-                }
-            })?;
+        let decoded_output = DecodedOutput::decode(output, view_key)?;
 
         // Unspendable `{no key, no conditions}` outputs are unrepresentable because `SpendAuthorization` has no such
         // variant, so every output has at least one spend path. When a `spend_key` is present, it reaches the auth
@@ -105,48 +91,22 @@ pub fn validate_stealth_outputs_statement(
             });
         }
 
-        match (view_key.is_some(), output.viewable_balance_proof.is_some()) {
-            (false, true) => {
-                return Err(ResourceError::InvalidConfidentialProof {
-                    details: "ViewableBalanceProof provided for a resource that is not viewable".to_string(),
-                });
-            },
-            (true, false) => {
-                return Err(ResourceError::InvalidConfidentialProof {
-                    details: "ViewableBalanceProof is required for a viewable resource".to_string(),
-                });
-            },
-            _ => {},
-        }
-
-        decompressed.push((output_commitment, output_public_nonce));
+        decoded.push(decoded_output);
     }
 
-    let mut outputs = Vec::with_capacity(stmt.outputs.len());
-    let mut bp_statements = Vec::with_capacity(stmt.outputs.len());
-    for (statement, (output_commitment, output_public_nonce)) in stmt.outputs.iter().zip(decompressed) {
-        let output = &statement.output;
-        let viewable_balance = validate_elgamal_verifiable_balance_proof(
-            &output_commitment,
-            view_key,
-            output.viewable_balance_proof.as_ref(),
-        )?;
-        bp_statements.push(Statement {
-            commitment: output_commitment.clone(),
-            minimum_value_promise: output.minimum_value_promise,
-        });
-        outputs.push(ValidatedStealthOutput {
-            output: ValidateOutputBody {
-                commitment: output_commitment,
-                public_nonce: output_public_nonce,
-                encrypted_data: output.encrypted_data.clone(),
-                minimum_value_promise: output.minimum_value_promise,
-                viewable_balance,
-            },
-            auth: statement.auth.clone(),
-            tag: statement.tag,
-        });
-    }
+    let bp_statements = decoded.iter().map(DecodedOutput::range_proof_statement).collect();
+    let outputs = stmt
+        .outputs
+        .iter()
+        .zip(decoded)
+        .map(|(statement, decoded_output)| {
+            Ok(ValidatedStealthOutput {
+                output: decoded_output.verify_viewable_balance(view_key)?,
+                auth: statement.auth.clone(),
+                tag: statement.tag,
+            })
+        })
+        .collect::<Result<Vec<_>, ResourceError>>()?;
 
     validate_bullet_proof_statements(&stmt.agg_range_proof, bp_statements)?;
 

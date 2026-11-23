@@ -467,16 +467,9 @@ impl<TStore: StateReader> WorkingState<TStore> {
         locked: &LockedSubstate,
         f: F,
     ) -> Result<(), RuntimeError> {
-        let component = self.get_component_mut(locked)?;
-        f(&mut component.header);
-        let component_template = *component.template_address();
-        // A top-level instruction changes a header outside any frame; the change is attributed to the component's
-        // own template.
-        let template_address = match self.call_frames.last() {
-            Some(frame) => *frame.current_template(),
-            None => component_template,
-        };
+        f(&mut self.get_component_mut(locked)?.header);
 
+        let template_address = *self.current_template()?;
         self.push_event(Event::std(
             Some(locked.substate_id().clone()),
             template_address,
@@ -2374,57 +2367,38 @@ impl<TStore: StateReader> WorkingState<TStore> {
             return Ok(());
         }
 
-        let action = action.into();
-        let is_vault_read = matches!(
-            &action,
-            ActionIdent::Native(NativeAction::Vault(vault_action)) if !vault_action.requires_write_access()
-        );
-
         let component_lock = self
             .current_call_scope()?
             .get_current_component_lock()
-            .ok_or(RuntimeError::NotInComponentContext { action })?;
+            .ok_or(RuntimeError::NotInComponentContext { action: action.into() })?;
 
         let component = self.get_component(component_lock)?;
-        if component.contains_substate(address)? {
-            return Ok(());
+        if !component.contains_substate(address)? {
+            warn!(
+                target: LOG_TARGET,
+                "Component {} attempted access to {} that it does not own",
+                component_lock.substate_id(),
+                address
+            );
+            return Err(RuntimeError::SubstateNotOwned {
+                id: address.clone(),
+                requested_owner: Box::new(component_lock.substate_id().clone()),
+            });
         }
 
-        if is_vault_read && self.is_owned_by_acting_component(address)? {
-            return Ok(());
-        }
-
-        warn!(
-            target: LOG_TARGET,
-            "Component {} attempted access to {} that it does not own",
-            component_lock.substate_id(),
-            address
-        );
-        Err(RuntimeError::SubstateNotOwned {
-            id: address.clone(),
-            requested_owner: Box::new(component_lock.substate_id().clone()),
-        })
+        Ok(())
     }
 
-    /// Whether the current frame is a resource auth hook frame and `address` is owned by the component whose
-    /// action triggered the hook. The acting component's frame is suspended for the hook call and the hook frame
-    /// cannot write it, so its loaded state is the state the action ran against.
-    fn is_owned_by_acting_component(&self, address: &SubstateId) -> Result<bool, RuntimeError> {
-        let Some(acting_component) = self.current_call_scope()?.acting_component().copied() else {
-            return Ok(false);
-        };
-        let component = self.store.get_loaded_component(acting_component)?;
-        Ok(component.contains_substate(address)?)
-    }
-
-    /// Enforces the stealth-transfer limits and counts this transfer against the per-transaction totals. Must be
-    /// called before the transfer's input authorization, hooks and proof crypto run, so an over-limit transaction is
-    /// rejected before that work is done.
+    /// Enforces the stealth-transfer limits, validates commitment uniqueness across inputs and outputs, and counts
+    /// this transfer against the per-transaction totals. Must be called before the transfer's input authorization,
+    /// hooks and proof crypto run, so an over-limit or duplicate-commitment statement is rejected before that work is
+    /// done.
     pub(super) fn admit_stealth_transfer(
         &mut self,
         statement: StealthTransferStatement,
     ) -> Result<AdmittedStealthTransfer, RuntimeError> {
         check_stealth_transfer_limits(&limits::STEALTH_LIMITS, &statement)?;
+        stealth::validate_transfer_commitments(&statement)?;
         self.stealth_totals.admit(&limits::STEALTH_LIMITS, &statement)?;
         Ok(AdmittedStealthTransfer(statement))
     }
@@ -2724,7 +2698,6 @@ mod tests {
                 access_rules: ComponentAccessRules::new(),
                 entity_id: address.entity_id(),
                 upgrade_rule: UpdateRule::default(),
-                rules_updater: None,
             },
             body: tari_engine_types::component::ComponentBody {
                 state: tari_bor::Value::Null,
@@ -2791,6 +2764,64 @@ mod tests {
                 ArgumentValidationError::MaxStealthTransfersPerTransactionExceeded { .. }
             ))
         ));
+    }
+
+    #[test]
+    fn admit_stealth_transfer_rejects_duplicate_commitments_without_consuming_budget() {
+        use tari_template_lib::types::{
+            EncryptedData,
+            crypto::UtxoTag,
+            stealth::{StealthUnspentOutput, UnspentOutput},
+        };
+
+        fn sample_output(byte: u8) -> StealthUnspentOutput {
+            StealthUnspentOutput {
+                output: UnspentOutput {
+                    commitment: PedersenCommitmentBytes::from_bytes(&[byte; 32]).unwrap(),
+                    sender_public_nonce: RistrettoPublicKeyBytes::zero(),
+                    encrypted_data: EncryptedData::try_from(vec![0u8; EncryptedData::min_size()]).unwrap(),
+                    minimum_value_promise: 0,
+                    viewable_balance_proof: None,
+                },
+                auth: SpendAuthorization::Key(RistrettoPublicKeyBytes::zero()),
+                tag: UtxoTag::new(0),
+            }
+        }
+
+        let mut state = test_working_state();
+        let base =
+            StealthTransferStatement::revealed_only(Amount::new(1), Amount::new(1), RistrettoPublicKeyBytes::default());
+        let commit_a = PedersenCommitmentBytes::from_bytes(&[1u8; 32]).unwrap();
+
+        let mut dup_inputs = base.clone();
+        dup_inputs.inputs_statement.inputs = vec![StealthInput::new(commit_a), StealthInput::new(commit_a)];
+        assert!(matches!(
+            state.admit_stealth_transfer(dup_inputs),
+            Err(RuntimeError::ResourceError(ResourceError::InvalidSpend { details }))
+                if details.contains("Duplicate input commitment")
+        ));
+
+        let mut input_output_collision = base.clone();
+        input_output_collision.inputs_statement.inputs = vec![StealthInput::new(commit_a)];
+        input_output_collision.outputs_statement.outputs = vec![sample_output(1)];
+        assert!(matches!(
+            state.admit_stealth_transfer(input_output_collision),
+            Err(RuntimeError::ResourceError(ResourceError::InvalidSpend { details }))
+                if details.contains("duplicates an input commitment")
+        ));
+
+        let mut dup_outputs = base.clone();
+        dup_outputs.outputs_statement.outputs = vec![sample_output(2), sample_output(2)];
+        assert!(matches!(
+            state.admit_stealth_transfer(dup_outputs),
+            Err(RuntimeError::ResourceError(ResourceError::InvalidConfidentialProof { details }))
+                if details.contains("Duplicate output commitment")
+        ));
+
+        // None of the rejected statements may advance the per-transaction transfer counter.
+        for _ in 0..limits::STEALTH_LIMITS.max_transfers_per_transaction {
+            state.admit_stealth_transfer(base.clone()).unwrap();
+        }
     }
 
     #[test]

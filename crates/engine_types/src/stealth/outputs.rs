@@ -309,13 +309,10 @@ mod tests {
 
         let range_proof = single_output_range_proof(7, 100);
         for invalid_key in [non_canonical, identity] {
-            for auth in [
-                SpendAuthorization::Key(invalid_key),
-                SpendAuthorization::KeyAndScript {
-                    spend_key: invalid_key,
-                    condition_root: Hash32::zero(),
-                },
-            ] {
+            for auth in [SpendAuthorization::Key(invalid_key), SpendAuthorization::KeyAndScript {
+                spend_key: invalid_key,
+                condition_root: Hash32::zero(),
+            }] {
                 let mut out = sample_stealth_output(7, 100);
                 out.auth = auth;
                 let stmt = StealthOutputsStatement {

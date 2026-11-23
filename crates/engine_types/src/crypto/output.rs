@@ -97,7 +97,7 @@ impl<'a> DecodedOutput<'a> {
         })
     }
 
-    pub(crate) fn range_proof_statement(&self) -> Statement<RistrettoPublicKey> {
+    pub(crate) fn to_range_proof_statement(&self) -> Statement<RistrettoPublicKey> {
         Statement {
             commitment: self.commitment.clone(),
             minimum_value_promise: self.output.minimum_value_promise,

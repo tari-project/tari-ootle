@@ -94,7 +94,7 @@ pub fn validate_stealth_outputs_statement(
         decoded.push(decoded_output);
     }
 
-    let bp_statements = decoded.iter().map(DecodedOutput::range_proof_statement).collect();
+    let bp_statements = decoded.iter().map(DecodedOutput::to_range_proof_statement).collect();
     let outputs = stmt
         .outputs
         .iter()

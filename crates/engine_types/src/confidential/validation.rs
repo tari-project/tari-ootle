@@ -83,7 +83,7 @@ pub fn validate_confidential_statement(
     let bp_statements = decoded_output
         .iter()
         .chain(&decoded_change)
-        .map(DecodedOutput::range_proof_statement)
+        .map(DecodedOutput::to_range_proof_statement)
         .collect::<Vec<_>>();
     if bp_statements.is_empty() {
         if !proof.range_proof.is_empty() {

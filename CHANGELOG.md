@@ -32,6 +32,11 @@ types is bounded the same way CBOR decoding already was.
   - `TemplateMetadata::commit_hash` is an `Option<CommitHash>`, replacing `gix_hash::ObjectId`;
     the CBOR encoding is unchanged. (#3897)
 
+### Features
+
+- **template_lib:** `ResourceAddressAllocation`, `BucketId` and `ProofId` implement `Tagged`, as
+  `ComponentAddressAllocation` does. (#3484)
+
 ### Bug fixes
 
 - **engine:** templates with a `br_table` of more than 16,384 targets are refused before
@@ -41,7 +46,7 @@ types is bounded the same way CBOR decoding already was.
   or another component can no longer read a vault it does not own. (#3773)
 - **engine_types:** stealth outputs with an unspendable spend key are rejected instead of locking
   their funds, and malformed output proofs fail before range-proof verification. (#3726)
-- **consensus:** a transaction aborted locally drops the locks a foreign shard group's commit
+- **storage:** a transaction aborted locally drops the locks a foreign shard group's commit
   would otherwise leave in its pool record. (#3866)
 - **serde:** transactions, blobs and template types cap sequence lengths and preallocation during
   serde decoding, matching their CBOR limits. (#3711, #3896, #3771)
@@ -53,8 +58,7 @@ types is bounded the same way CBOR decoding already was.
 - **template_macros:** `#[template_non_wasm]` runs the same validation as wasm templates, `impl`
   blocks may come before the component struct, and invalid receivers give a spanned error
   instead of a macro panic. (#3468)
-- **template_lib:** `invoke_args!` accepts a trailing comma; `ResourceAddressAllocation`,
-  `BucketId` and `ProofId` implement `Tagged`. (#3742, #3484)
+- **template_lib:** `invoke_args!` accepts a trailing comma. (#3742)
 - **template_metadata:** the `gix-hash` dependency is gone, which removes `heapless` 0.8.0 and
   RUSTSEC-2026-0574 to RUSTSEC-2026-0582; the borsh build works and `MetadataHash` derives
   `BorshDeserialize`. (#3897, #3498)

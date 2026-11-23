@@ -61,6 +61,11 @@ const useInterval = (fn: () => Promise<unknown>, ms: number) => {
   }, [run]);
 };
 
+const formatError = (err: unknown): string =>
+  err && typeof err === "object" && "message" in err && typeof err.message === "string" && err.message
+    ? err.message
+    : `Unknown error: ${JSON.stringify(err)}`;
+
 function Connections() {
   const [connections, setConnections] = useState<VNConnection[]>([]);
   const [showPeerDialog, setShowAddPeerDialog] = useState(false);
@@ -80,7 +85,7 @@ function Connections() {
       setConnections(resp.connections);
       setFetchError(undefined);
     } catch (err) {
-      setFetchError(err instanceof Error ? err.message : String(err));
+      setFetchError(formatError(err));
     }
   }, []);
   useInterval(fetchConnections, 5000);
@@ -104,7 +109,7 @@ function Connections() {
       setShowAddPeerDialog(false);
       await fetchConnections();
     } catch (err) {
-      setAddError(err instanceof Error ? err.message : String(err));
+      setAddError(formatError(err));
     } finally {
       setSubmitting(false);
     }

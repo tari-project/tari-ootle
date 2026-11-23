@@ -49,7 +49,7 @@ import {
   VaultId,
 } from "@tari-project/ootle-ts-bindings";
 import { bigintToDecimalString, substateIdToString } from "@utils/helpers";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { IoWalletOutline } from "react-icons/io5";
 import { useNavigate } from "react-router-dom";
 import ClaimCoinsButton from "./components/ClaimCoinsButton";
@@ -72,10 +72,10 @@ interface ConfidentialBalanceProps {
   balance: Amount;
   resourceType: string;
   divisibility: number;
-  token_symbol?: string;
+  token_symbol: string;
 }
 
-function formatBalanceWithSymbol(balance: Amount, divisibility: number, tokenSymbol?: string): string {
+function formatBalanceWithSymbol(balance: Amount, divisibility: number, tokenSymbol: string): string {
   const formatted = bigintToDecimalString(balance, divisibility);
   return tokenSymbol ? `${formatted} ${tokenSymbol}` : formatted;
 }
@@ -184,11 +184,6 @@ function Tokens({ account }: { account: Account }) {
   } | null>(null);
   const [nftResourceToSend, setNftResourceToSend] = useState<ResourceAddress | null>(null);
   const accountAddress = substateIdToString(account.component_address) as ComponentAddress;
-
-  useEffect(() => {
-    setResourceToSend(null);
-    setNftResourceToSend(null);
-  }, [accountAddress]);
 
   const {
     data: balancesData,

@@ -137,7 +137,7 @@ export default function BlockDetails() {
 
   const [epochEvents, setEpochEvents] = useState<string[]>([]);
   const [identity, setIdentity] = useState<VNGetIdentityResponse>();
-  const [blockTime, setBlockTime] = useState<number>(0);
+  const [blockTime, setBlockTime] = useState<number | null | undefined>(undefined);
   const [wasmPoints, setWasmPoints] = useState<bigint>(0n);
   const [nativePoints, setNativePoints] = useState<bigint>(0n);
   const [maxExecutionPoints, setMaxExecutionPoints] = useState<bigint>(0n);
@@ -154,7 +154,7 @@ export default function BlockDetails() {
     setLoading(true);
     setError(undefined);
     setBlock(undefined);
-    setBlockTime(0);
+    setBlockTime(undefined);
     setBlockExhaustBurn(undefined);
     setExpandedPanels([]);
     setBlockData({});
@@ -186,6 +186,8 @@ export default function BlockDetails() {
                 Math.floor(new Date(blockTime * 1000).getTime() / 1000) -
                   Math.floor(new Date(justifyTime * 1000).getTime() / 1000),
               );
+            } else {
+              setBlockTime(null);
             }
             // The header burn accumulates within an epoch, so this block's burn is the step from
             // the parent, or the whole figure when the parent belongs to the previous epoch.
@@ -200,6 +202,7 @@ export default function BlockDetails() {
             if (cancelled) {
               return;
             }
+            setBlockTime(null);
             setBlockExhaustBurn(null);
           });
 
@@ -385,7 +388,9 @@ export default function BlockDetails() {
                           </TableRow>
                           <TableRow>
                             <TableCell>Block time</TableCell>
-                            <DataTableCell>{blockTime} secs</DataTableCell>
+                            <DataTableCell>
+                              {blockTime === undefined ? "…" : blockTime === null ? "--" : `${blockTime} secs`}
+                            </DataTableCell>
                           </TableRow>
                           {block!.stored_at && (
                             <TableRow>

@@ -66,14 +66,6 @@ function WatchedSubstatesLayout() {
   const [substatesError, setSubstatesError] = useState<string | null>(null);
   const [loadingSubstates, setLoadingSubstates] = useState(false);
   const requestIdRef = useRef(0);
-  const mountedRef = useRef(true);
-
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -107,14 +99,14 @@ function WatchedSubstatesLayout() {
         limit: BigInt(PAGE_SIZE),
         offset: BigInt(pageNum * PAGE_SIZE),
       });
-      if (!mountedRef.current || reqId !== requestIdRef.current) return;
+      if (reqId !== requestIdRef.current) return;
       setSubstates(resp.substates);
       setPage(pageNum);
     } catch (err: unknown) {
-      if (!mountedRef.current || reqId !== requestIdRef.current) return;
+      if (reqId !== requestIdRef.current) return;
       setSubstatesError(getErrorMessage(err, "Failed to load watched substates."));
     } finally {
-      if (mountedRef.current && reqId === requestIdRef.current) {
+      if (reqId === requestIdRef.current) {
         setLoadingSubstates(false);
       }
     }
@@ -122,7 +114,12 @@ function WatchedSubstatesLayout() {
 
   useEffect(() => {
     if (!selectedTemplate) return;
+    setSubstates([]);
+    setPage(0);
     void fetchSubstates(selectedTemplate, 0);
+    return () => {
+      requestIdRef.current++;
+    };
   }, [selectedTemplate, fetchSubstates]);
 
   async function handleChangePage(newPage: number) {
@@ -132,9 +129,7 @@ function WatchedSubstatesLayout() {
 
   function handleSelectTemplate(templateAddress: string) {
     if (templateAddress === selectedTemplate) {
-      if (page !== 0) {
-        void fetchSubstates(templateAddress, 0);
-      }
+      void fetchSubstates(templateAddress, 0);
       return;
     }
     setSelectedTemplate(templateAddress);

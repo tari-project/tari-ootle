@@ -55,6 +55,10 @@ pub struct StealthOutputsStatement {
     /// The stealth outputs that are to be created
     #[n(0)]
     #[cbor(decode_with = "decode_outputs")]
+    #[cfg_attr(
+        feature = "serde",
+        serde(deserialize_with = "ootle_serde::bounded_seq::deserialize::<{ MAX_STEALTH_OUTPUTS }, _, _>")
+    )]
     pub outputs: Vec<StealthUnspentOutput>,
     /// The revealed funds to output, and the key authorised to take them. When set, a bucket containing the revealed
     /// stealth funds is created for `receiver`. `None` is the only encoding of "no revealed output": a zero amount is
@@ -149,6 +153,10 @@ pub struct StealthInputsStatement {
     /// The stealth inputs that are to be spent
     #[n(0)]
     #[cbor(decode_with = "decode_inputs")]
+    #[cfg_attr(
+        feature = "serde",
+        serde(deserialize_with = "ootle_serde::bounded_seq::deserialize::<{ MAX_STEALTH_INPUTS }, _, _>")
+    )]
     pub inputs: Vec<StealthInput>,
     /// The total amount of revealed funds being spent.
     #[n(1)]
@@ -214,6 +222,10 @@ pub struct StealthTransferStatement {
     /// requires value conservation. Empty when no spent input gates on a covenant.
     #[n(3)]
     #[cbor(decode_with = "decode_covenant_claims")]
+    #[cfg_attr(
+        feature = "serde",
+        serde(deserialize_with = "ootle_serde::bounded_seq::deserialize::<{ MAX_STEALTH_INPUTS }, _, _>")
+    )]
     pub covenant_claims: Vec<CovenantBalanceClaim>,
 }
 
@@ -385,5 +397,34 @@ mod tests {
         let mut over_limit = at_limit;
         over_limit.inputs_statement.inputs.push(script_path_input(1, 0));
         assert_decodes(&over_limit, false);
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn statement_deserializes_up_to_its_count_limits() {
+        fn deserializes(statement: &StealthTransferStatement) -> bool {
+            let json = serde_json::to_string(statement).unwrap();
+            serde_json::from_str::<StealthTransferStatement>(&json).is_ok()
+        }
+        let inputs = |n| {
+            (0..n)
+                .map(|_| StealthInput::new(PedersenCommitmentBytes::zero()))
+                .collect()
+        };
+        assert!(deserializes(&statement(inputs(MAX_STEALTH_INPUTS))));
+        assert!(!deserializes(&statement(inputs(MAX_STEALTH_INPUTS + 1))));
+
+        assert!(deserializes(&statement(vec![script_path_input(
+            MAX_CONDITIONS_PER_CONJUNCTION,
+            MAX_INCLUSION_PROOF_LEN
+        )])));
+        assert!(!deserializes(&statement(vec![script_path_input(
+            1,
+            MAX_INCLUSION_PROOF_LEN + 1
+        )])));
+        assert!(!deserializes(&statement(vec![script_path_input(
+            MAX_CONDITIONS_PER_CONJUNCTION + 1,
+            0
+        )])));
     }
 }

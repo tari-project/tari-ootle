@@ -436,6 +436,10 @@ pub enum RequireRule {
     AnyOf(
         #[n(0)]
         #[cbor(decode_with = "decode_requirements")]
+        #[cfg_attr(
+            feature = "serde",
+            serde(deserialize_with = "ootle_serde::bounded_seq::deserialize_boxed::<{ MAX_ACCESS_RULE_NODES }, _, _>")
+        )]
         Box<[RuleRequirement]>,
     ),
     /// Requires all of the specified conditions to be met (logical AND)
@@ -443,6 +447,10 @@ pub enum RequireRule {
     AllOf(
         #[n(0)]
         #[cbor(decode_with = "decode_requirements")]
+        #[cfg_attr(
+            feature = "serde",
+            serde(deserialize_with = "ootle_serde::bounded_seq::deserialize_boxed::<{ MAX_ACCESS_RULE_NODES }, _, _>")
+        )]
         Box<[RuleRequirement]>,
     ),
     /// Requires N of the specified conditions to be met
@@ -451,6 +459,10 @@ pub enum RequireRule {
         #[n(0)] u16,
         #[n(1)]
         #[cbor(decode_with = "decode_requirements")]
+        #[cfg_attr(
+            feature = "serde",
+            serde(deserialize_with = "ootle_serde::bounded_seq::deserialize_boxed::<{ MAX_ACCESS_RULE_NODES }, _, _>")
+        )]
         Box<[RuleRequirement]>,
     ),
 }
@@ -1783,5 +1795,16 @@ mod tests {
             .find_invalid_rule(),
             None
         );
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn require_rule_deserializes_up_to_max_requirements() {
+        fn deserializes(rule: &RestrictedAccessRule) -> bool {
+            let json = serde_json::to_string(rule).unwrap();
+            serde_json::from_str::<RestrictedAccessRule>(&json).is_ok()
+        }
+        assert!(deserializes(&requirements(MAX_ACCESS_RULE_NODES)));
+        assert!(!deserializes(&requirements(MAX_ACCESS_RULE_NODES + 1)));
     }
 }

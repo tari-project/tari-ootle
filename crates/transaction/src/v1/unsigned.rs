@@ -55,9 +55,21 @@ pub struct UnsignedTransactionV1 {
     pub network: u8,
     #[n(1)]
     #[cbor(decode_with = "decode_instructions")]
+    #[cfg_attr(
+        feature = "serde",
+        serde(
+            deserialize_with = "ootle_serde::bounded_seq::deserialize::<{ crate::MAX_TRANSACTION_INSTRUCTIONS }, _, _>"
+        )
+    )]
     pub fee_instructions: Vec<Instruction>,
     #[n(2)]
     #[cbor(decode_with = "decode_instructions")]
+    #[cfg_attr(
+        feature = "serde",
+        serde(
+            deserialize_with = "ootle_serde::bounded_seq::deserialize::<{ crate::MAX_TRANSACTION_INSTRUCTIONS }, _, _>"
+        )
+    )]
     pub instructions: Vec<Instruction>,
 
     /// Input objects that may be read/write

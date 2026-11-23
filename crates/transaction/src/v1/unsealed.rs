@@ -43,6 +43,13 @@ pub struct UnsealedTransactionV1 {
     transaction: UnsignedTransactionV1,
     #[n(1)]
     #[cbor(decode_with = "decode_signatures")]
+    #[cfg_attr(
+        feature = "serde",
+        serde(
+            deserialize_with = "ootle_serde::bounded_seq::deserialize::<{ crate::MAX_SIGNATURES_PER_TRANSACTION }, _, \
+                                _>"
+        )
+    )]
     signatures: Vec<TransactionSignature>,
 }
 

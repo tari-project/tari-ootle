@@ -2374,26 +2374,47 @@ impl<TStore: StateReader> WorkingState<TStore> {
             return Ok(());
         }
 
+        let action = action.into();
+        let is_vault_read = matches!(
+            &action,
+            ActionIdent::Native(NativeAction::Vault(vault_action)) if !vault_action.requires_write_access()
+        );
+
         let component_lock = self
             .current_call_scope()?
             .get_current_component_lock()
-            .ok_or(RuntimeError::NotInComponentContext { action: action.into() })?;
+            .ok_or(RuntimeError::NotInComponentContext { action })?;
 
         let component = self.get_component(component_lock)?;
-        if !component.contains_substate(address)? {
-            warn!(
-                target: LOG_TARGET,
-                "Component {} attempted access to {} that it does not own",
-                component_lock.substate_id(),
-                address
-            );
-            return Err(RuntimeError::SubstateNotOwned {
-                id: address.clone(),
-                requested_owner: Box::new(component_lock.substate_id().clone()),
-            });
+        if component.contains_substate(address)? {
+            return Ok(());
         }
 
-        Ok(())
+        if is_vault_read && self.is_owned_by_acting_component(address)? {
+            return Ok(());
+        }
+
+        warn!(
+            target: LOG_TARGET,
+            "Component {} attempted access to {} that it does not own",
+            component_lock.substate_id(),
+            address
+        );
+        Err(RuntimeError::SubstateNotOwned {
+            id: address.clone(),
+            requested_owner: Box::new(component_lock.substate_id().clone()),
+        })
+    }
+
+    /// Whether the current frame is a resource auth hook frame and `address` is owned by the component whose
+    /// action triggered the hook. The acting component's frame is suspended for the hook call and the hook frame
+    /// cannot write it, so its loaded state is the state the action ran against.
+    fn is_owned_by_acting_component(&self, address: &SubstateId) -> Result<bool, RuntimeError> {
+        let Some(acting_component) = self.current_call_scope()?.acting_component().copied() else {
+            return Ok(false);
+        };
+        let component = self.store.get_loaded_component(acting_component)?;
+        Ok(component.contains_substate(address)?)
     }
 
     /// Enforces the stealth-transfer limits and counts this transfer against the per-transaction totals. Must be

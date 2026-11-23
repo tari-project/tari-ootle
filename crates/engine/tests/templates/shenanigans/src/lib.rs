@@ -329,8 +329,9 @@ mod template {
             Self::steal_from(vault_id.parse().unwrap())
         }
 
-        /// Withdraws a fixed amount rather than the balance, so the `Withdraw` is the first action taken on the
-        /// vault and the engine's verdict is on the withdrawal itself.
+        /// Withdraws a fixed amount from the vault. NOTE: withdraw_all is not used because it first fetches 
+        /// the balance, then withdraws and since the vault is not in scope, it fails on the _get balance_ 
+        /// read instead of the withdraw (write)
         fn steal_from(vault_id: VaultId) -> Bucket {
             Vault::for_test(vault_id).withdraw(Amount::from(1000u64))
         }

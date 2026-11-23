@@ -31,18 +31,7 @@ import { GetNetworkInfoResponse } from "@tari-project/ootle-ts-bindings";
 import { indexerGetNetworkInfo, settingsSet } from "@utils/json_rpc";
 import React, { useEffect, useState } from "react";
 import { Form } from "react-router-dom";
-
-function validateUrl(value: string): string | null {
-  try {
-    const url = new URL(value);
-    if (url.protocol !== "http:" && url.protocol !== "https:") {
-      return "URL must use http or https";
-    }
-    return null;
-  } catch {
-    return "Invalid URL";
-  }
-}
+import { normalizeIndexerUrl, validateIndexerUrl } from "./indexerSettingsHelpers";
 
 interface IndexerStatusProps {
   indexerUrl: string;
@@ -56,19 +45,29 @@ function IndexerStatus({ indexerUrl, walletNetwork }: IndexerStatusProps) {
 
   useEffect(() => {
     if (!indexerUrl) return;
+    let cancelled = false;
     setLoading(true);
     setInfo(null);
     setError(null);
     indexerGetNetworkInfo(indexerUrl)
       .then((res) => {
+        if (cancelled) return;
         setInfo(res);
         setError(null);
       })
       .catch((e) => {
+        if (cancelled) return;
         setError(e instanceof Error ? e.message : "Cannot connect to indexer");
         setInfo(null);
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [indexerUrl]);
 
   if (!indexerUrl) return null;
@@ -121,9 +120,11 @@ interface IndexerSettingsProps {
 
 function IndexerSettings({ indexerUrls, activeUrl, walletNetwork, onSaved }: IndexerSettingsProps) {
   const [inputUrl, setInputUrl] = useState("");
-  const [validationError, setValidationError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+
+  const trimmedInput = normalizeIndexerUrl(inputUrl);
+  const validationError = trimmedInput ? validateIndexerUrl(trimmedInput, indexerUrls) : null;
 
   const save = async (urls: string[]) => {
     setSaving(true);
@@ -142,21 +143,13 @@ function IndexerSettings({ indexerUrls, activeUrl, walletNetwork, onSaved }: Ind
 
   const onInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setInputUrl(e.target.value);
-    setValidationError(e.target.value ? validateUrl(e.target.value) : null);
     setSaveError(null);
   };
 
-  const onAdd = async () => {
-    const error = validateUrl(inputUrl);
-    if (error) {
-      setValidationError(error);
-      return;
-    }
-    if (indexerUrls.includes(inputUrl)) {
-      setValidationError("This indexer is already configured");
-      return;
-    }
-    if (await save([...indexerUrls, inputUrl])) {
+  const onAdd = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (saving || !trimmedInput || validationError) return;
+    if (await save([...indexerUrls, trimmedInput])) {
       setInputUrl("");
     }
   };
@@ -213,7 +206,7 @@ function IndexerSettings({ indexerUrls, activeUrl, walletNetwork, onSaved }: Ind
             error={!!validationError}
             helperText={validationError ?? " "}
           />
-          <Button variant="contained" type="submit" disabled={saving || !inputUrl || !!validationError}>
+          <Button variant="contained" type="submit" disabled={saving || !trimmedInput || !!validationError}>
             Add Indexer
           </Button>
         </Box>

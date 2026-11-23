@@ -21,7 +21,6 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { useAccountsCreate, useAccountsList, useAccountsSetDefault } from "@api/hooks/useAccounts";
-import queryClient from "@api/queryClient";
 import CopyAddress from "@components/CopyAddress";
 import FetchStatusCheck from "@components/FetchStatusCheck";
 import { BoxHeading2, DataTableCell } from "@components/StyledComponents";
@@ -39,7 +38,7 @@ import TableRow from "@mui/material/TableRow";
 import TextField from "@mui/material/TextField";
 import Tooltip from "@mui/material/Tooltip";
 import { AccountInfo, shortenSubstateId, substateIdToString } from "@tari-project/ootle-ts-bindings";
-import { useState } from "react";
+import { type FormEvent, useState } from "react";
 import { Form, Link } from "react-router-dom";
 import { useErrorNotification } from "../../../contexts/ErrorNotificationContext";
 
@@ -123,7 +122,7 @@ function Accounts() {
     error: errorAccountsList,
   } = useAccountsList(0, 10);
 
-  const { mutateAsync: mutateAddAccount } = useAccountsCreate();
+  const { mutateAsync: mutateAddAccount, isPending: isCreatingAccount } = useAccountsCreate();
   const { showError, showSuccess } = useErrorNotification();
   const { mutate: setDefaultAccount, isPending: isSettingDefault } = useAccountsSetDefault();
 
@@ -147,23 +146,24 @@ function Accounts() {
     });
   };
 
-  const onSubmitAddAccount = async () => {
-    await mutateAddAccount(
-      {
-        accountName: accountFormState.accountName,
-      },
-      {
-        onSettled: () => {
-          setAccountFormState({
-            accountName: "",
-            signingKeyIndex: "",
-            fee: "",
-          });
-          setShowAddAccountDialog(false);
-          queryClient.invalidateQueries({ queryKey: ["accounts"] });
-        },
-      },
-    );
+  const onSubmitAddAccount = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const accountName = accountFormState.accountName.trim();
+    if (isCreatingAccount || !accountName) {
+      return;
+    }
+    try {
+      await mutateAddAccount({ accountName });
+      setAccountFormState({
+        accountName: "",
+        signingKeyIndex: "",
+        fee: "",
+      });
+      setShowAddAccountDialog(false);
+      showSuccess("Account created");
+    } catch (error: unknown) {
+      showError(error instanceof Error ? error.message : "Failed to create account");
+    }
   };
 
   const onAccountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -192,11 +192,16 @@ function Accounts() {
                 value={accountFormState.accountName}
                 onChange={onAccountChange}
                 style={{ flexGrow: 1 }}
+                disabled={isCreatingAccount}
               />
-              <Button variant="contained" type="submit">
+              <Button
+                variant="contained"
+                type="submit"
+                disabled={isCreatingAccount || !accountFormState.accountName.trim()}
+              >
                 Add Account
               </Button>
-              <Button variant="outlined" onClick={() => showAddAccountDialog(false)}>
+              <Button variant="outlined" onClick={() => showAddAccountDialog(false)} disabled={isCreatingAccount}>
                 Cancel
               </Button>
             </Form>

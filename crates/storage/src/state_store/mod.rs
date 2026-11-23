@@ -765,6 +765,10 @@ pub trait StateStoreWriteTransaction {
 
     /// Commits the batch's transitions, recording each state version's transitions with the shard's
     /// [`TransitionAccumulator`] extended by them.
+    ///
+    /// Each state version in the batch must hold all of its transitions. A substate's head becomes the highest version
+    /// the batch writes for it, and DOWN if the batch puts that version down, whatever order the transitions are listed
+    /// in.
     fn substates_commit_batch(&mut self, update_batch: SubstateUpdateBatch) -> Result<(), StorageError>;
     /// Clears the values of substates downed in or before `epoch`, stopping at the first index entry that takes the
     /// count to `limit` or more. Returns the number of values cleared; a result below `limit` means none remain.

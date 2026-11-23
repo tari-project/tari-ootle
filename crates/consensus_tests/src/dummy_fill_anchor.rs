@@ -37,7 +37,7 @@ struct OrphanPlan {
 }
 
 /// Denies one committee member the first proposal to carry a command for the transaction, and records what
-/// that block said. From then on that block never reaches the member, in a proposal or in a catch-up response:
+/// that block said. From then on that block never reaches the member, in a proposal or in a catch-up page:
 /// a member that asked to catch up before the block was proposed is otherwise sent it as the responder's leaf,
 /// votes for it, and completes its quorum.
 fn withhold_first_command_for(plan: Arc<Mutex<OrphanPlan>>) -> MessageFilter {
@@ -47,7 +47,21 @@ fn withhold_first_command_for(plan: Arc<Mutex<OrphanPlan>>) -> MessageFilter {
     Box::new(move |from, to, msg| {
         let (block, is_proposal) = match msg {
             HotstuffMessage::Proposal(proposal) => (&proposal.block, true),
-            HotstuffMessage::CatchUpSyncResponse(response) => (&response.block, false),
+            // A page is withheld whole when it carries the orphan, as its leaf or as a fork at its height.
+            HotstuffMessage::CatchUpPage(page) => {
+                let plan = plan.lock().unwrap();
+                let carries_orphan = plan.orphan_block_id.is_some_and(|orphan_block_id| {
+                    page.blocks
+                        .iter()
+                        .chain(page.leaf.iter())
+                        .any(|proposal| *proposal.block.id() == orphan_block_id)
+                });
+                let is_orphan_to_starved = carries_orphan && plan.starved.as_ref() == Some(to);
+                if is_orphan_to_starved {
+                    log::info!("🔇 Withholding a catch-up page carrying the orphan from {to}");
+                }
+                return !is_orphan_to_starved;
+            },
             _ => return true,
         };
         let mut plan = plan.lock().unwrap();

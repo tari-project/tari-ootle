@@ -12,7 +12,7 @@ use std::{
 
 use config::Config;
 use log::*;
-use tari_common::configuration::{ConfigOverrideProvider, Network as L1Network};
+use tari_common::configuration::{ConfigOverrideProvider, Network as L1Network, loader::CONFIG_OVERRIDES_KEY};
 use tari_ootle_transaction::Network;
 
 const LOG_TARGET: &str = "tari::application::configuration";
@@ -50,6 +50,11 @@ pub fn load_configuration<P: AsRef<Path>, TOverride: ConfigOverrideProvider>(
 }
 
 /// Loads the config at the given path applying all overrides.
+///
+/// A section's network-scoped table (e.g. `[esmeralda.epoch_oracle]`) is merged over its root keys when the section
+/// loads, so the `TARI_*` environment and `-p`/application overrides are also stored under [`CONFIG_OVERRIDES_KEY`]
+/// for `merge_subconfig` to re-apply on top of it. An override therefore wins over the config file whether it names the
+/// root key (`epoch_oracle.x`) or the scoped one (`esmeralda.epoch_oracle.x`), and `-p` wins over the environment.
 pub fn load_configuration_with_overrides<P: AsRef<Path>, TOverride: ConfigOverrideProvider>(
     config_path: P,
     overrides: &TOverride,
@@ -87,7 +92,12 @@ pub fn load_configuration_with_overrides<P: AsRef<Path>, TOverride: ConfigOverri
         },
     };
 
-    let overrides = overrides.get_config_property_overrides(&convert_network_to_l1_network(&network));
+    let l1_network = convert_network_to_l1_network(&network);
+    let overrides = overrides.get_config_property_overrides(&l1_network);
+    let env = env_overrides(
+        std::env::vars_os().filter_map(|(key, value)| Some((key.into_string().ok()?, value.into_string().ok()?))),
+    );
+    let reapply = replay_list(&env, &overrides, l1_network.as_key_str());
 
     let mut cfg = Config::builder().add_source(cfg);
     for (key, value) in overrides {
@@ -97,12 +107,48 @@ pub fn load_configuration_with_overrides<P: AsRef<Path>, TOverride: ConfigOverri
     }
     cfg = cfg
         .set_override("network", network.to_string())
+        .map_err(|ce| ConfigError::new("Could not override config property", Some(ce.to_string())))?
+        .set_override(CONFIG_OVERRIDES_KEY, reapply)
         .map_err(|ce| ConfigError::new("Could not override config property", Some(ce.to_string())))?;
     let cfg = cfg
         .build()
         .map_err(|ce| ConfigError::new("Could not build config", Some(ce.to_string())))?;
 
     Ok(cfg)
+}
+
+/// The `TARI_*` environment variables as config overrides, keyed as the `TARI` [`config::Environment`] source keys
+/// them: `TARI_EPOCH_ORACLE__BASE_LAYER__X` becomes `epoch_oracle.base_layer.x`.
+fn env_overrides<I: IntoIterator<Item = (String, String)>>(vars: I) -> Vec<(String, String)> {
+    vars.into_iter()
+        .filter_map(|(key, value)| {
+            let key = key.to_lowercase().strip_prefix("tari_")?.replace("__", ".");
+            Some((key, value))
+        })
+        .collect()
+}
+
+/// The `key=value` entries `merge_subconfig` re-applies, later entries winning: environment overrides, then `-p` and
+/// application overrides. Each group is followed by its entries scoped to `network` copied to their root keys, so a
+/// scoped `-p esmeralda.epoch_oracle.x` beats an unscoped `-p epoch_oracle.x`.
+fn replay_list(env: &[(String, String)], overrides: &[(String, String)], network: &str) -> Vec<String> {
+    let scope = format!("{network}.");
+    let with_unscoped_copies = |entries: &[(String, String)]| {
+        let as_given = entries.iter().map(|(key, value)| (key.to_lowercase(), value.clone()));
+        let unscoped = entries
+            .iter()
+            .filter_map(|(key, value)| {
+                let root_key = key.to_lowercase().strip_prefix(&scope)?.to_string();
+                root_key.contains('.').then(|| (root_key, value.clone()))
+            })
+            .collect::<Vec<_>>();
+        as_given.chain(unscoped).collect::<Vec<_>>()
+    };
+    with_unscoped_copies(env)
+        .into_iter()
+        .chain(with_unscoped_copies(overrides))
+        .map(|(key, value)| format!("{key}={value}"))
+        .collect()
 }
 
 /// Returns the default configuration file template in parts from the embedded presets. If use_mining_config is true,
@@ -147,5 +193,48 @@ pub enum ConfigError {
 impl ConfigError {
     pub fn new(cause: &'static str, source: Option<String>) -> Self {
         Self::CustomError { cause, error: source }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn env_vars_are_keyed_as_the_environment_source_keys_them() {
+        let env = env_overrides([
+            (
+                "TARI_EPOCH_ORACLE__BASE_LAYER__BASE_NODE_GRPC_URL".to_string(),
+                "http://a/".to_string(),
+            ),
+            ("HOME".to_string(), "/home/x".to_string()),
+        ]);
+
+        assert_eq!(env, [(
+            "epoch_oracle.base_layer.base_node_grpc_url".to_string(),
+            "http://a/".to_string()
+        )]);
+    }
+
+    #[test]
+    fn later_replay_entries_take_precedence() {
+        let pair = |key: &str, value: &str| (key.to_string(), value.to_string());
+        let env = [
+            pair("esmeralda.epoch_oracle.x", "env-scoped"),
+            pair("epoch_oracle.y", "env"),
+        ];
+        let overrides = [
+            pair("epoch_oracle.x", "cli"),
+            pair("esmeralda.epoch_oracle.y", "cli-scoped"),
+        ];
+
+        assert_eq!(replay_list(&env, &overrides, "esmeralda"), [
+            "esmeralda.epoch_oracle.x=env-scoped",
+            "epoch_oracle.y=env",
+            "epoch_oracle.x=env-scoped",
+            "epoch_oracle.x=cli",
+            "esmeralda.epoch_oracle.y=cli-scoped",
+            "epoch_oracle.y=cli-scoped",
+        ]);
     }
 }

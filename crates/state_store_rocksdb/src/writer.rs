@@ -25,7 +25,7 @@
 #![deny(clippy::disallowed_methods)]
 
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     iter,
     ops::Deref,
     sync::Arc,
@@ -1356,6 +1356,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         let head_cf = db.cf(substate::HeadIndex)?;
         let unpruned_cf = db.cf(substate::UnprunedDownedValuesIndex)?;
         let records_transitions = update_batch.records_transitions();
+        let mut heads = HashMap::<SubstateId, SubstateHeadData>::new();
 
         for (shard, updates) in update_batch.updates {
             for (state_version, updates) in updates {
@@ -1399,7 +1400,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
                             let address = rec.to_substate_address();
                             cf.put(&address, &rec, OPERATION)?;
-                            head_cf.put(rec.substate_id(), &SubstateHeadData { version, is_up: true }, OPERATION)?;
+                            fold_head(&mut heads, rec.substate_id(), SubstateHeadData { version, is_up: true });
 
                             transitions.push(StateTransitionRecordData {
                                 substate_address: address,
@@ -1415,14 +1416,10 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
                                 at_state_version: state_version,
                             });
                             cf.put(&address, &substate, OPERATION)?;
-                            head_cf.put(
-                                &substate.substate_id,
-                                &SubstateHeadData {
-                                    version: substate.version(),
-                                    is_up: false,
-                                },
-                                OPERATION,
-                            )?;
+                            fold_head(&mut heads, &substate.substate_id, SubstateHeadData {
+                                version: substate.version(),
+                                is_up: false,
+                            });
                             downed_substate_addresses.push(address);
 
                             transitions.push(StateTransitionRecordData {
@@ -1455,6 +1452,10 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
                 db.cf(StateTransitionCf)?
                     .put(&(shard, state_version), &transition, OPERATION)?;
             }
+        }
+
+        for (substate_id, head) in &heads {
+            head_cf.put(substate_id, head, OPERATION)?;
         }
 
         Ok(())
@@ -2243,6 +2244,23 @@ impl<TAddr> Drop for RocksDbStateStoreWriteTransaction<'_, TAddr> {
                 );
             }
         }
+    }
+}
+
+/// Folds `head` into `heads`, keeping the later of the two for `substate_id`: the higher version, and at the same
+/// version DOWN, since a version that is put down stays down. A batch holds whole state versions and a substate's
+/// versions only increase from one state version to the next, so what this keeps is the substate's head whatever order
+/// the batch lists its transitions in, and is never below the head already stored.
+fn fold_head(heads: &mut HashMap<SubstateId, SubstateHeadData>, substate_id: &SubstateId, head: SubstateHeadData) {
+    match heads.get_mut(substate_id) {
+        Some(current) => {
+            if (head.version, !head.is_up) > (current.version, !current.is_up) {
+                *current = head;
+            }
+        },
+        None => {
+            heads.insert(substate_id.clone(), head);
+        },
     }
 }
 

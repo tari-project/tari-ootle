@@ -88,6 +88,20 @@ impl<TConsensusSpec: ConsensusSpec> OnInboundMessage<TConsensusSpec> {
     pub fn clear_buffer(&mut self) {
         self.message_buffer.clear_buffer();
     }
+
+    /// Admits `message` from `from`, delivered outside the inbound queue, by the view rule an inbound message follows.
+    /// It is returned when it is for the current view, held until its view when it is ahead, and dropped otherwise.
+    pub fn admit(
+        &mut self,
+        epoch_state: &EpochState<TConsensusSpec::Addr>,
+        current_height: NodeHeight,
+        has_processed_first_block: bool,
+        from: TConsensusSpec::Addr,
+        message: HotstuffMessage,
+    ) -> Option<HotstuffMessage> {
+        self.message_buffer
+            .admit(epoch_state, current_height, has_processed_first_block, from, message)
+    }
 }
 
 /// Size budget for messages held for views we have not reached yet. Half the default byte budget of the
@@ -273,6 +287,35 @@ impl<TConsensusSpec: ConsensusSpec> MessageBuffer<TConsensusSpec> {
     pub async fn discard(&mut self) {
         self.clear_buffer();
         while self.inbound_messaging.next_message().await.is_some() {}
+    }
+
+    fn admit(
+        &mut self,
+        epoch_state: &EpochState<TConsensusSpec::Addr>,
+        current_height: NodeHeight,
+        has_processed_first_block: bool,
+        from: TConsensusSpec::Addr,
+        message: HotstuffMessage,
+    ) -> Option<HotstuffMessage> {
+        let current_epoch = epoch_state.epoch();
+        match msg_relative_view(&message, current_epoch, current_height, has_processed_first_block) {
+            MessageRelativeView::Current => Some(message),
+            MessageRelativeView::Future { epoch, height } => {
+                push_to_buffer(
+                    &mut self.buffer,
+                    epoch_state.local_committee(),
+                    View::new(current_epoch, current_height),
+                    View::new(epoch, height),
+                    from,
+                    message,
+                );
+                None
+            },
+            MessageRelativeView::Past { .. } | MessageRelativeView::Discard => {
+                debug!(target: LOG_TARGET, "🗑️ Discard admitted message {message}. Current view {current_epoch}/{current_height}");
+                None
+            },
+        }
     }
 
     pub fn clear_buffer(&mut self) {
@@ -533,6 +576,7 @@ fn buffered_message_size(msg: &HotstuffMessage) -> usize {
     match msg {
         HotstuffMessage::Proposal(_) |
         HotstuffMessage::CatchUpSyncResponse(_) |
+        HotstuffMessage::CatchUpPage(_) |
         HotstuffMessage::ForeignProposal(_) |
         HotstuffMessage::MissingTransactionsResponse(_) => UNBOUNDED_MESSAGE_SIZE,
         HotstuffMessage::NewView(_) |
@@ -730,12 +774,17 @@ fn msg_relative_view(
             }
             MessageRelativeView::Current
         },
-        // Catch-up responses are an ordered block import, not live consensus. They are deliberately
-        // exempt from the view filter: a node behind on blocks must ingest them regardless of where
-        // its current view sits (above OR below the imported heights). Ordering is preserved by the
-        // sender (FIFO, height order) and the request/response loop, and each imported block advances
-        // the view monotonically, so they are never buffered or dropped here.
-        HotstuffMessage::CatchUpSyncResponse(_) => MessageRelativeView::Current,
+        // A catch-up page is an ordered block import, not live consensus, so it is exempt from the view filter: a node
+        // behind on blocks must ingest it wherever its current view sits. One for another epoch answers a request this
+        // node no longer tracks.
+        HotstuffMessage::CatchUpPage(msg) => {
+            if msg.epoch != current_epoch {
+                return MessageRelativeView::Discard;
+            }
+            MessageRelativeView::Current
+        },
+        // Peers send catch-up blocks only inside pages.
+        HotstuffMessage::CatchUpSyncResponse(_) => MessageRelativeView::Discard,
     }
 }
 

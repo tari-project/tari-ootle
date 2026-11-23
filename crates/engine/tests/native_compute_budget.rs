@@ -326,7 +326,7 @@ fn paid_native_verification_is_charged() {
             .pay_fee_from_component(account, 900_000_000u64)
             .stealth_transfer(faucet_resx, transfer.statement)
             .finish()
-            .add_signer(&seal_signer, &mint.output_masks[0])
+            .authorize(&seal_signer, [&mint.output_masks[0]])
             .seal(&key),
         vec![owner, mask_badge],
     );
@@ -379,7 +379,7 @@ fn view_key_surcharge_is_charged_per_output() {
             .pay_fee_from_component(account, 900_000_000u64)
             .stealth_transfer(faucet_resx, transfer.statement)
             .finish()
-            .add_signer(&seal_signer, &mint.output_masks[0])
+            .authorize(&seal_signer, [&mint.output_masks[0]])
             .seal(&key),
         vec![owner, mask_badge],
     );

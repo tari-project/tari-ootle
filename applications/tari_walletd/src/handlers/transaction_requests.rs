@@ -58,6 +58,7 @@ use tari_template_lib_types::{ResourceAddress, crypto::PedersenCommitmentBytes, 
 
 use super::context::HandlerContext;
 use crate::handlers::{
+    component_rules_changes::component_rules_changes,
     component_upgrades::component_upgrades,
     helpers::{
         OrJrpcNotFound,
@@ -463,6 +464,10 @@ fn to_info(context: &HandlerContext, model: TransactionRequestModel) -> Result<T
         model.unsigned_transaction.fee_instructions(),
         model.unsigned_transaction.instructions(),
     );
+    let component_rules_changes = component_rules_changes(
+        model.unsigned_transaction.fee_instructions(),
+        model.unsigned_transaction.instructions(),
+    );
 
     Ok(TransactionRequestInfo {
         request_id: model.id,
@@ -474,6 +479,7 @@ fn to_info(context: &HandlerContext, model: TransactionRequestModel) -> Result<T
         transaction_id: model.transaction_id,
         value_summaries,
         component_upgrades,
+        component_rules_changes,
         main_signer,
         external_signers,
         expires_at: model.expires_at.assume_utc().unix_timestamp(),
@@ -754,10 +760,11 @@ mod tests {
             .unwrap_err();
         assert!(err.to_string().contains("transaction.main_signer"), "{err}");
 
+        let external_only: tari_ootle_transaction::AuthorizerSet = [external_public_key].into_iter().collect();
         req.signatures = vec![TransactionSignature::sign(
             &external_secret,
-            &wallet_public_key,
-            &req.transaction,
+            tari_ootle_transaction::AuthorizationContext::new(&wallet_public_key, &external_only),
+            req.transaction.body(),
         )];
         let request_id = handle_create(&daemon.context, Some(&tool), req)
             .await

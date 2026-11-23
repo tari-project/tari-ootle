@@ -2946,6 +2946,22 @@ mod locked_epoch {
 }
 
 mod some_accept {
+    use tari_ootle_storage::consensus_models::{
+        BlockHeaderMetadata,
+        BlockPledge,
+        CommandOrHash,
+        CommandsCommitProof,
+        ForeignProposal,
+    };
+    use tari_sidechain::{
+        CommitProofElement,
+        QcSignatures,
+        QuorumCertificate,
+        SidechainBlockCommitProof,
+        SidechainBlockHeader,
+        SignerBitmap,
+    };
+
     use super::*;
 
     fn aborted_after_local_accept() -> (Replica, TransactionPoolRecord) {
@@ -3111,6 +3127,153 @@ mod some_accept {
             "{:?}",
             evaluation.no_vote
         );
+    }
+
+    /// A foreign proposal from `foreign` whose only command is a LocalAccept of `atom`.
+    fn foreign_local_accept_proposal(foreign: ShardGroup, atom: MultiShardAtom) -> ForeignProposal {
+        let metadata = BlockHeaderMetadata {
+            total_leader_fee: 0,
+            timestamp: 0,
+            extra_data: ExtraData::new(),
+            timeout_certificate_id: None,
+            is_dummy: false,
+        };
+        let header = SidechainBlockHeader {
+            network: NETWORK.as_byte(),
+            protocol_version: 0,
+            parent_id: Default::default(),
+            justify_id: Default::default(),
+            height: 1,
+            epoch: 0,
+            epoch_hash: Default::default(),
+            shard_group: tari_sidechain::ShardGroup {
+                start: foreign.start().as_u32(),
+                end_inclusive: foreign.end().as_u32(),
+            },
+            proposed_by: Default::default(),
+            state_merkle_root: Default::default(),
+            command_merkle_root: Default::default(),
+            transaction_merkle_root: Default::default(),
+            signature: Default::default(),
+            accumulated_data: Default::default(),
+            metadata_hash: metadata.calculate_hash(),
+        };
+        let proof_elements = vec![CommitProofElement::QuorumCertificate(QuorumCertificate {
+            header_hash: header.calculate_hash(),
+            parent_id: header.parent_id,
+            protocol_version: header.protocol_version,
+            epoch: header.epoch,
+            height: header.height,
+            signatures: QcSignatures::Schnorr {
+                signers: SignerBitmap::from_indices(1, [0]).unwrap(),
+                signatures: vec![],
+            },
+            decision: QuorumDecision::Accept,
+        })];
+        let commit_proof = CommandsCommitProof::new_latest(
+            vec![CommandOrHash::Command(Command::LocalAccept(atom))],
+            SidechainBlockCommitProof { header, proof_elements },
+        );
+        ForeignProposal::new(commit_proof, BlockPledge::default(), metadata)
+    }
+
+    #[test]
+    fn a_some_accept_in_the_block_of_a_foreign_local_accept_commit_is_voted_for() {
+        let (mut replica, rec, abort) = prepared_cross_shard_creating_an_existing_output();
+        let id = *rec.id();
+        let prepared_evidence = rec.evidence().clone();
+        let (_, foreign) = local_and_foreign_halves();
+        let foreign_input = component_id_in(foreign);
+
+        replica
+            .store
+            .with_write_tx(|tx| {
+                tx.transaction_pool_add_pending_update(
+                    &replica.parent.as_leaf(),
+                    &TransactionPoolStatusUpdate::new(rec, true),
+                )
+            })
+            .unwrap();
+        replica.extend();
+        replica.accept_in_parent(&abort);
+
+        let mut foreign_evidence = prepared_evidence;
+        let foreign_sg_ev = foreign_evidence.add_shard_group(foreign);
+        foreign_sg_ev.insert_from_lock_intent(
+            VersionedSubstateIdLockIntent::write(
+                VersionedSubstateId::new(foreign_input.clone(), SubstateVersion::ZERO),
+                true,
+            )
+            .with_pledged_value(&component_value()),
+        );
+        foreign_sg_ev.insert_output(foreign_input, SubstateVersion::from(1));
+        let involved = NonZeroU64::new(foreign_evidence.num_shard_groups() as u64).unwrap();
+        let foreign_proposal = foreign_local_accept_proposal(foreign, MultiShardAtom {
+            id,
+            decision: Decision::Commit,
+            evidence: foreign_evidence,
+            transaction_fee: FEE,
+            leader_fee: Some(calculate_leader_fee(FEE, exhaust_burn(), involved)),
+            fee_intent_only: false,
+            locked_epoch: abort.locked_epoch.clone(),
+        });
+
+        let block = &replica.candidate;
+        let mut proposer_rec = replica.pending_record(&id);
+        let (proposed, replica_rec, no_vote) = replica
+            .store
+            .with_read_tx(|tx| {
+                // The proposer derives its SomeAccept from the stored record with the foreign proposal's update
+                // applied.
+                let mut substate_store = PendingSubstateStore::init(tx, block.as_leaf(), NUM_PRESHARDS)?;
+                let mut change_set = ProposedBlockChangeSet::new(block.as_leaf());
+                crate::hotstuff::foreign_proposal_processor::process_foreign_block(
+                    tx,
+                    &foreign_proposal,
+                    &replica.committee,
+                    &mut substate_store,
+                    &mut change_set,
+                )
+                .unwrap();
+                change_set.apply_transaction_update(&mut proposer_rec);
+                let proposed = proposer_rec.get_current_multi_shard_atom().unwrap();
+
+                // A replica reads the record from the change set the same foreign proposal updated.
+                let validator = LocalCommandValidator::new(&replica.manager, &replica.public_key);
+                let mut substate_store = PendingSubstateStore::init(tx, block.as_leaf(), NUM_PRESHARDS)?;
+                let mut change_set = ProposedBlockChangeSet::new(block.as_leaf());
+                crate::hotstuff::foreign_proposal_processor::process_foreign_block(
+                    tx,
+                    &foreign_proposal,
+                    &replica.committee,
+                    &mut substate_store,
+                    &mut change_set,
+                )
+                .unwrap();
+                let replica_rec = change_set
+                    .get_transaction_pool_record(tx, substate_store.parent_chain(), &id)
+                    .unwrap();
+                let no_vote = validator
+                    .evaluate_some_accept_command(
+                        tx,
+                        block,
+                        &proposed,
+                        &replica.committee,
+                        &mut substate_store,
+                        &mut change_set,
+                        &mut BlockTotals::default(),
+                    )
+                    .unwrap();
+                Ok::<_, StorageError>((proposed, replica_rec, no_vote))
+            })
+            .unwrap();
+
+        assert_eq!(proposed.decision, Decision::Abort(AbortReason::LockOutputsFailed));
+        assert!(no_vote.is_none(), "{no_vote:?}");
+        let foreign_ev = replica_rec.evidence().get(&foreign).unwrap();
+        assert!(foreign_ev.inputs().values().all(Option::is_none), "{foreign_ev:?}");
+        assert!(foreign_ev.outputs().is_empty(), "{foreign_ev:?}");
+        assert_eq!(*replica_rec.evidence(), proposed.evidence);
     }
 }
 

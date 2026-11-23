@@ -345,6 +345,22 @@ impl<TStore: StateReader> WorkingState<TStore> {
         self.lock_substate(addr, LockFlag::Read)
     }
 
+    /// Read-locks `addr` only when the current call frame has it in scope, so a frame cannot read a substate it was
+    /// never given by naming its address.
+    pub fn read_lock_substate_in_scope(&mut self, addr: SubstateId) -> Result<LockedSubstate, RuntimeError> {
+        self.check_substate_in_scope(&addr)?;
+        self.read_lock_substate(addr)
+    }
+
+    /// Fails with [`RuntimeError::SubstateOutOfScope`] when `addr` is outside the current call frame's scope.
+    pub fn check_substate_in_scope(&self, addr: &SubstateId) -> Result<(), RuntimeError> {
+        if self.current_call_scope()?.is_substate_in_scope(addr) {
+            Ok(())
+        } else {
+            Err(RuntimeError::SubstateOutOfScope { id: addr.clone() })
+        }
+    }
+
     pub fn write_lock_substate(&mut self, addr: SubstateId) -> Result<LockedSubstate, RuntimeError> {
         self.lock_substate(addr, LockFlag::Write)
     }
@@ -451,9 +467,16 @@ impl<TStore: StateReader> WorkingState<TStore> {
         locked: &LockedSubstate,
         f: F,
     ) -> Result<(), RuntimeError> {
-        f(&mut self.get_component_mut(locked)?.header);
+        let component = self.get_component_mut(locked)?;
+        f(&mut component.header);
+        let component_template = *component.template_address();
+        // A top-level instruction changes a header outside any frame; the change is attributed to the component's
+        // own template.
+        let template_address = match self.call_frames.last() {
+            Some(frame) => *frame.current_template(),
+            None => component_template,
+        };
 
-        let template_address = *self.current_template()?;
         self.push_event(Event::std(
             Some(locked.substate_id().clone()),
             template_address,
@@ -1591,6 +1614,19 @@ impl<TStore: StateReader> WorkingState<TStore> {
         Ok(count)
     }
 
+    /// Rejects a state that would persist more than [`limits::EngineLimits::max_substate_outputs`] substates.
+    ///
+    /// Component, resource and vault addresses are drawn from a counter with the same bound, but a substate can be
+    /// created without one: every minted non-fungible is a substate of its own. Counted here, where the set to
+    /// persist is known, so the bound holds for every kind of substate.
+    pub fn enforce_substate_output_limit(&self) -> Result<(), RuntimeError> {
+        let count = self.store.mutated_substates().len();
+        if count > limits::ENGINE_LIMITS.max_substate_outputs {
+            return Err(LimitError::SubstateOutputsExceeded { count }.into());
+        }
+        Ok(())
+    }
+
     /// Rejects a state that would persist more than
     /// [`limits::EngineLimits::max_transaction_output_bytes`]: its mutated substates and its receipt.
     pub fn enforce_output_size_limit(&mut self) -> Result<(), RuntimeError> {
@@ -2338,26 +2374,47 @@ impl<TStore: StateReader> WorkingState<TStore> {
             return Ok(());
         }
 
+        let action = action.into();
+        let is_vault_read = matches!(
+            &action,
+            ActionIdent::Native(NativeAction::Vault(vault_action)) if !vault_action.requires_write_access()
+        );
+
         let component_lock = self
             .current_call_scope()?
             .get_current_component_lock()
-            .ok_or(RuntimeError::NotInComponentContext { action: action.into() })?;
+            .ok_or(RuntimeError::NotInComponentContext { action })?;
 
         let component = self.get_component(component_lock)?;
-        if !component.contains_substate(address)? {
-            warn!(
-                target: LOG_TARGET,
-                "Component {} attempted access to {} that it does not own",
-                component_lock.substate_id(),
-                address
-            );
-            return Err(RuntimeError::SubstateNotOwned {
-                id: address.clone(),
-                requested_owner: Box::new(component_lock.substate_id().clone()),
-            });
+        if component.contains_substate(address)? {
+            return Ok(());
         }
 
-        Ok(())
+        if is_vault_read && self.is_owned_by_acting_component(address)? {
+            return Ok(());
+        }
+
+        warn!(
+            target: LOG_TARGET,
+            "Component {} attempted access to {} that it does not own",
+            component_lock.substate_id(),
+            address
+        );
+        Err(RuntimeError::SubstateNotOwned {
+            id: address.clone(),
+            requested_owner: Box::new(component_lock.substate_id().clone()),
+        })
+    }
+
+    /// Whether the current frame is a resource auth hook frame and `address` is owned by the component whose
+    /// action triggered the hook. The acting component's frame is suspended for the hook call and the hook frame
+    /// cannot write it, so its loaded state is the state the action ran against.
+    fn is_owned_by_acting_component(&self, address: &SubstateId) -> Result<bool, RuntimeError> {
+        let Some(acting_component) = self.current_call_scope()?.acting_component().copied() else {
+            return Ok(false);
+        };
+        let component = self.store.get_loaded_component(acting_component)?;
+        Ok(component.contains_substate(address)?)
     }
 
     /// Enforces the stealth-transfer limits and counts this transfer against the per-transaction totals. Must be
@@ -2667,6 +2724,7 @@ mod tests {
                 access_rules: ComponentAccessRules::new(),
                 entity_id: address.entity_id(),
                 upgrade_rule: UpdateRule::default(),
+                rules_updater: None,
             },
             body: tari_engine_types::component::ComponentBody {
                 state: tari_bor::Value::Null,

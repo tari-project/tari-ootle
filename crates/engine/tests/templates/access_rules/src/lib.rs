@@ -59,6 +59,7 @@ mod access_rules_template {
             })
             .with_owner_rule(owner_rule)
             .with_access_rules(component_access_rule)
+            .with_rules_updater(RulesUpdater::Owner)
             .create()
         }
 

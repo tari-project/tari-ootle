@@ -3,7 +3,9 @@ import type { ComponentAddress } from "./ComponentAddress";
 import type { Crud } from "./Crud";
 import type { ReadOnly } from "./ReadOnly";
 import type { ResourceAddress } from "./ResourceAddress";
+import type { RistrettoPublicKeyBytes } from "./RistrettoPublicKeyBytes";
 import type { TxRequestAction } from "./TxRequestAction";
+import type { VnFeesAction } from "./VnFeesAction";
 
 /**
  * A capability the wallet daemon recognises as granted by a caller or required
@@ -27,7 +29,7 @@ export type Permission =
   | { Nfts: [Crud, ResourceAddress | null] }
   | { Confidential: [Crud, ComponentAddress | null] }
   | { StealthUtxos: [Crud, ComponentAddress | null] }
-  | { Validators: Crud }
+  | { VnFees: [VnFeesAction, RistrettoPublicKeyBytes | null] }
   | { Settings: Crud }
   | { AddressBook: Crud }
   | { Substates: ReadOnly }

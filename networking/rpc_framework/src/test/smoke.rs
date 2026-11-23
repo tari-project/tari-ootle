@@ -716,6 +716,25 @@ async fn a_session_whose_client_stops_reading_is_closed_and_its_slot_released() 
 }
 
 #[tokio::test]
+async fn serve_returns_when_notifications_end_while_a_client_holds_its_session_open() {
+    let server = TestRpcServer::with_sessions(GreetingService::default(), 1);
+    let mut client = connect(server.dial()).await.unwrap();
+    client.say_hello(SayHelloRequest::default()).await.unwrap();
+
+    let TestRpcServer {
+        notif_tx,
+        shutdown: _shutdown,
+        handle,
+    } = server;
+    drop(notif_tx);
+    time::timeout(Duration::from_secs(5), handle)
+        .await
+        .expect("serve waited on a session its client kept open")
+        .unwrap();
+    client.say_hello(SayHelloRequest::default()).await.unwrap_err();
+}
+
+#[tokio::test]
 async fn max_per_client_sessions() {
     let server = TestRpcServer::spawn(
         GreetingService::default(),

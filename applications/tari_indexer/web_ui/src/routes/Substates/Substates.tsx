@@ -221,6 +221,10 @@ function ComponentView({ data }: { data: Component }) {
           { label: "Owner Rule", value: <CodeBlock>{renderJson(data.header.owner_rule)}</CodeBlock> },
           { label: "Access Rules", value: <CodeBlock>{renderJson(data.header.access_rules)}</CodeBlock> },
           { label: "Upgrade Rule", value: <CodeBlock>{renderJson(data.header.upgrade_rule)}</CodeBlock> },
+          {
+            label: "Rules Updater",
+            value: <CodeBlock>{renderJson(data.header.rules_updater ?? "TemplateManaged")}</CodeBlock>,
+          },
         ]}
       />
       <Typography variant="subtitle2">State</Typography>

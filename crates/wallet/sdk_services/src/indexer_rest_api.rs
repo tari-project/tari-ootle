@@ -2,6 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
+    collections::HashMap,
     ops::Deref,
     sync::{Arc, Mutex},
     time::Duration,
@@ -28,6 +29,7 @@ use tari_indexer_client::{
         GetCommitteeRequest,
         GetLatestEpochCheckpointRequest,
         GetSubstateRequest,
+        GetSubstateVersionsRequest,
         GetSubstatesRequest,
         GetTransactionResultRequest,
         GetUtxoUpdatesRequest,
@@ -414,6 +416,36 @@ impl WalletNetworkInterface for IndexerRestApiNetworkInterface {
         Ok(fetched)
     }
 
+    async fn get_substate_versions(
+        &self,
+        substate_ids: &[SubstateId],
+    ) -> Result<HashMap<SubstateId, SubstateVersion>, Self::Error> {
+        let client = self.tracked_client();
+        let mut versions = HashMap::with_capacity(substate_ids.len());
+        for chunk in substate_ids.chunks(MAX_SUBSTATES_PER_FETCH) {
+            let ids = chunk.to_vec().try_into().map_err(|_| {
+                IndexerRestApiNetworkInterfaceError::IndexerClientError(IndexerRestClientError::RequestInvariant {
+                    details: "Too many substate IDs requested".to_string(),
+                })
+            })?;
+            let resp = self
+                .observe_checked(
+                    &client,
+                    client.get_substate_versions(GetSubstateVersionsRequest { substate_ids: ids }),
+                    |resp| match resp.versions.keys().find(|id| !chunk.contains(id)) {
+                        Some(id) => Err(IndexerRestApiNetworkInterfaceError::UnrequestedSubstateVersion {
+                            substate_id: id.clone(),
+                        }),
+                        None => Ok(()),
+                    },
+                )
+                .await?;
+            versions.extend(resp.versions);
+        }
+
+        Ok(versions)
+    }
+
     async fn submit_transaction(&self, transaction: Transaction) -> Result<TransactionId, Self::Error> {
         let transaction = TransactionEnvelope::encode(transaction)?;
         self.submit_transaction_envelope(transaction).await
@@ -785,6 +817,8 @@ pub enum IndexerRestApiNetworkInterfaceError {
         substate_id: SubstateId,
         version: SubstateVersion,
     },
+    #[error("Indexer answered with the version of {substate_id}, which was not asked for")]
+    UnrequestedSubstateVersion { substate_id: SubstateId },
     #[error("Indexer returned an invalid UTXO page cursor {next_cursor:?} after {cursor:?}")]
     InvalidUtxoPageCursor {
         cursor: Option<UtxoId>,
@@ -853,6 +887,7 @@ impl TransactionStatusResponseError for IndexerRestApiNetworkInterfaceError {
             IndexerRestApiNetworkInterfaceError::SubstateTypeMismatch(_) |
             IndexerRestApiNetworkInterfaceError::UndecodableValue { .. } |
             IndexerRestApiNetworkInterfaceError::UnrequestedDownAnswer { .. } |
+            IndexerRestApiNetworkInterfaceError::UnrequestedSubstateVersion { .. } |
             IndexerRestApiNetworkInterfaceError::InvalidUtxoPageCursor { .. } => ResponseErrorStatus::InternalError {
                 message: self.to_string(),
             },
@@ -1006,6 +1041,7 @@ mod tests {
         prost::Message,
         types::{
             GetSubstateResponse,
+            GetSubstateVersionsResponse,
             GetSubstatesResponse,
             GetTransactionResultResponse,
             GetUtxosResponse,
@@ -1389,6 +1425,40 @@ mod tests {
             err,
             IndexerRestApiNetworkInterfaceError::SubstateTypeMismatch(_)
         ));
+    }
+
+    #[tokio::test]
+    async fn substate_versions_are_served_for_the_ids_asked_for() {
+        let body = serde_json::to_string(&GetSubstateVersionsResponse {
+            versions: HashMap::from([(component_id(), SubstateVersion::new(3))]),
+        })
+        .unwrap();
+        let network = network_answering_with(body).await;
+
+        let versions = network.get_substate_versions(&[component_id()]).await.unwrap();
+
+        assert_eq!(versions, HashMap::from([(component_id(), SubstateVersion::new(3))]));
+    }
+
+    /// A version for an id the wallet did not ask for would be pinned as an input it never chose.
+    #[tokio::test]
+    async fn a_substate_version_that_was_not_asked_for_is_refused() {
+        let other: SubstateId = ComponentAddress::from_array([2; 32]).into();
+        let body = serde_json::to_string(&GetSubstateVersionsResponse {
+            versions: HashMap::from([(other.clone(), SubstateVersion::new(1))]),
+        })
+        .unwrap();
+        let network = network_answering_with(body).await;
+
+        let err = network.get_substate_versions(&[component_id()]).await.unwrap_err();
+
+        assert!(
+            matches!(
+                &err,
+                IndexerRestApiNetworkInterfaceError::UnrequestedSubstateVersion { substate_id } if substate_id == &other
+            ),
+            "{err}"
+        );
     }
 
     /// An accepted execution whose diff brings up `component_id()` with a vault value.

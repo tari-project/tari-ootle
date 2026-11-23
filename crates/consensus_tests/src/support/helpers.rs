@@ -67,6 +67,7 @@ pub fn make_test_component_with_state_size(entity_id: EntityId, state_size: usiz
             access_rules: Default::default(),
             entity_id,
             upgrade_rule: Default::default(),
+            rules_updater: None,
         },
         body: ComponentBody { state },
     })

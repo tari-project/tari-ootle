@@ -426,5 +426,33 @@ mod tests {
             MAX_CONDITIONS_PER_CONJUNCTION + 1,
             0
         )])));
+
+        let output = || StealthUnspentOutput {
+            output: crate::stealth::UnspentOutput {
+                commitment: PedersenCommitmentBytes::zero(),
+                sender_public_nonce: RistrettoPublicKeyBytes::zero(),
+                encrypted_data: crate::EncryptedData::empty(),
+                minimum_value_promise: 0,
+                viewable_balance_proof: None,
+            },
+            auth: crate::stealth::SpendAuthorization::Key(RistrettoPublicKeyBytes::zero()),
+            tag: crate::crypto::UtxoTag::new(0),
+        };
+        let mut with_outputs = statement(vec![]);
+        with_outputs.outputs_statement.outputs = (0..MAX_STEALTH_OUTPUTS).map(|_| output()).collect();
+        assert!(deserializes(&with_outputs));
+        with_outputs.outputs_statement.outputs.push(output());
+        assert!(!deserializes(&with_outputs));
+
+        let claim = || CovenantBalanceClaim {
+            partition_input_index: 0,
+            revealed_amount: Amount::ZERO,
+            signature: BalanceProofSignature::zero(),
+        };
+        let mut with_claims = statement(vec![]);
+        with_claims.covenant_claims = (0..MAX_STEALTH_INPUTS).map(|_| claim()).collect();
+        assert!(deserializes(&with_claims));
+        with_claims.covenant_claims.push(claim());
+        assert!(!deserializes(&with_claims));
     }
 }

@@ -32,14 +32,13 @@ import { useNftTransferStore } from "@store/nftTransferStore";
 import {
   Account,
   ComponentAddressOrName,
-  getRejectReasonFromTransactionResult,
   NonFungibleId,
   NonFungibleToken,
-  rejectReasonToString,
   ResourceAddress,
 } from "@tari-project/ootle-ts-bindings";
 import { substateIdToString } from "@utils/helpers";
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import { formatNftTransferRejection, parseNftFeeAmount, resolveSelectedNftTransferState } from "../nftTransferHelpers";
 import ConfirmationStep from "../steps/ConfirmationStep";
 import FormStep from "../steps/FormStep";
 import ResultStep from "../steps/ResultStep";
@@ -86,30 +85,6 @@ function getAccountSelector(account: Account): ComponentAddressOrName {
   return {
     ComponentAddress: account.component_address,
   };
-}
-
-function nftIdToString(nftId: NonFungibleId): string {
-  const key = Object.keys(nftId)[0];
-  // @ts-ignore
-  const id = nftId[key].toString();
-  const typeName = getNftIdTypeAsName(nftId);
-  return typeName + "_" + id;
-}
-
-function getNftIdTypeAsName(nftId: NonFungibleId): string {
-  const key = Object.keys(nftId)[0];
-  switch (key) {
-    case "U256":
-      return "uuid";
-    case "String":
-      return "str";
-    case "Uint32":
-      return "u32";
-    case "Uint64":
-      return "u64";
-    default:
-      return "";
-  }
 }
 
 export function TransferNftDialog(props: TransferNftDialogProps) {
@@ -179,7 +154,7 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
       source_account: sourceAccount!,
       target_account_address: transferFormState.targetAccountAddress,
       dry_run: false,
-      max_fee: transferFormState.maxFee ? BigInt(transferFormState.maxFee) : 0n,
+      max_fee: parseNftFeeAmount(transferFormState.maxFee),
       fee_payer_account: feePayerAccount!,
       resource_address: transferFormState.resourceAddress,
     };
@@ -211,8 +186,7 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
         return result.fee;
       } else {
         console.error("Fee estimation rejected:", result);
-        const reason = result ? getRejectReasonFromTransactionResult(result.result.result) : undefined;
-        throw new Error(reason ? rejectReasonToString(reason) : "Transaction was rejected");
+        throw new Error(formatNftTransferRejection(result));
       }
     } catch (e: any) {
       console.error("Fee estimation error:", e);
@@ -274,7 +248,7 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
       } else {
         setTransferResult({
           success: false,
-          message: "Transfer failed: Transaction was rejected",
+          message: `Transfer failed: ${formatNftTransferRejection(result)}`,
         });
       }
     } catch (e: any) {
@@ -300,26 +274,11 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
     if (typeof event.target.value == "string") {
       return;
     }
-    const nftNamesSelected = event.target.value.map((s) => JSON.parse(s)) as NonFungibleId[];
-    const nftsSelected = nftNamesSelected
-      .map((nftId) => {
-        return availableNfts.find((nft) => {
-          return nftIdToString(nft.nft_id) === nftIdToString(nftId);
-        })!;
-      })
-      .filter((value) => Boolean(value));
-
+    const nextState = resolveSelectedNftTransferState(event.target.value, availableNfts, preSelectedResourceAddress);
     setValidity({
-      nfts: nftsSelected.length > 0,
+      nfts: nextState.nfts.length > 0,
     });
-    if (nftsSelected.length === 0) {
-      return;
-    }
-
-    setTransferFormState({
-      nfts: nftsSelected.map((item) => item.nft_id),
-      resourceAddress: nftsSelected[0].resource_address,
-    });
+    setTransferFormState(nextState);
   };
 
   const handlePayerAccountChange = (event: SelectChangeEvent) => {
@@ -332,6 +291,7 @@ export function TransferNftDialog(props: TransferNftDialogProps) {
 
       setTransferFormState({
         payerAccount: value,
+        maxFee: "",
       });
     }
   };

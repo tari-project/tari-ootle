@@ -31,6 +31,7 @@ import {
 } from "@tari-project/ootle-ts-bindings";
 import { XTR_CURRENCY } from "@utils/currency";
 import { displayNftId, formatCurrency, substateIdToString } from "@utils/helpers";
+import { parseNftFeeAmount } from "../nftTransferHelpers";
 
 interface ConfirmationStepProps {
   accounts: Array<{ account: Account }> | undefined;
@@ -140,7 +141,7 @@ export default function ConfirmationStep({
               <Typography variant="subtitle2" color="text.secondary">
                 Transaction Fee:
               </Typography>
-              <Typography>{formatCurrency(parseInt(transferFormState.maxFee), XTR_CURRENCY)}</Typography>
+              <Typography>{formatCurrency(parseNftFeeAmount(transferFormState.maxFee), XTR_CURRENCY)}</Typography>
             </Box>
 
             <Box>

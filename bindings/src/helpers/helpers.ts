@@ -108,8 +108,9 @@ export function rejectReasonToString(reason: RejectReason | null): string {
   if ("Abort" in reason) {
     return `Abort: ${reason.Abort.reason}`;
   }
-  console.error("Unknown reason", reason);
-  return JSON.stringify(reason);
+  const unhandled: never = reason;
+  console.error("Unknown reason", unhandled);
+  return JSON.stringify(unhandled);
 }
 
 export function getSubstateDiffFromTransactionResult(result: TransactionResult): SubstateDiff | null {

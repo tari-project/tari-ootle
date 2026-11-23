@@ -158,9 +158,9 @@ function bytesToHex(bytes: readonly number[]): string {
   return bytes.map((b) => ("0" + (b & 0xff).toString(16)).slice(-2)).join("");
 }
 
-function extractHexWithOptionalPrefix(value: unknown, prefix: string): string | null {
-  if (typeof value === "string") {
-    return value.startsWith(prefix) ? value.slice(prefix.length) : value;
+function extractResourceHex(value: unknown): string | null {
+  if (typeof value === "string" && value.startsWith("resource_")) {
+    return value.slice("resource_".length);
   }
   if (isByteArray(value)) {
     return bytesToHex(value);
@@ -179,10 +179,7 @@ function decodeNonFungibleId(raw: unknown): string | null {
   const inner = fields[0];
   switch (variant) {
     case 0:
-      if (isByteArray(inner)) {
-        return `uuid_${bytesToHex(inner)}`;
-      }
-      return typeof inner === "string" ? `uuid_${inner}` : null;
+      return isByteArray(inner) ? `uuid_${bytesToHex(inner)}` : null;
     case 1:
       return typeof inner === "string" ? `str_${inner}` : null;
     case 2:
@@ -199,30 +196,22 @@ function decodeNonFungibleId(raw: unknown): string | null {
 
 function decodeNonFungibleAddress(value: any, tag: number): any {
   if (Array.isArray(value) && value.length === 2) {
-    const resourceHex = extractHexWithOptionalPrefix(value[0], "resource_");
+    const resourceHex = extractResourceHex(value[0]);
     const idStr = decodeNonFungibleId(value[1]);
     if (resourceHex !== null && idStr !== null) {
       return `nft_${resourceHex}_${idStr}`;
     }
-    return { tag, value };
-  }
-  if (isByteArray(value) || typeof value === "string") {
-    return bytesValueToAddressString("nft", value);
   }
   return { tag, value };
 }
 
 function decodeUtxoAddress(value: any, tag: number): any {
   if (Array.isArray(value) && value.length === 2) {
-    const resourceHex = extractHexWithOptionalPrefix(value[0], "resource_");
-    const idHex = extractHexWithOptionalPrefix(value[1], "utxo_");
+    const resourceHex = extractResourceHex(value[0]);
+    const idHex = isByteArray(value[1]) ? bytesToHex(value[1]) : null;
     if (resourceHex !== null && idHex !== null) {
       return `utxo_${resourceHex}_${idHex}`;
     }
-    return { tag, value };
-  }
-  if (isByteArray(value) || typeof value === "string") {
-    return bytesValueToAddressString("utxo", value);
   }
   return { tag, value };
 }

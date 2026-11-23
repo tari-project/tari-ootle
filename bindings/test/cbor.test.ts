@@ -31,7 +31,7 @@ describe("convertCborValue", () => {
     expect(convertCborValue(input)).toBe(`nft_${RESOURCE_HEX}_uuid_${uuidHex}`);
   });
 
-  it("decodes NonFungibleAddress with u32 and large u64 ids", () => {
+  it("decodes NonFungibleAddress with u32 and u64 ids", () => {
     const u32Input = {
       "@cbor": "tag",
       "tag": TariTypeTag.NonFungibleAddress,
@@ -39,19 +39,13 @@ describe("convertCborValue", () => {
     };
     expect(convertCborValue(u32Input)).toBe(`nft_${RESOURCE_HEX}_u32_7`);
 
+    // `tari_bor::Value` serializes u64 values as plain JSON numbers.
     const u64Input = {
       "@cbor": "tag",
       "tag": TariTypeTag.NonFungibleAddress,
-      "value": [RESOURCE_TAG, [3, [{ "@cbor": "int", "value": "17179869189" }]]],
+      "value": [RESOURCE_TAG, [3, [17179869189]]],
     };
     expect(convertCborValue(u64Input)).toBe(`nft_${RESOURCE_HEX}_u64_17179869189`);
-
-    const maxU64Input = {
-      "@cbor": "tag",
-      "tag": TariTypeTag.NonFungibleAddress,
-      "value": [RESOURCE_TAG, [3, [{ "@cbor": "int", "value": "18446744073709551615" }]]],
-    };
-    expect(convertCborValue(maxU64Input)).toBe(`nft_${RESOURCE_HEX}_u64_18446744073709551615`);
   });
 
   it("decodes Utxo address from resource tag and commitment bytes", () => {
@@ -74,22 +68,8 @@ describe("convertCborValue", () => {
     expect(convertCborValue(input)).toBe(`vnfp_${poolHex}`);
   });
 
-  it("falls back cleanly on legacy raw bytes and unrecognized structured payloads", () => {
+  it("falls back to { tag, value } on unexpected payloads", () => {
     const rawHex = "ab".repeat(4);
-    expect(
-      convertCborValue({
-        "@cbor": "tag",
-        "tag": TariTypeTag.NonFungibleAddress,
-        "value": { "@cbor": "bytes", "hex": rawHex },
-      }),
-    ).toBe(`nft_${rawHex}`);
-    expect(
-      convertCborValue({
-        "@cbor": "tag",
-        "tag": TariTypeTag.Utxo,
-        "value": { "@cbor": "bytes", "hex": rawHex },
-      }),
-    ).toBe(`utxo_${rawHex}`);
     expect(
       convertCborValue({
         "@cbor": "tag",
@@ -99,6 +79,36 @@ describe("convertCborValue", () => {
     ).toEqual({
       tag: TariTypeTag.NonFungibleAddress,
       value: [`resource_${RESOURCE_HEX}`, [99, ["unexpected"]]],
+    });
+    expect(
+      convertCborValue({
+        "@cbor": "tag",
+        "tag": TariTypeTag.NonFungibleAddress,
+        "value": [RESOURCE_TAG, [0, ["not-bytes"]]],
+      }),
+    ).toEqual({
+      tag: TariTypeTag.NonFungibleAddress,
+      value: [`resource_${RESOURCE_HEX}`, [0, ["not-bytes"]]],
+    });
+    expect(
+      convertCborValue({
+        "@cbor": "tag",
+        "tag": TariTypeTag.NonFungibleAddress,
+        "value": { "@cbor": "bytes", "hex": rawHex },
+      }),
+    ).toEqual({
+      tag: TariTypeTag.NonFungibleAddress,
+      value: [0xab, 0xab, 0xab, 0xab],
+    });
+    expect(
+      convertCborValue({
+        "@cbor": "tag",
+        "tag": TariTypeTag.Utxo,
+        "value": [RESOURCE_TAG, "not-bytes"],
+      }),
+    ).toEqual({
+      tag: TariTypeTag.Utxo,
+      value: [`resource_${RESOURCE_HEX}`, "not-bytes"],
     });
   });
 

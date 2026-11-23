@@ -61,6 +61,12 @@ pub fn validate_stealth_outputs_statement(
         return Ok(vec![]);
     }
 
+    if stmt.agg_range_proof.is_empty() {
+        return Err(ResourceError::InvalidRangeProof {
+            details: "Range proof is empty".to_string(),
+        });
+    }
+
     let mut seen_commitments = BTreeSet::new();
     let mut decompressed = Vec::with_capacity(stmt.outputs.len());
     for statement in &stmt.outputs {
@@ -114,12 +120,6 @@ pub fn validate_stealth_outputs_statement(
         }
 
         decompressed.push((output_commitment, output_public_nonce));
-    }
-
-    if stmt.agg_range_proof.is_empty() {
-        return Err(ResourceError::InvalidRangeProof {
-            details: "Range proof is empty".to_string(),
-        });
     }
 
     let mut outputs = Vec::with_capacity(stmt.outputs.len());
@@ -340,7 +340,7 @@ mod tests {
         let stmt = StealthOutputsStatement {
             outputs: vec![dup.clone(), dup],
             revealed_output: None,
-            agg_range_proof: RangeProofBytes::empty(),
+            agg_range_proof: RangeProofBytes::try_from(vec![0xabu8; 64]).unwrap(),
         };
 
         let err = validate_stealth_outputs_statement(&stmt, None).unwrap_err();
@@ -365,7 +365,7 @@ mod tests {
         let missing_vb = StealthOutputsStatement {
             outputs: vec![sample_stealth_output(7, 100)],
             revealed_output: None,
-            agg_range_proof: RangeProofBytes::empty(),
+            agg_range_proof: range_proof.clone(),
         };
         let err = validate_stealth_outputs_statement(&missing_vb, Some(&view_pk)).unwrap_err();
         assert!(
@@ -383,7 +383,7 @@ mod tests {
         let unexpected_vb = StealthOutputsStatement {
             outputs: vec![unexpected_out],
             revealed_output: None,
-            agg_range_proof: RangeProofBytes::empty(),
+            agg_range_proof: range_proof.clone(),
         };
         let err = validate_stealth_outputs_statement(&unexpected_vb, None).unwrap_err();
         assert!(
@@ -450,14 +450,16 @@ mod tests {
     #[test]
     fn rejects_malformed_output_keys_before_range_proof_verification() {
         let non_canonical = RistrettoPublicKeyBytes::from_bytes(&[0xff; 32]).unwrap();
+        // Range-proof verification rejects this proof with `InvalidRangeProof`, so each key error below shows the key
+        // checks ran first.
+        let malformed_proof = RangeProofBytes::try_from(vec![0xabu8; 64]).unwrap();
 
         let mut bad_nonce = sample_stealth_output(11, 25);
         bad_nonce.output.sender_public_nonce = non_canonical;
         let stmt = StealthOutputsStatement {
             outputs: vec![bad_nonce],
             revealed_output: None,
-            // An empty range proof would fail with `InvalidRangeProof` if range-proof checks ran first.
-            agg_range_proof: RangeProofBytes::empty(),
+            agg_range_proof: malformed_proof.clone(),
         };
         let err = validate_stealth_outputs_statement(&stmt, None).unwrap_err();
         assert!(
@@ -474,7 +476,7 @@ mod tests {
         let stmt = StealthOutputsStatement {
             outputs: vec![bad_commitment],
             revealed_output: None,
-            agg_range_proof: RangeProofBytes::empty(),
+            agg_range_proof: malformed_proof.clone(),
         };
         let err = validate_stealth_outputs_statement(&stmt, None).unwrap_err();
         assert!(
@@ -491,7 +493,7 @@ mod tests {
         let stmt = StealthOutputsStatement {
             outputs: vec![bad_spend_key],
             revealed_output: None,
-            agg_range_proof: RangeProofBytes::empty(),
+            agg_range_proof: malformed_proof,
         };
         let err = validate_stealth_outputs_statement(&stmt, None).unwrap_err();
         assert!(

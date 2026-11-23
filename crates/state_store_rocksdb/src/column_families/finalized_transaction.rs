@@ -3,12 +3,14 @@
 
 use minicbor::{CborLen, Decode, Encode};
 use serde::{Deserialize, Serialize};
+use tari_consensus_types::BlockId;
 use tari_ootle_common_types::Epoch;
-use tari_ootle_storage::time::PrimitiveDateTime;
+use tari_ootle_storage::{consensus_models::FinalizedTransactionInclusion, time::PrimitiveDateTime};
 use tari_ootle_transaction::TransactionId;
+use tari_state_tree::SparseMerkleProofExt;
 
 use crate::{
-    codecs::{DefaultCodec, EpochCodec, KeyPrefix, TransactionIdCodec, UnitCodec},
+    codecs::{BlockIdCodec, DefaultCodec, EpochCodec, KeyPrefix, TransactionIdCodec, UnitCodec},
     column_families::cf_names,
     prefixed,
     traits::{Cf, QueryCf},
@@ -24,6 +26,38 @@ pub struct FinalizedTransactionLinkData {
     /// can prune finalized transaction bookkeeping by age.
     #[n(1)]
     pub epoch: Epoch,
+    /// Where the finalized decision is proven. Each one cites its block in
+    /// [`BlockCommitProofTransactionCitationCf`],
+    /// so the block's commit proof outlives the link.
+    #[n(2)]
+    pub inclusion: Option<FinalizedTransactionInclusionData>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, CborLen)]
+pub struct FinalizedTransactionInclusionData {
+    #[n(0)]
+    pub block_id: BlockId,
+    #[n(1)]
+    #[cbor(with = "tari_bor::adapters::serde_bridge")]
+    pub proof: SparseMerkleProofExt,
+}
+
+impl From<FinalizedTransactionInclusion> for FinalizedTransactionInclusionData {
+    fn from(inclusion: FinalizedTransactionInclusion) -> Self {
+        Self {
+            block_id: inclusion.block_id,
+            proof: inclusion.proof,
+        }
+    }
+}
+
+impl From<FinalizedTransactionInclusionData> for FinalizedTransactionInclusion {
+    fn from(data: FinalizedTransactionInclusionData) -> Self {
+        Self {
+            block_id: data.block_id,
+            proof: data.proof,
+        }
+    }
 }
 
 prefixed!(FinalizedTransactionLinkPrefix, KeyPrefix::FinalizedTransactionLinks);
@@ -71,4 +105,33 @@ impl QueryCf for ByEpochQuery {
     type Cf = EpochIndex;
     type Key = Epoch;
     type KeyCodec = EpochCodec;
+}
+
+prefixed!(
+    BlockCommitProofTransactionCitationPrefix,
+    KeyPrefix::BlockCommitProofTransactionCitations
+);
+
+/// Per committed block, each transaction whose finalized transaction link holds an inclusion in the block. A
+/// transaction holds at most one inclusion, in the block that last finalized it.
+pub struct BlockCommitProofTransactionCitationCf;
+
+impl Cf for BlockCommitProofTransactionCitationCf {
+    type Key = (BlockId, TransactionId);
+    type KeyCodec = (BlockIdCodec, TransactionIdCodec);
+    type Prefix = BlockCommitProofTransactionCitationPrefix;
+    type Value = ();
+    type ValueCodec = UnitCodec;
+
+    fn name() -> &'static str {
+        cf_names::TRANSACTIONS
+    }
+}
+
+pub struct BlockCommitProofTransactionCitationByBlockQuery;
+
+impl QueryCf for BlockCommitProofTransactionCitationByBlockQuery {
+    type Cf = BlockCommitProofTransactionCitationCf;
+    type Key = BlockId;
+    type KeyCodec = BlockIdCodec;
 }

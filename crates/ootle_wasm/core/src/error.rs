@@ -42,15 +42,25 @@ pub enum OotleWasmError {
     SealSignatureInvalid,
     #[error(
         "Authorization signature does not verify for the given public key; sign the hash from hashUnsignedTransaction \
-         for this seal signer with that public key's secret key"
+         for this seal signer and authorizer set with that public key's secret key"
     )]
     TransactionSignatureInvalid,
     #[error(
         "An authorization signature on the transaction does not verify for this seal signer and transaction body; \
-         each authorizer must sign the hash from hashUnsignedTransaction for this seal signer's public key, and the \
-         body must not change after signing"
+         each authorizer must sign the hash from hashUnsignedTransaction for this seal signer's public key and the \
+         public keys of every authorizer attached, and the body must not change after signing"
     )]
     AuthorizationSignatureInvalid,
+    #[error(
+        "The authorizer public keys are {0} bytes, which is not a whole number of 32-byte keys; pass the keys \
+         concatenated"
+    )]
+    InvalidAuthorizerKeys(usize),
+    #[error(
+        "The signer's public key is not among the authorizer public keys; every authorizer signs over the full set, \
+         so the set must include the signer"
+    )]
+    SignerNotAnAuthorizer,
     #[error("Stealth crypto error: {0}")]
     Stealth(String),
     #[error("Stealth transfer validation failed: {0}")]

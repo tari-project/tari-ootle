@@ -54,6 +54,8 @@ use tari_ootle_p2p::{
         GetCommittedBlockProofResponse,
         GetConsensusStateRequest,
         GetConsensusStateResponse,
+        GetEpochOracleConfigRequest,
+        GetEpochOracleConfigResponse,
         GetHighQcRequest,
         GetHighQcResponse,
         GetShardSnapshotRequest,
@@ -145,6 +147,8 @@ pub struct ValidatorNodeRpcServiceImpl<TStateStore> {
     response_bytes: Arc<Semaphore>,
     state_sync_reads: Arc<Semaphore>,
     root_mismatch_log: Arc<RootMismatchLog>,
+    /// The JSON of the configured epoch oracle's config, served to indexers that follow it.
+    epoch_oracle_config_json: Option<Arc<str>>,
 }
 
 impl<TStateStore: StateStore> ValidatorNodeRpcServiceImpl<TStateStore> {
@@ -168,7 +172,14 @@ impl<TStateStore: StateStore> ValidatorNodeRpcServiceImpl<TStateStore> {
             response_bytes: Arc::new(Semaphore::new(MAX_BUFFERED_RESPONSE_BYTES / RESPONSE_BUDGET_UNIT_BYTES)),
             state_sync_reads: Arc::new(Semaphore::new(max_concurrent_state_sync_reads())),
             root_mismatch_log: Arc::default(),
+            epoch_oracle_config_json: None,
         }
+    }
+
+    /// Serves `config_json`, the configured epoch oracle's config this node runs, to peers that ask for it.
+    pub fn with_epoch_oracle_config_json(mut self, config_json: Option<Arc<str>>) -> Self {
+        self.epoch_oracle_config_json = config_json;
+        self
     }
 
     /// Resolves which shards' committed history through `epoch` this node holds.
@@ -591,6 +602,32 @@ fn proven_substate(substate: &SubstateRecord, value_proof: Vec<u8>) -> proto::rp
     }
 }
 
+/// The CBOR-encoded proof of the decision this node finalized for `tx_id` and the CBOR-encoded commit proof of the
+/// block it is against, or two empty buffers when the node holds no inclusion for it.
+fn finalized_transaction_proof<TTx: StateStoreReadTransaction>(
+    tx: &TTx,
+    tx_id: &TransactionId,
+) -> Result<(Vec<u8>, Vec<u8>), StorageError> {
+    let Some(inclusion) = tx.finalized_transaction_inclusion_get(tx_id)? else {
+        return Ok((Vec::new(), Vec::new()));
+    };
+    // A stored inclusion cites its block, which keeps the block's commit proof stored by every binary that honours the
+    // citation. One that does not may have deleted it, and the result is then served unproven.
+    let Some(commit_proof) = tx.block_commit_proofs_get(&inclusion.block_id).optional()? else {
+        warn!(
+            target: LOG_TARGET,
+            "No commit proof is stored for block {}, which finalized transaction {tx_id}, so its result is served \
+             without a proof",
+            inclusion.block_id
+        );
+        return Ok((Vec::new(), Vec::new()));
+    };
+    let transaction_proof = tari_bor::serde_codec::to_vec(&inclusion.proof).map_err(|e| StorageError::QueryError {
+        reason: format!("encode the inclusion proof of transaction {tx_id}: {e}"),
+    })?;
+    Ok((transaction_proof, commit_proof))
+}
+
 /// The commit proof for the latest committed block: the quorum-signed anchor for the shard-group
 /// state merkle root that substate value proofs generated in the same read transaction verify
 /// against. `None` when nothing is committed beyond the epoch genesis yet, in which case results go
@@ -884,6 +921,9 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
             .optional()
             .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
 
+        let (transaction_proof, commit_proof) =
+            finalized_transaction_proof(&tx, &tx_id).map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
+
         self.budgeted_response(GetTransactionResultResponse {
             status: PayloadResultStatus::Finalized.into(),
 
@@ -895,6 +935,8 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
             abort_details: execution.abort_reason().map(|r| r.to_string()).unwrap_or_default(),
             // For simplicity, we simply encode the whole result as a CBOR blob.
             execution_result: encode(execution.result()).map_err(RpcStatus::log_internal_error(LOG_TARGET))?,
+            transaction_proof,
+            commit_proof,
         })
     }
 
@@ -1190,6 +1232,15 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
         req: Request<GetShardSnapshotRequest>,
     ) -> Result<Response<GetShardSnapshotResponse>, RpcStatus> {
         self.shard_snapshot(req.into_message()).await
+    }
+
+    async fn get_epoch_oracle_config(
+        &self,
+        _req: Request<GetEpochOracleConfigRequest>,
+    ) -> Result<Response<GetEpochOracleConfigResponse>, RpcStatus> {
+        Ok(Response::new(GetEpochOracleConfigResponse {
+            config_json: self.epoch_oracle_config_json.as_deref().unwrap_or_default().to_string(),
+        }))
     }
 
     async fn get_substate_batch(
@@ -1904,6 +1955,21 @@ mod tests {
             1024,
             10,
         )
+    }
+
+    #[tokio::test]
+    async fn the_epoch_oracle_config_is_served_as_it_was_given() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = RocksDbStateStore::<String>::open(dir.path().join("db"), DatabaseOptions::default()).unwrap();
+        let request = || Request::new(1.into(), GetEpochOracleConfigRequest {});
+
+        let service = rpc_service(store);
+        let unserved = service.get_epoch_oracle_config(request()).await.unwrap().into_message();
+        assert!(unserved.config_json.is_empty());
+
+        let service = service.with_epoch_oracle_config_json(Some(Arc::from(r#"{"validators":[]}"#)));
+        let served = service.get_epoch_oracle_config(request()).await.unwrap().into_message();
+        assert_eq!(served.config_json, r#"{"validators":[]}"#);
     }
 
     /// Substate responses hold their share of the response byte budget until they are dropped, which the server does

@@ -3,6 +3,162 @@
 All notable changes to this project will be documented in this file.
 See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [0.55.0](https://github.com/tari-project/tari-ootle/compare/v0.54.0...v0.55.0) (2026-11-19)
+
+Transactions move to schema V2, which binds every authorization to the whole authorizer set and
+takes signature bytes out of the transaction id. Component access and owner rules can now be
+changed by transaction instruction, under a rules updater fixed when the component is created.
+Validators catch up in bounded pages instead of an unterminated block stream.
+
+### ⚠️ Upgrade notes
+
+- **Validators and indexers upgrade together.** The catch-up protocol changed (#3833), and the
+  engine changes below switch at deployment with no activation epoch: validators on different
+  binaries diverge on V2 transactions, the new rules instructions and template admission.
+  (#3827, #3807, #3860)
+- **Operators:** each node recompiles every template once, on first use, because the compiled-module
+  cache key now includes the metering middleware version. Fees and metering are unchanged. (#3867)
+- **App and wallet developers:**
+  - Clients build V2 transactions. V2 changes the authorization message and the transaction id,
+    and the mempool rejects a V2 authorization list that is not strictly ascending by key
+    (`AuthorizationsNotCanonical`) or an authorization not over the full key set. V1 transactions
+    are still accepted. Go, Python, FFI and wasm consumers move to the new co-sign signatures; the
+    C FFI ABI tag is `ootle-sdk-ffi-c/20`. (#3827)
+  - Ledger: an installed Ootle app rejects V2 authorizations until a rebuilt app is released.
+    (#3827)
+  - `WalletNetworkInterface::get_substate_versions` is a new required method, and
+    `IndexerRestApiNetworkInterfaceError` gains `UnrequestedSubstateVersion`. (#3829)
+- **walletd users:**
+  - `keys.create`, `keys.list` and `keys.set_active` are removed; account and view keys come with
+    their account (`accounts.create` / `accounts.list`), and `keys.import` stays. Account key
+    indices are allocated from the accounts table, so `accounts.create` with a `key_index` already
+    in use returns an "already exists" error. (#3864)
+  - The `validators:*` permission becomes `vn_fees:read[:<claim_pk>]` and
+    `vn_fees:claim[:<claim_pk>]`, scoped by claim key. The old `validators:*` strings are still
+    parsed for this release. (#3796)
+  - Submitting `SetComponentAccessRules` or `SetComponentOwnerRule` directly requires `admin`.
+    (#3831)
+- **Template authors:** a component built with `tari_template_lib` 0.42.0 defaults to
+  `RulesUpdater::Locked`, so `ComponentManager::set_access_rules` and `set_owner_rule` refuse it
+  unless the template sets `ComponentBuilder::with_rules_updater`. Components and templates
+  created before this release behave as `TemplateManaged`, as before. (#3807)
+
+### Features
+
+- **engine:** `SetComponentAccessRules` and `SetComponentOwnerRule` replace a component's method
+  access rules or owner rule, as permitted by its `rules_updater` (`Locked`, `TemplateManaged`,
+  `Owner` or `AccessRule`), with `set_access_rules!` / `set_owner_rule!` manifest macros. (#3807)
+- **engine:** template admission rules run only when a template is published, so a tightened rule
+  never retires a template that is already published. (#3860)
+- **transaction:** schema V2 binds each authorization to the authorizer set, so a sealer can no
+  longer reorder, duplicate or pad co-signatures to mint a new transaction id. (#3827)
+- **consensus:** a catch-up request is answered by one page of at most 3 MiB that says where the
+  next page starts, so a catching-up validator no longer waits on stall re-requests or opens
+  duplicate streams. (#3833)
+- **indexer:** `POST /substates/versions` returns the live versions of up to 20 substates in one
+  call, unproven, for wallets that only need versions to pin inputs. (#3829)
+- **walletd:** signing requests, transaction requests and dry runs list component rules changes
+  and show a warning before signing. (#3831)
+
+### Bug fixes
+
+- **networking:** nodes dial a peer's identify listen addresses only within the connection's
+  scope, which ends the indexers' `Unexpected peer ID` dial failures through validators' loopback
+  and Docker bridge addresses. (#3855)
+- **engine:** the compiled-module cache is keyed on the metering middleware version, so a
+  middleware patch cannot leave warm-cache nodes metering differently from fresh ones. (#3867)
+- **engine:** a template whose `TemplateDef` has duplicate function names or colliding dispatch
+  identifiers is rejected at publish. (#3841)
+- **engine:** method access rules naming a static function or migration are rejected. (#3862)
+- **consensus:** foreign proposals naming the local shard group are rejected. (#3779)
+- **state store:** a substate's head is its highest committed version whatever order a batch lists
+  its transitions in, so a validator that state-synced a version streamed out of order no longer
+  resolves an unversioned input to a down version. (#3820)
+- **consensus:** fee-pool withdrawals keep their `Output` lock across several withdrawals in one
+  block, and versioned lock conflicts are deferred. (#3632)
+- **consensus:** catch-up parks blocks behind a parked justify block instead of dropping them, and
+  a restarted pacemaker keeps its timeout backoff. (#3826, #3794, #3858)
+- **walletd:** a stealth transfer submits the inputs its dry run priced, manifest narrowing keeps
+  `ValidatorFeePool` inputs write-declared, and burn-claim retries honour their budgets.
+  (#3832, #3638, #3342)
+- **wallet:** dependent-substate resolution includes `ValidatorFeePool` inputs and the TARI token,
+  and stealth transfers declare badge inputs read-only. (#3634, #3666)
+- **wallet:** an unconfirmed stealth output relocked for spend is confirmed when its transaction
+  mints it on chain unspent, instead of being deleted from the wallet. (#3851)
+- **transaction:** `call_args!` accepts `Blob(idx)` and `Workspace(id, offset)`. (#3732)
+- **config:** `-p` and `TARI_*` overrides win over network-scoped preset tables. (#3861)
+- **indexer:** networking and libp2p log to `network.log` and `libp2p.log`, and the esmeralda scan
+  starts at block 1024283. (#3859)
+- **deps:** `libz-sys` 1.1.33 fixes RUSTSEC-2026-0544, and the unmaintained `chrono` and
+  `humantime` dependencies are removed. (#3856)
+
+## [0.54.0](https://github.com/tari-project/tari-ootle/compare/v0.53.5...v0.54.0) (2026-11-17)
+
+Components can no longer change their template in place. To change a component's code, deploy the
+new template as a new component and move the state across.
+
+### ⚠️ Upgrade notes
+
+- **Validators and indexers upgrade together.** Validators reject any transaction containing
+  `UpdateComponentTemplate`, in mempool validation and in the engine, with no activation epoch.
+  (#3824)
+- **Template authors:** `ComponentBuilder::with_upgrade_rule` is removed from `tari_template_lib`
+  0.41.0, and a template that calls it no longer compiles; remove the call. Deployed templates run
+  unchanged. (#3824)
+- **App and wallet developers:** `TransactionBuilder::update_component_template` and
+  `update_component_template_address_with_migrate` are removed. A transaction carrying the
+  instruction is rejected with `ComponentTemplateUpdateNotSupported`. (#3824)
+
+### Features
+
+- **engine:** `UpdateComponentTemplate` is rejected, so a component's template never changes after
+  creation. (#3824)
+
+## [0.53.5](https://github.com/tari-project/tari-ootle/compare/v0.53.4...v0.53.5) (2026-11-16)
+
+Indexers verify a transaction result from one validator with a proof instead of polling several,
+and follow validator set changes from the validators' config. The configured oracle can schedule
+validator exits, and catch-up and multi-shard consensus fixes land.
+
+### ⚠️ Upgrade notes
+
+- **Validators and indexers upgrade together.** The catch-up, multi-shard evidence and guest export
+  changes alter which blocks and templates are accepted, with no activation epoch. (#3660, #3662,
+  #3702)
+- **Operators:** every validator must run this release before a configured validator entry sets
+  `exit_epoch`; older binaries ignore it. (#3782)
+- **Indexer operators:** `indexer.follow_validator_oracle_config` defaults to `true`, so the indexer
+  adopts validator set changes the validators serve. Set it to `false` to keep only the config
+  shipped with the release. (#3783)
+- **Indexer operators:** an abort finalized before the validators upgraded shows as pending until
+  its bookkeeping is pruned (6 epochs by default). (#3801)
+
+### Features
+
+- **indexer:** a transaction result comes from one validator and is checked against a proof: a
+  commit against its receipt, an abort against the block's transaction merkle root. A verified
+  result is cached. (#3801)
+- **validator_node:** validators store an inclusion proof for each aborted transaction and serve it
+  with `GetTransactionResult`. (#3789, #3803)
+- **indexer:** indexers fetch the configured epoch oracle config from validators at startup and each
+  epoch (new validator RPC `get_epoch_oracle_config`), and adopt it once two validators agree and it
+  matches the epochs already processed. (#3783)
+- **epoch_oracles:** a configured validator entry can set `exit_epoch`, the first epoch it is no
+  longer active. (#3782)
+
+### Bug fixes
+
+- **consensus:** a catch-up block at or below the last voted height reports `AlreadyVotedAtHeight`
+  and never triggers a leader timeout, a catch-up batch ends on a complete height across forks, and
+  a stalled catch-up re-requests the rest of its range. (#3660)
+- **consensus:** a shard group involved only through a dynamic output records its own evidence, an
+  output-only shard group ignores foreign `LocalPrepare`, and a fee-intent-only commit propagates.
+  (#3662)
+- **engine:** a template that exports a name starting with `__tari_global_` is rejected when it
+  loads. (#3702)
+- **deps:** `quinn-proto` 0.11.19 and `quinn-udp` 0.5.16 (RUSTSEC-2026-0523, 0524, 0538), and
+  `webauthn-rs` 0.5.5 (GHSA-22w3-693w-x895). (#3787, #3800)
+
 ## [0.53.4](https://github.com/tari-project/tari-ootle/compare/v0.53.3...v0.53.4) (2026-11-13)
 
 A transaction may persist at most 1,000 substates, minted non-fungibles included. Consensus checks

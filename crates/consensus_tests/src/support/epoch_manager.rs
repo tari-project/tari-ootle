@@ -3,7 +3,11 @@
 
 use std::{
     collections::{HashMap, HashSet},
-    sync::{Arc, Mutex as StdMutex},
+    sync::{
+        Arc,
+        Mutex as StdMutex,
+        atomic::{AtomicBool, Ordering},
+    },
     time::Instant,
 };
 
@@ -78,6 +82,9 @@ pub struct TestEpochManager {
     /// its activation. `None` = registered from the start. Like the lag fields, a fresh `Arc` is allocated per
     /// validator by `clone_for`.
     activation_epoch: Arc<StdMutex<Option<Epoch>>>,
+    /// When set, the next `get_local_committee` call fails and clears it. Like the lag fields, a fresh `Arc` is
+    /// allocated per validator by `clone_for`.
+    fail_next_local_committee: Arc<AtomicBool>,
 }
 
 impl TestEpochManager {
@@ -93,7 +100,13 @@ impl TestEpochManager {
             oracle_observed_boundaries: Arc::new(StdMutex::new(HashSet::new())),
             validator_set_hash_override: Arc::new(StdMutex::new(None)),
             activation_epoch: Arc::new(StdMutex::new(None)),
+            fail_next_local_committee: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    /// Makes the next `get_local_committee` call fail, as a lookup against an oracle that has lost its data would.
+    pub fn fail_next_local_committee(&self) {
+        self.fail_next_local_committee.store(true, Ordering::SeqCst);
     }
 
     /// Makes this validator activate at `epoch`. See `activation_epoch`.
@@ -234,6 +247,7 @@ impl TestEpochManager {
         copy.oracle_observed_boundaries = Arc::new(StdMutex::new(HashSet::new()));
         copy.validator_set_hash_override = Arc::new(StdMutex::new(None));
         copy.activation_epoch = Arc::new(StdMutex::new(None));
+        copy.fail_next_local_committee = Arc::new(AtomicBool::new(false));
         if let Some(our_validator_node) = self.our_validator_node.clone() {
             copy.our_validator_node = Some(ValidatorNode {
                 address,
@@ -370,6 +384,14 @@ impl EpochManagerReader for TestEpochManager {
 
     async fn get_our_validator_node(&self, _epoch: Epoch) -> Result<ValidatorNode<TestAddress>, EpochManagerError> {
         Ok(self.our_validator_node.clone().unwrap())
+    }
+
+    async fn get_local_committee(&self, epoch: Epoch) -> Result<Arc<Committee<Self::Addr>>, EpochManagerError> {
+        let validator = self.get_our_validator_node(epoch).await?;
+        if self.fail_next_local_committee.swap(false, Ordering::SeqCst) {
+            return Err(EpochManagerError::NoCommitteeFound(validator.shard_key));
+        }
+        self.get_committee_for_substate(epoch, validator.shard_key).await
     }
 
     async fn get_all_validator_nodes(

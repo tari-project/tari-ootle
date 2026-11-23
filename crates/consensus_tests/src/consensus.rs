@@ -9,8 +9,10 @@
 //! where {} is replaced with the node address.
 
 use std::{
+    collections::HashSet,
     sync::{
         Arc,
+        Mutex,
         atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     time::Duration,
@@ -2155,10 +2157,36 @@ async fn transaction_missing_from_pool_is_resequenced_from_its_record() {
     // at which the pool record is dropped deterministic.
     let drop_proposals = Arc::new(AtomicBool::new(true));
     let drop_proposals_f = drop_proposals.clone();
+    // A block proposed while proposals are dropped stays withheld afterwards, in a proposal or a catch-up page, so it
+    // never gathers a certificate and no block carries the transaction until it is re-sequenced.
+    let withheld = Arc::new(Mutex::new(HashSet::new()));
     let mut test = Test::builder()
         .add_committee(0, vec!["1", "2"])
         .with_message_filter(Box::new(move |_from, _to, msg| {
-            !(drop_proposals_f.load(Ordering::SeqCst) && matches!(msg, HotstuffMessage::Proposal(_)))
+            let mut withheld = withheld.lock().unwrap();
+            let blocks = match msg {
+                HotstuffMessage::Proposal(proposal) => vec![*proposal.block.id()],
+                HotstuffMessage::CatchUpPage(page) => page
+                    .blocks
+                    .iter()
+                    .chain(page.leaf.iter())
+                    .map(|proposal| *proposal.block.id())
+                    .collect(),
+                _ => return true,
+            };
+            if drop_proposals_f.load(Ordering::SeqCst) {
+                if matches!(msg, HotstuffMessage::Proposal(_)) {
+                    withheld.extend(blocks);
+                    return false;
+                }
+                if let HotstuffMessage::CatchUpPage(page) = msg &&
+                    let Some(leaf) = &page.leaf
+                {
+                    withheld.insert(*leaf.block.id());
+                    return false;
+                }
+            }
+            !blocks.iter().any(|id| withheld.contains(id))
         }))
         // Dropping proposals burns a pacemaker round, so shorten the round...
         .modify_consensus_constants(|c| {

@@ -55,7 +55,7 @@ function AllVNs({ epoch }: { epoch: number }) {
       })
       .catch((err) => {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : String(err));
+          setError(err && err.message ? err.message : `Unknown error: ${JSON.stringify(err)}`);
         }
       })
       .finally(() => {

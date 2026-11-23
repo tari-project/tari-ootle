@@ -56,14 +56,10 @@ function Blocks() {
   const [filterIndex, setFilterIndex] = useState(0);
   const [error, setError] = useState<string>();
 
-  const totalCount = Number(blocksCount);
-  const maxPage = totalCount > 0 ? Math.ceil(totalCount / rowsPerPage) - 1 : 0;
-  const safePage = Math.min(page, maxPage);
-
   // Avoid a layout jump when reaching the last page with empty rows.
-  const emptyRowsCnt = Math.max(0, rowsPerPage - blocks.length);
+  const emptyRowsCnt = rowsPerPage - blocks.length;
 
-  const handleChangePage = (_event: unknown, newPage: number) => {
+  const handleChangePage = (event: unknown, newPage: number) => {
     setPage(newPage);
   };
 
@@ -106,7 +102,7 @@ function Blocks() {
       })
       .catch((err) => {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : String(err));
+          setError(err && err.message ? err.message : `Unknown error: ${JSON.stringify(err)}`);
         }
       });
 
@@ -423,9 +419,9 @@ function Blocks() {
         <TablePagination
           rowsPerPageOptions={[10, 25, 50]}
           component="div"
-          count={totalCount}
+          count={Number(blocksCount)}
           rowsPerPage={rowsPerPage}
-          page={safePage}
+          page={page}
           onPageChange={handleChangePage}
           onRowsPerPageChange={handleChangeRowsPerPage}
         />

@@ -111,7 +111,6 @@ const validateHash = (hash: string): boolean => {
   return hashRegex.test(hash);
 };
 
-// formatTimestamp.ts
 const parseTimestamp = (rawTimestamp: string | null | undefined): Date | null => {
   if (!rawTimestamp) return null;
 
@@ -129,7 +128,7 @@ const parseTimestamp = (rawTimestamp: string | null | undefined): Date | null =>
   }
 
   // If it doesn't already end with "Z" or have a timezone offset, add Z for UTC
-  if (!/(?:[Zz]|[+\-]\d{2}:?\d{2})$/.test(formatted)) {
+  if (!/(?:Z|[+\-]\d{2}:?\d{2})$/.test(formatted)) {
     formatted += "Z";
   }
 

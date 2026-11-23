@@ -8,7 +8,6 @@ describe("parseTimestamp", () => {
   it("parses ISO-8601 UTC timestamps ending with Z", () => {
     expect(parseTimestamp("2026-11-23T15:00:00Z")?.toISOString()).toBe("2026-11-23T15:00:00.000Z");
     expect(parseTimestamp("2026-11-23T15:00:00.123Z")?.toISOString()).toBe("2026-11-23T15:00:00.123Z");
-    expect(parseTimestamp("2026-11-23T15:00:00z")?.toISOString()).toBe("2026-11-23T15:00:00.000Z");
   });
 
   it("parses naive timestamps as UTC", () => {

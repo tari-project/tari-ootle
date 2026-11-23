@@ -315,7 +315,7 @@ const normalizeTimestamp = (rawTimestamp: string | null | undefined): Date | nul
     formatted = formatted.slice(0, -2);
   }
 
-  if (!/(?:[Zz]|[+\-]\d{2}:?\d{2})$/.test(formatted)) {
+  if (!/(?:Z|[+\-]\d{2}:?\d{2})$/.test(formatted)) {
     formatted += "Z";
   }
 

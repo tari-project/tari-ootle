@@ -458,8 +458,7 @@ fn calc_instruction_weight(instruction: &Instruction) -> u64 {
                 _ => 0,
             };
             let access_rule_nodes = access_rules.as_ref().map(|a| a.num_nodes() as u64).unwrap_or(0);
-            (owner_rule_nodes + access_rule_nodes + workspace_id.as_ref().map(|_| 1).unwrap_or(0))
-                .max(INVOCATION_FLOOR)
+            (owner_rule_nodes + access_rule_nodes + workspace_id.as_ref().map(|_| 1).unwrap_or(0)).max(INVOCATION_FLOOR)
         },
         Instruction::CallFunction { args, .. } => calc_args_weight(args).max(INVOCATION_FLOOR),
         Instruction::CallMethod { args, .. } => calc_args_weight(args).max(INVOCATION_FLOOR),

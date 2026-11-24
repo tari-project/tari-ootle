@@ -68,12 +68,12 @@ function Resources() {
           </Typography>
           <Grid container spacing={0}>
             <Grid size={{ xs: 12 }}>
-              <Stack direction="row" alignItems="baseline" spacing={1}>
+              <Stack direction="row" alignItems="center" spacing={1}>
                 <Typography variant="subtitle2">Address:</Typography>
                 <Typography variant="body2" color="text.secondary">
-                  {resourceAddress ? shortenString(resourceAddress) : ""}
-                  <CopyToClipboard copy={resourceAddress || ""} />
+                  {resourceAddress ? shortenString(resourceAddress) : "--"}
                 </Typography>
+                {resourceAddress ? <CopyToClipboard copy={resourceAddress} /> : null}
               </Stack>
             </Grid>
             <Grid size={{ xs: 12 }}>
@@ -88,7 +88,7 @@ function Resources() {
               <Stack direction="row" alignItems="baseline" spacing={1}>
                 <Typography variant="subtitle2">Resource Type:</Typography>
                 <Typography variant="body2" color="text.secondary">
-                  {resource?.resource_type}
+                  {resource?.resource_type ?? "--"}
                 </Typography>
               </Stack>
             </Grid>
@@ -96,8 +96,8 @@ function Resources() {
               <Stack direction="row" alignItems="baseline" spacing={1}>
                 <Typography variant="subtitle2">Total Supply:</Typography>
                 <Typography variant="body2" color="text.secondary">
-                  {resource?.total_supply
-                    ? formatCurrency(resource.total_supply, resource.divisibility, resource.metadata["SYMBOL"])
+                  {resource?.total_supply !== null && resource?.total_supply !== undefined
+                    ? formatCurrency(resource.total_supply, resource.divisibility, resource.metadata?.SYMBOL)
                     : "--"}
                 </Typography>
               </Stack>

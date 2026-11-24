@@ -121,27 +121,36 @@ type DestinationTagDialogProps = {
   onClose: () => void;
 };
 
+const DESTINATION_TAG_MAX_LENGTH = 64;
+
 function DestinationTagDialog(props: DestinationTagDialogProps) {
   const { address, open, onClose } = props;
 
   const [tag, setTag] = useState("");
 
   useEffect(() => {
-    setTag("");
+    if (open) {
+      setTag("");
+    }
   }, [open, address]);
 
   let currentAddress: OotleAddress = address;
   let tagError: string | null = null;
 
   if (tag) {
-    const decoded = address ? decodeOotleAddressOrNull(address) : null;
-    if (!decoded) {
-      tagError = "Unable to decode account address";
+    const tagByteLength = new TextEncoder().encode(tag).length;
+    if (tagByteLength > DESTINATION_TAG_MAX_LENGTH) {
+      tagError = `Destination tag must be at most ${DESTINATION_TAG_MAX_LENGTH} bytes (got ${tagByteLength})`;
     } else {
-      try {
-        currentAddress = encodeOotleAddress({ ...decoded, destinationTag: tag });
-      } catch (err) {
-        tagError = err instanceof Error ? err.message : "Invalid destination tag";
+      const decoded = address ? decodeOotleAddressOrNull(address) : null;
+      if (!decoded) {
+        tagError = "Unable to decode account address";
+      } else {
+        try {
+          currentAddress = encodeOotleAddress({ ...decoded, destinationTag: tag });
+        } catch (err) {
+          tagError = err instanceof Error ? err.message : "Invalid destination tag";
+        }
       }
     }
   }

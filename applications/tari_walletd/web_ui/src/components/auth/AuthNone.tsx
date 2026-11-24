@@ -4,7 +4,8 @@
 import Loading from "@components/Loading";
 import { Typography } from "@mui/material";
 import { getClientInstance } from "@utils/json_rpc";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { runAuthNone } from "./authNoneHelpers";
 import { DEFAULT_PERMISSIONS } from "./web_authn/Webauthn";
 
 export interface AuthNoneProps {
@@ -15,25 +16,31 @@ export interface AuthNoneProps {
 export function AuthNone(props: AuthNoneProps) {
   const { onAuthenticated, onError } = props;
   const [error, setError] = useState<string | null>(null);
+  const onAuthenticatedRef = useRef(onAuthenticated);
+  const onErrorRef = useRef(onError);
+  onAuthenticatedRef.current = onAuthenticated;
+  onErrorRef.current = onError;
 
   useEffect(() => {
-    async function authenticate() {
-      try {
-        const client = await getClientInstance();
-        const token = await client.authRequest(DEFAULT_PERMISSIONS, "None");
-        client.setToken(token);
-        onAuthenticated();
-      } catch (err) {
-        const error = err instanceof Error ? err : new Error(String(err ?? "Unknown authentication error"));
-        setError(error.message);
-        if (onError) {
-          onError(error);
-        }
-      }
-    }
+    let cancelled = false;
 
-    authenticate();
-  }, [onAuthenticated, onError]);
+    void runAuthNone({
+      getClient: getClientInstance,
+      permissions: DEFAULT_PERMISSIONS,
+      isCancelled: () => cancelled,
+      onAuthenticated: () => {
+        onAuthenticatedRef.current();
+      },
+      onError: (authError) => {
+        setError(authError.message);
+        onErrorRef.current?.(authError);
+      },
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   if (error) {
     return <Typography color="error">Authentication failed: {error}</Typography>;

@@ -28,7 +28,7 @@ import TableContainer from "@mui/material/TableContainer";
 import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
 import type { IndexerConnection } from "@tari-project/ootle-ts-bindings";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import CopyToClipboard from "../../../Components/CopyToClipboard";
 import { DataTableCell } from "../../../Components/StyledComponents";
 import { getConnections } from "../../../utils/api";
@@ -36,28 +36,36 @@ import { displayDuration } from "../../../utils/helpers";
 import { shortenString } from "./helpers";
 
 const useInterval = (fn: () => Promise<unknown>, ms: number) => {
-  const timeout = useRef<number>(0);
-  const mountedRef = useRef(false);
-  const run = useCallback(async () => {
-    await fn();
-    if (mountedRef.current) {
-      timeout.current = window.setTimeout(run, ms);
-    }
-  }, [fn, ms]);
   useEffect(() => {
-    mountedRef.current = true;
+    let cancelled = false;
+    let timeoutId: number | undefined;
+
+    const run = async () => {
+      try {
+        await fn();
+      } catch (err) {
+        console.error("Polling callback failed:", err);
+      } finally {
+        if (!cancelled) {
+          timeoutId = window.setTimeout(run, ms);
+        }
+      }
+    };
+
     run();
     return () => {
-      mountedRef.current = false;
-      window.clearTimeout(timeout.current);
+      cancelled = true;
+      if (timeoutId !== undefined) {
+        window.clearTimeout(timeoutId);
+      }
     };
-  }, [run]);
+  }, [fn, ms]);
 };
 
 function Connections() {
   const [connections, setConnections] = useState<Array<IndexerConnection>>([]);
 
-  let fetchConnections = useCallback(async () => {
+  const fetchConnections = useCallback(async () => {
     const resp = await getConnections();
     setConnections(resp.connections);
   }, []);
@@ -82,7 +90,7 @@ function Connections() {
                 <DataTableCell>
                   <Stack direction="row" alignItems="center">
                     {peer_id ? shortenString(peer_id) : "--"}
-                    <CopyToClipboard copy={peer_id} />
+                    {peer_id && <CopyToClipboard copy={peer_id} />}
                   </Stack>
                 </DataTableCell>
                 <DataTableCell>{displayDuration(age)}</DataTableCell>

@@ -20,7 +20,14 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import type { Amount, Blobs, NonFungibleId, SubstateId } from "@tari-project/ootle-ts-bindings";
+import {
+  shortenString as bindingsShortenString,
+  shortenSubstateId as bindingsShortenSubstateId,
+  type Amount,
+  type Blobs,
+  type NonFungibleId,
+  type SubstateId,
+} from "@tari-project/ootle-ts-bindings";
 import { Currency } from "@utils/currency";
 import { ChangeEvent } from "react";
 
@@ -129,9 +136,7 @@ export function shortenSubstateId(
   if (substateId === null || substateId === undefined) {
     return "";
   }
-  const string = substateIdToString(substateId);
-  const parts = string.split("_", 2);
-  return parts[0] + "_" + shortenString(parts[1], start, end);
+  return bindingsShortenSubstateId(substateIdToString(substateId), start, end);
 }
 
 export function isSubstateIdString(substateId: SubstateId | string | null | undefined): boolean {
@@ -139,7 +144,19 @@ export function isSubstateIdString(substateId: SubstateId | string | null | unde
     return false;
   }
   const string = substateIdToString(substateId);
-  const SUBSTATE_PREFIXES = ["component_", "vault_", "resource_", "nft_", "commitment_", "txreceipt_", "template_"];
+  const SUBSTATE_PREFIXES = [
+    "component_",
+    "vault_",
+    "resource_",
+    "nft_",
+    "commitment_",
+    "tombstone_",
+    "txreceipt_",
+    "template_",
+    "vnfp_",
+    "utxo_",
+    "coutput_",
+  ];
 
   return SUBSTATE_PREFIXES.some((prefix) => string.startsWith(prefix));
 }
@@ -148,11 +165,7 @@ export function shortenString(string: string | null | undefined, start: number =
   if (string === null || string === undefined) {
     return "";
   }
-  // The number 3 is from the characters for ellipsis
-  if (string.length < start + end + 3) {
-    return string;
-  }
-  return string.substring(0, start) + "..." + string.slice(-end);
+  return bindingsShortenString(string, start, end);
 }
 
 export function emptyRows(page: number, rowsPerPage: number, array: Array<any> | undefined) {

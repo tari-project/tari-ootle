@@ -68,6 +68,18 @@ describe("shortenSubstateId", () => {
     expect(shortenSubstateId(COMPONENT_ID)).toBe("component_23e5...2d45");
   });
 
+  it("preserves the trailing identifier of multi-segment substate ids (utxo, coutput, nft)", () => {
+    const utxoId =
+      "utxo_0000000000000000000000000000000000000000000000000000000000000000_abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123459876";
+    const coutputId =
+      "coutput_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5eeeeeeee_11223344556677889900aabbccddeeff11223344556677889900aabbccddff00";
+    const nftId = "nft_0101010101010101010101010101010101010101010101010101010101010101_str_token_42";
+
+    expect(shortenSubstateId(utxoId)).toBe("utxo_0000...9876");
+    expect(shortenSubstateId(coutputId)).toBe("coutput_7cbf...ff00");
+    expect(shortenSubstateId(nftId)).toBe("nft_0101...n_42");
+  });
+
   it("returns an empty string for null and undefined", () => {
     expect(shortenSubstateId(null)).toBe("");
     expect(shortenSubstateId(undefined)).toBe("");

@@ -20,7 +20,6 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { SubstateId, substateIdToString } from "@tari-project/ootle-ts-bindings";
 import { toHexString } from "../routes/VN/Components/helpers";
 
 export const renderJson = (json: any) => {
@@ -75,19 +74,6 @@ export function fromHexString(hexString: string) {
     res.push(Number("0x" + hexString.substring(i, i + 2)));
   }
   return res;
-}
-
-export function shortenSubstateId(substateId: SubstateId | null | undefined, start: number = 4, end: number = 4) {
-  if (substateId === null || substateId === undefined) {
-    return "";
-  }
-  const string = substateIdToString(substateId);
-  const parts = string.split("_", 2);
-  return parts[0] + "_" + shortenString(parts[1], start, end);
-}
-
-export function shortenString(string: string, start: number = 8, end: number = 8) {
-  return string.substring(0, start) + "..." + string.slice(-end);
 }
 
 export function emptyRows(page: number, rowsPerPage: number, array: any[]) {

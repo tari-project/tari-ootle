@@ -26,7 +26,7 @@ import { useTheme } from "@mui/material/styles";
 import Typography from "@mui/material/Typography";
 import { SettingsGetResponse } from "@tari-project/ootle-ts-bindings";
 import { settingsGet } from "@utils/json_rpc";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { createSettingsLoader } from "./generalSettingsHelpers";
 import IndexerSettings from "./IndexerSettings";
 
@@ -43,28 +43,25 @@ function GeneralSettings() {
   const theme = useTheme();
   const [settings, setSettings] = useState<SettingsGetResponse | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const loaderRef = useRef<ReturnType<typeof createSettingsLoader<SettingsGetResponse>> | null>(null);
-
-  if (loaderRef.current === null) {
-    loaderRef.current = createSettingsLoader({
+  const [loader] = useState(() =>
+    createSettingsLoader({
       fetchSettings: settingsGet,
       onStart: () => setLoadError(null),
       onSuccess: setSettings,
       onError: setLoadError,
-    });
-  }
+    }),
+  );
 
   const loadSettings = useCallback(() => {
-    void loaderRef.current?.load();
-  }, []);
+    void loader.load();
+  }, [loader]);
 
   useEffect(() => {
-    const loader = loaderRef.current;
-    void loader?.load();
+    loadSettings();
     return () => {
-      loader?.invalidate();
+      loader.invalidate();
     };
-  }, []);
+  }, [loadSettings, loader]);
 
   const items = [
     {

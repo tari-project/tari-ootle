@@ -12,7 +12,7 @@ import TableContainer from "@mui/material/TableContainer";
 import TemplateItem from "@routes/Templates/components/TemplateItem";
 import useAccountStore from "@store/accountStore";
 import { handleChangePage, handleChangeRowsPerPage } from "@utils/helpers";
-import { Fragment, useState } from "react";
+import { Dispatch, Fragment, SetStateAction, useState } from "react";
 import { buildAuthoredTemplatesQuery, extractAuthorPublicKey } from "./templateListHelpers";
 
 const COLUMNS = ["Address", "Name", "ABI Version", ""];
@@ -20,13 +20,28 @@ const COLUMNS = ["Address", "Name", "ABI Version", ""];
 export default function TemplateList() {
   const ootleAddress = useAccountStore((s) => s.address);
   const authorPublicKey = extractAuthorPublicKey(ootleAddress);
+  const [rowsPerPage, setRowsPerPage] = useState(10);
 
-  return <TemplateListContent key={authorPublicKey ?? "none"} authorPublicKey={authorPublicKey} />;
+  return (
+    <TemplateListContent
+      key={authorPublicKey ?? "none"}
+      authorPublicKey={authorPublicKey}
+      rowsPerPage={rowsPerPage}
+      setRowsPerPage={setRowsPerPage}
+    />
+  );
 }
 
-function TemplateListContent({ authorPublicKey }: { authorPublicKey: string | null }) {
+function TemplateListContent({
+  authorPublicKey,
+  rowsPerPage,
+  setRowsPerPage,
+}: {
+  authorPublicKey: string | null;
+  rowsPerPage: number;
+  setRowsPerPage: Dispatch<SetStateAction<number>>;
+}) {
   const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(10);
   const [openItem, setOpenItem] = useState<string | undefined>();
 
   const { request, enabled } = buildAuthoredTemplatesQuery(authorPublicKey, page, rowsPerPage);

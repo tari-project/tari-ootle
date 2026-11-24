@@ -13,12 +13,12 @@ export function buildAccountSelectOptions(
   activeAccount: Account | null | undefined,
 ): AccountSelectOption[] {
   const options: AccountSelectOption[] = (accounts ?? []).map((info) => ({
-    address: substateIdToString(info.account.component_address) as ComponentAddress,
+    address: substateIdToString(info.account.component_address),
     label: info.account.name || "<No Name>",
   }));
 
   if (activeAccount) {
-    const activeAddress = substateIdToString(activeAccount.component_address) as ComponentAddress;
+    const activeAddress = substateIdToString(activeAccount.component_address);
     if (!options.some((opt) => opt.address === activeAddress)) {
       options.push({
         address: activeAddress,
@@ -34,11 +34,5 @@ export function resolveSelectedAccountValue(
   options: readonly AccountSelectOption[],
   activeAccount: Account | null | undefined,
 ): string {
-  if (activeAccount) {
-    const activeAddress = substateIdToString(activeAccount.component_address);
-    if (options.some((opt) => opt.address === activeAddress)) {
-      return activeAddress;
-    }
-  }
-  return options[0]?.address ?? "";
+  return activeAccount ? substateIdToString(activeAccount.component_address) : (options[0]?.address ?? "");
 }

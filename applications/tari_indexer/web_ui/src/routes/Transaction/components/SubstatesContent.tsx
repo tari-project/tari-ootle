@@ -23,29 +23,33 @@
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
 import { Box, Chip, Collapse, Stack, Table, TableBody, TableContainer, TableRow, Typography } from "@mui/material";
-import { useTheme } from "@mui/material/styles";
-import { SubstateId, substateIdToString } from "@tari-project/ootle-ts-bindings";
+import { Substate, SubstateId, substateIdToString, SubstateVersion } from "@tari-project/ootle-ts-bindings";
 import { useState } from "react";
 import { IoArrowDownCircle, IoArrowUpCircle } from "react-icons/io5";
 import CopyToClipboard from "../../../Components/CopyToClipboard";
 import { AccordionIconButton, CodeBlock, DataTableCell } from "../../../Components/StyledComponents";
 import { renderJson } from "../../../utils/helpers";
 
+type SubstateEntryValue = Substate | SubstateVersion | null | undefined;
+
 interface SubstateRowProps {
   id: SubstateId;
-  substate: any;
+  substate: SubstateEntryValue;
   state: "Up" | "Down";
-  index: number;
 }
 
-function SubstateRow({ id, substate, state, index }: SubstateRowProps) {
+function formatSubstateVersion(substate: SubstateEntryValue): string {
+  if (substate === null || substate === undefined) {
+    return "";
+  }
+  const rawVersion = typeof substate === "number" ? substate : substate.version;
+  return rawVersion !== null && rawVersion !== undefined ? `v${rawVersion}` : "";
+}
+
+function SubstateRow({ id, substate, state }: SubstateRowProps) {
   const [open, setOpen] = useState(false);
-  const theme = useTheme();
   const substateId = substateIdToString(id);
-  const version =
-    substate !== null && substate !== undefined
-      ? "v" + (typeof substate === "number" ? substate : substate.version)
-      : "";
+  const version = formatSubstateVersion(substate);
 
   return (
     <>
@@ -63,7 +67,7 @@ function SubstateRow({ id, substate, state, index }: SubstateRowProps) {
         <DataTableCell sx={{ borderBottom: "none" }}>
           <Stack direction="row" alignItems="center">
             <Typography variant="body2" sx={{ fontFamily: "monospace", wordBreak: "break-all" }}>
-              {substateId} {version}
+              {version ? `${substateId} ${version}` : substateId}
             </Typography>
             <CopyToClipboard copy={substateId} />
           </Stack>
@@ -88,15 +92,15 @@ function SubstateRow({ id, substate, state, index }: SubstateRowProps) {
 interface SubstatesContentProps {
   result: {
     Accept: {
-      up_substates?: [SubstateId, any][];
-      down_substates?: [SubstateId, any][];
+      up_substates?: [SubstateId, Substate][];
+      down_substates?: [SubstateId, SubstateVersion][];
     };
   };
 }
 
 export default function SubstatesContent({ result }: SubstatesContentProps) {
-  const up = result.Accept.up_substates || [];
-  const down = result.Accept.down_substates || [];
+  const up = result?.Accept?.up_substates || [];
+  const down = result?.Accept?.down_substates || [];
 
   if (up.length === 0 && down.length === 0) {
     return (
@@ -112,11 +116,11 @@ export default function SubstatesContent({ result }: SubstatesContentProps) {
     <TableContainer>
       <Table>
         <TableBody>
-          {up.map(([id, substate]: [SubstateId, any], index: number) => (
-            <SubstateRow key={`up-${index}`} id={id} substate={substate} state="Up" index={index} />
+          {up.map(([id, substate], index) => (
+            <SubstateRow key={`up-${substateIdToString(id)}-${index}`} id={id} substate={substate} state="Up" />
           ))}
-          {down.map(([id, substate]: [SubstateId, any], index: number) => (
-            <SubstateRow key={`down-${index}`} id={id} substate={substate} state="Down" index={index} />
+          {down.map(([id, substate], index) => (
+            <SubstateRow key={`down-${substateIdToString(id)}-${index}`} id={id} substate={substate} state="Down" />
           ))}
         </TableBody>
       </Table>

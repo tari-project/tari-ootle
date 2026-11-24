@@ -43,27 +43,38 @@ interface ICodeBlockExpand {
   content: unknown;
 }
 
-function stringifyContent(content: unknown): string {
-  try {
-    return (
-      JSON.stringify(content, (_key, value) => {
-        if (typeof value === "bigint") {
-          return value.toString();
-        }
-        if (value instanceof Uint8Array) {
-          return Array.from(value, (b) => b.toString(16).padStart(2, "0")).join("");
-        }
-        if (value instanceof Map) {
-          return Object.fromEntries(
-            Array.from(value.entries(), ([k, v]) => [typeof k === "string" ? k : String(k), v]),
-          );
-        }
-        return value;
-      }) ?? "null"
-    );
-  } catch {
-    return String(content);
+function bytesToHex(bytes: Uint8Array): string {
+  return `0x${Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")}`;
+}
+
+function mapKeyToString(key: unknown): string {
+  if (typeof key === "string") {
+    return key;
   }
+  if (key instanceof Uint8Array) {
+    return bytesToHex(key);
+  }
+  if (typeof key === "number" || typeof key === "bigint" || typeof key === "boolean" || key == null) {
+    return String(key);
+  }
+  return stringifyContent(key);
+}
+
+export function stringifyContent(content: unknown): string {
+  return (
+    JSON.stringify(content, (_key, value) => {
+      if (typeof value === "bigint") {
+        return value.toString();
+      }
+      if (value instanceof Uint8Array) {
+        return bytesToHex(value);
+      }
+      if (value instanceof Map) {
+        return Object.fromEntries(Array.from(value.entries(), ([k, v]) => [mapKeyToString(k), v]));
+      }
+      return value;
+    }) ?? "null"
+  );
 }
 
 const CodeBlock = styled(Box)(({ theme }) => ({
@@ -98,12 +109,9 @@ interface ToolBarProps {
 function ToolBar({ title, content, open, onOpen, onClose }: ToolBarProps) {
   const [copied, setCopied] = useState(false);
   const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const isMountedRef = useRef(true);
 
   useEffect(() => {
-    isMountedRef.current = true;
     return () => {
-      isMountedRef.current = false;
       if (copyTimerRef.current !== null) {
         clearTimeout(copyTimerRef.current);
       }
@@ -113,9 +121,6 @@ function ToolBar({ title, content, open, onOpen, onClose }: ToolBarProps) {
   const handleCopy = async () => {
     try {
       await navigator.clipboard.writeText(stringifyContent(content));
-      if (!isMountedRef.current) {
-        return;
-      }
       setCopied(true);
       if (copyTimerRef.current !== null) {
         clearTimeout(copyTimerRef.current);

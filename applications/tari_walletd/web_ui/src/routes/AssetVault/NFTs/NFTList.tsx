@@ -55,6 +55,96 @@ export interface NftListProps {
   onManualRefresh?: () => void;
 }
 
+function nftKey(nft: NonFungibleToken): string {
+  return `${nft.resource_address}:${nftIdToString(nft.nft_id)}`;
+}
+
+function EmptyPlaceholder() {
+  return (
+    <Stack alignItems="center" justifyContent="center" sx={{ py: 8 }}>
+      <Typography variant="h6" color="text.secondary" gutterBottom>
+        No NFTs found
+      </Typography>
+      <Typography variant="body2" color="text.secondary">
+        You don't have any NFTs in this account yet. Try claiming some testnet NFTs to get started.
+      </Typography>
+    </Stack>
+  );
+}
+
+function EmptyPagePlaceholder({ onManualRefresh }: { onManualRefresh?: () => void }) {
+  return (
+    <Stack alignItems="center" justifyContent="center" sx={{ py: 8 }}>
+      <Typography variant="h6" color="text.secondary" gutterBottom>
+        No NFTs on this page
+      </Typography>
+      <Typography variant="body2" color="text.secondary">
+        No NFTs are available for the current page.
+      </Typography>
+      {onManualRefresh && (
+        <Button variant="outlined" onClick={onManualRefresh} size="small" sx={{ mt: 2 }}>
+          Click here to manually refresh
+        </Button>
+      )}
+    </Stack>
+  );
+}
+
+interface NftCollectionProps {
+  viewMode: "grid" | "list";
+  displayedNfts: NonFungibleToken[];
+  selectedMap: Map<string, NonFungibleToken>;
+  isSelectDisabled: (nft: NonFungibleToken) => boolean;
+  onToggleSelect: (nft: NonFungibleToken) => void;
+}
+
+function NftCollection({ viewMode, displayedNfts, selectedMap, isSelectDisabled, onToggleSelect }: NftCollectionProps) {
+  return viewMode === "grid" ? (
+    <Grid container spacing={3}>
+      {displayedNfts.map((nft: NonFungibleToken) => {
+        const key = nftKey(nft);
+        return (
+          <NftCard
+            key={key}
+            nft={nft}
+            selected={selectedMap.has(key)}
+            selectDisabled={isSelectDisabled(nft)}
+            onToggleSelect={() => onToggleSelect(nft)}
+          />
+        );
+      })}
+    </Grid>
+  ) : (
+    <TableContainer>
+      <Table>
+        <TableHead>
+          <TableRow>
+            <TableCell padding="checkbox" aria-hidden />
+            <TableCell>NFT</TableCell>
+            <TableCell>Original Owner</TableCell>
+            <TableCell>Status</TableCell>
+            <TableCell>Actions</TableCell>
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {displayedNfts.map((nft: NonFungibleToken) => {
+            const key = nftKey(nft);
+            return (
+              <NftRow
+                key={key}
+                nft={nft}
+                selected={selectedMap.has(key)}
+                selectDisabled={isSelectDisabled(nft)}
+                onToggleSelect={() => onToggleSelect(nft)}
+              />
+            );
+          })}
+        </TableBody>
+      </Table>
+    </TableContainer>
+  );
+}
+
 export default function NFTList(props: NftListProps) {
   const {
     nftsListIsError,
@@ -72,24 +162,19 @@ export default function NFTList(props: NftListProps) {
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [selectedMap, setSelectedMap] = useState<Map<string, NonFungibleToken>>(new Map());
   const [sendDialogOpen, setSendDialogOpen] = useState(false);
-  const displayedNfts = nftsListData?.nfts || [];
+  const displayedNfts = useMemo(() => nftsListData?.nfts ?? [], [nftsListData?.nfts]);
   const lockedResourceAddress = selectedMap.size ? Array.from(selectedMap.values())[0].resource_address : null;
+  const maxPage = totalCount > 0 ? Math.ceil(totalCount / rowsPerPage) - 1 : 0;
+  const clampedPage = Math.min(page, maxPage);
 
-  const nftKey = useCallback((nft: NonFungibleToken) => {
-    return `${nft.resource_address}:${nftIdToString(nft.nft_id)}`;
+  const toggleSelect = useCallback((nft: NonFungibleToken) => {
+    setSelectedMap((prev) => {
+      const key = nftKey(nft);
+      const next = new Map(prev);
+      next.has(key) ? next.delete(key) : next.set(key, nft);
+      return next;
+    });
   }, []);
-
-  const toggleSelect = useCallback(
-    (nft: NonFungibleToken) => {
-      setSelectedMap((prev) => {
-        const key = nftKey(nft);
-        const next = new Map(prev);
-        next.has(key) ? next.delete(key) : next.set(key, nft);
-        return next;
-      });
-    },
-    [nftKey],
-  );
 
   const isSelectDisabled = useCallback(
     (nft: NonFungibleToken) => {
@@ -99,94 +184,35 @@ export default function NFTList(props: NftListProps) {
         nft.resource_address !== lockedResourceAddress
       );
     },
-    [lockedResourceAddress, selectedMap, nftKey],
+    [lockedResourceAddress, selectedMap],
   );
+
+  // Sync out-of-range page back to maxPage once data settles
+  useEffect(() => {
+    if (!nftsListIsFetching && !nftsListIsError && totalCount > 0 && page > maxPage) {
+      onPageChange(null, maxPage);
+    }
+  }, [nftsListIsFetching, nftsListIsError, totalCount, page, maxPage, onPageChange]);
 
   // Prune selections that are no longer in the displayed NFT list
   useEffect(() => {
-    if (selectedMap.size === 0) return;
-    const currentKeys = new Set(displayedNfts.map((nft) => nftKey(nft)));
-    const staleKeys = Array.from(selectedMap.keys()).filter((key) => !currentKeys.has(key));
-    if (staleKeys.length > 0) {
-      setSelectedMap((prev) => {
-        const next = new Map(prev);
-        for (const key of staleKeys) {
-          next.delete(key);
+    setSelectedMap((prev) => {
+      if (prev.size === 0) return prev;
+      const currentKeys = new Set(displayedNfts.map(nftKey));
+      let changed = false;
+      const next = new Map<string, NonFungibleToken>();
+      for (const [key, nft] of prev) {
+        if (currentKeys.has(key)) {
+          next.set(key, nft);
+        } else {
+          changed = true;
         }
-        return next;
-      });
-    }
-  }, [displayedNfts, selectedMap, nftKey]);
+      }
+      return changed ? next : prev;
+    });
+  }, [displayedNfts]);
 
   const selectedNfts = useMemo(() => Array.from(selectedMap.values()), [selectedMap]);
-
-  const EmptyPlaceHolder = () => (
-    <Stack alignItems="center" justifyContent="center" sx={{ py: 8 }}>
-      <Typography variant="h6" color="text.secondary" gutterBottom>
-        No NFTs found
-      </Typography>
-      <Typography variant="body2" color="text.secondary">
-        You don't have any NFTs in this account yet. Try claiming some testnet NFTs to get started.
-      </Typography>
-    </Stack>
-  );
-
-  const FetchingPlaceHolder = () => (
-    <Stack alignItems="center" justifyContent="center" sx={{ py: 8 }}>
-      <Typography variant="h6" color="text.secondary" gutterBottom>
-        NFTs loading...
-      </Typography>
-      <Typography variant="body2" color="text.secondary">
-        Please wait while we fetch your NFTs from the wallet.
-      </Typography>
-      {onManualRefresh && (
-        <Button variant="outlined" onClick={onManualRefresh} size="small" sx={{ mt: 2 }}>
-          Click here to manually refresh
-        </Button>
-      )}
-    </Stack>
-  );
-
-  const DisplayNFTs = () => {
-    return viewMode === "grid" ? (
-      <Grid container spacing={3}>
-        {displayedNfts.map((nft: NonFungibleToken) => (
-          <NftCard
-            key={nftKey(nft)}
-            nft={nft}
-            selected={selectedMap.has(nftKey(nft))}
-            selectDisabled={isSelectDisabled(nft)}
-            onToggleSelect={() => toggleSelect(nft)}
-          />
-        ))}
-      </Grid>
-    ) : (
-      <TableContainer>
-        <Table>
-          <TableHead>
-            <TableRow>
-              <TableCell padding="checkbox" aria-hidden />
-              <TableCell>NFT</TableCell>
-              <TableCell>Original Owner</TableCell>
-              <TableCell>Status</TableCell>
-              <TableCell>Actions</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {displayedNfts.map((nft: NonFungibleToken) => (
-              <NftRow
-                key={nftKey(nft)}
-                nft={nft}
-                selected={selectedMap.has(nftKey(nft))}
-                selectDisabled={isSelectDisabled(nft)}
-                onToggleSelect={() => toggleSelect(nft)}
-              />
-            ))}
-          </TableBody>
-        </Table>
-      </TableContainer>
-    );
-  };
 
   return (
     <FetchStatusCheck
@@ -230,18 +256,24 @@ export default function NFTList(props: NftListProps) {
         </Stack>
 
         {totalCount === 0 ? (
-          <EmptyPlaceHolder />
+          <EmptyPlaceholder />
         ) : displayedNfts.length === 0 ? (
-          <FetchingPlaceHolder />
+          <EmptyPagePlaceholder onManualRefresh={onManualRefresh} />
         ) : (
-          <DisplayNFTs />
+          <NftCollection
+            viewMode={viewMode}
+            displayedNfts={displayedNfts}
+            selectedMap={selectedMap}
+            isSelectDisabled={isSelectDisabled}
+            onToggleSelect={toggleSelect}
+          />
         )}
 
         {totalCount > 0 && (
           <TablePagination
             component="div"
             count={totalCount}
-            page={page}
+            page={clampedPage}
             onPageChange={onPageChange}
             rowsPerPage={rowsPerPage}
             onRowsPerPageChange={onRowsPerPageChange}

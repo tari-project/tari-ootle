@@ -1,36 +1,26 @@
 //  Copyright 2026 The Tari Project
 //  SPDX-License-Identifier: BSD-3-Clause
 
+import { partialMatchKey } from "@tanstack/react-query";
 import { describe, expect, it } from "vitest";
-import { accountBalancesQueryKey, isAccountBalancesQueryKey, validatorFeesQueryKey } from "./accountQueryKeys";
+import { ACCOUNT_BALANCES_QUERY_KEY, accountBalancesQueryKey } from "./accountQueryKeys";
 
-const SAMPLE_ACCOUNT = "component_0000000000000000000000000000000000000000000000000000000000000001";
+const ACCOUNT_A = "component_0000000000000000000000000000000000000000000000000000000000000001";
+const ACCOUNT_B = "component_0000000000000000000000000000000000000000000000000000000000000002";
 
-describe("accountQueryKeys", () => {
-  describe("isAccountBalancesQueryKey", () => {
-    it("matches per-account balance query keys produced by accountBalancesQueryKey", () => {
-      expect(isAccountBalancesQueryKey(accountBalancesQueryKey(SAMPLE_ACCOUNT))).toBe(true);
-    });
-
-    it("does not match unrelated or bare query keys", () => {
-      expect(isAccountBalancesQueryKey(["accounts_balances"])).toBe(false);
-      expect(isAccountBalancesQueryKey(["accounts"])).toBe(false);
-      expect(isAccountBalancesQueryKey(["accounts_get_default"])).toBe(false);
-      expect(isAccountBalancesQueryKey(["transactions"])).toBe(false);
-      expect(isAccountBalancesQueryKey([])).toBe(false);
-      expect(isAccountBalancesQueryKey([123])).toBe(false);
-    });
+describe("accountBalancesQueryKey", () => {
+  it("matches the shared accounts_balances prefix used by mutation invalidations", () => {
+    const key = accountBalancesQueryKey(ACCOUNT_A);
+    expect(key[0]).toBe(ACCOUNT_BALANCES_QUERY_KEY);
+    expect(partialMatchKey(key, [ACCOUNT_BALANCES_QUERY_KEY])).toBe(true);
   });
 
-  describe("validatorFeesQueryKey", () => {
-    it("includes accountOrKeyId and shardGroup to avoid cross-validator cache collisions", () => {
-      const keyA = validatorFeesQueryKey({ Account: { ComponentAddress: SAMPLE_ACCOUNT } }, null);
-      const keyB = validatorFeesQueryKey({ KeyId: { Derived: { key_branch: "account", index: 1n } } }, null);
-      const keyC = validatorFeesQueryKey({ Account: { ComponentAddress: SAMPLE_ACCOUNT } }, { start: 0, end: 15 });
+  it("isolates per-account balance invalidations", () => {
+    const keyA = accountBalancesQueryKey(ACCOUNT_A);
+    const keyB = accountBalancesQueryKey(ACCOUNT_B);
 
-      expect(keyA).not.toEqual(keyB);
-      expect(keyA).not.toEqual(keyC);
-      expect(keyA[0]).toBe("validator_fees");
-    });
+    expect(partialMatchKey(keyA, keyA)).toBe(true);
+    expect(partialMatchKey(keyA, keyB)).toBe(false);
+    expect(partialMatchKey(["accounts"], [ACCOUNT_BALANCES_QUERY_KEY])).toBe(false);
   });
 });

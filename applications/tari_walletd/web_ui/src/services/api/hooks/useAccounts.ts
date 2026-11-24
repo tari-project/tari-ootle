@@ -24,7 +24,6 @@ import { ApiError } from "@api/helpers/types";
 import queryClient from "@api/queryClient";
 import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
 import {
-  AccountOrKeyId,
   BadgeUsage,
   BalanceChangeSourceType,
   ClaimBurnRequest,
@@ -60,10 +59,9 @@ import {
   confidentialListOutputs,
   mintFaucetNfts,
   stealthUtxosList,
-  validatorsGetFees,
 } from "@utils/json_rpc";
 import { useEffect, useRef } from "react";
-import { accountBalancesQueryKey, isAccountBalancesQueryKey, validatorFeesQueryKey } from "./accountQueryKeys";
+import { ACCOUNT_BALANCES_QUERY_KEY, accountBalancesQueryKey } from "./accountQueryKeys";
 
 const ACCOUNT_BALANCE_CHANGES_QUERY_KEY = "account_balance_changes";
 
@@ -274,7 +272,7 @@ export const useAccountsCreateFreeTestCoins = () => {
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ["transactions"] });
-      queryClient.invalidateQueries({ predicate: (query) => isAccountBalancesQueryKey(query.queryKey) });
+      queryClient.invalidateQueries({ queryKey: [ACCOUNT_BALANCES_QUERY_KEY] });
       queryClient.invalidateQueries({ queryKey: ["faucet_balance"] });
     },
   });
@@ -314,7 +312,7 @@ export const useMintTestnetFaucetNfts = () => {
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ["transactions"] });
-      queryClient.invalidateQueries({ predicate: (query) => isAccountBalancesQueryKey(query.queryKey) });
+      queryClient.invalidateQueries({ queryKey: [ACCOUNT_BALANCES_QUERY_KEY] });
 
       // Delayed invalidation for NFTs to handle wallet processing time
       setTimeout(() => {
@@ -427,13 +425,6 @@ export const useAccountsGet = (account: ComponentAddress) => {
 //     queryFn: () => nftList({ account: { ComponentAddress: account }, offset, limit }),
 //   });
 // };
-
-export const useValidatorFees = (accountOrKeyId: AccountOrKeyId, shardGroup = null) => {
-  return useQuery({
-    queryKey: validatorFeesQueryKey(accountOrKeyId, shardGroup),
-    queryFn: () => validatorsGetFees({ account_or_key: accountOrKeyId, shard_group: shardGroup }),
-  });
-};
 
 // (alias) type StealthUtxosListRequest = {
 //     resource_address: ResourceAddress;

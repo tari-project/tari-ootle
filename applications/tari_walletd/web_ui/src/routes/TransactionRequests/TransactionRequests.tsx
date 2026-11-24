@@ -77,23 +77,20 @@ function statusColor(status: EffectiveStatus): "default" | "warning" | "success"
   }
 }
 
-function Countdown({ expiresAt }: { expiresAt: bigint }) {
+function useNow(enabled: boolean): number {
   const [now, setNow] = useState(() => Date.now() / 1000);
-  const remaining = getRemainingSeconds(expiresAt, now);
-
   useEffect(() => {
-    if (getRemainingSeconds(expiresAt, Date.now() / 1000) === 0) {
+    if (!enabled) {
       return;
     }
-    const t = setInterval(() => {
-      const current = Date.now() / 1000;
-      setNow(current);
-      if (getRemainingSeconds(expiresAt, current) === 0) {
-        clearInterval(t);
-      }
-    }, 1000);
+    const t = setInterval(() => setNow(Date.now() / 1000), 1000);
     return () => clearInterval(t);
-  }, [expiresAt]);
+  }, [enabled]);
+  return now;
+}
+
+function Countdown({ expiresAt, now }: { expiresAt: bigint; now: number }) {
+  const remaining = getRemainingSeconds(expiresAt, now);
 
   return (
     <Chip
@@ -235,6 +232,8 @@ function RequestCard({ request }: { request: TransactionRequestInfo }) {
   // holding instructions this card cannot describe is open.
   const [expanded, setExpanded] = useState<string | null | undefined>(undefined);
   const isActionable = request.status === "Pending";
+  const now = useNow(isActionable);
+  const isExpired = isActionable && getRemainingSeconds(request.expires_at, now) === 0;
   // Approve and submit are separate permissions and separate RPCs, but this UI
   // holds both, so approving chains straight into submitting. If the submit
   // half fails (or another principal beat it), the request stays Approved and
@@ -278,7 +277,7 @@ function RequestCard({ request }: { request: TransactionRequestInfo }) {
           requests approval
         </Typography>
         <Stack direction="row" spacing={1} alignItems="center">
-          {isActionable && <Countdown expiresAt={request.expires_at} />}
+          {isActionable && <Countdown expiresAt={request.expires_at} now={now} />}
           <Chip label={request.status} size="small" color={statusColor(request.status)} />
         </Stack>
       </Stack>
@@ -384,7 +383,7 @@ function RequestCard({ request }: { request: TransactionRequestInfo }) {
                 <Button
                   variant="outlined"
                   color="error"
-                  disabled={busy}
+                  disabled={busy || isExpired}
                   startIcon={reject.isPending ? <CircularProgress size={16} color="inherit" /> : undefined}
                   onClick={() => reject.mutate(params)}
                 >
@@ -392,7 +391,7 @@ function RequestCard({ request }: { request: TransactionRequestInfo }) {
                 </Button>
                 <Button
                   variant="contained"
-                  disabled={busy}
+                  disabled={busy || isExpired}
                   startIcon={
                     approve.isPending || submit.isPending ? <CircularProgress size={16} color="inherit" /> : undefined
                   }

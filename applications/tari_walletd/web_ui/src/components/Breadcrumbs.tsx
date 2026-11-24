@@ -24,44 +24,30 @@ import { Breadcrumbs, Link } from "@mui/material";
 import React from "react";
 import { Link as RouterLink } from "react-router-dom";
 import useBreadcrumbs from "use-react-router-breadcrumbs";
-
-interface BreadcrumbsItem {
-  label: string;
-  path: string;
-  dynamic: boolean;
-}
+import { BreadcrumbRouteConfig, resolveBreadcrumbItem } from "./breadcrumbsHelpers";
 
 interface BreadcrumbsProps {
-  items: BreadcrumbsItem[];
+  items: BreadcrumbRouteConfig[];
 }
 
 const BreadcrumbsComponent: React.FC<BreadcrumbsProps> = ({ items }) => {
   const breadcrumbs = useBreadcrumbs(items);
 
-  const links = breadcrumbs.map(({ match, breadcrumb }: any, i) => {
-    const breadcrumbLabel = breadcrumb.props.children;
-    if (i === breadcrumbs.length - 1) {
+  const links = breadcrumbs.map(({ match, breadcrumb }, i) => {
+    const resolved = resolveBreadcrumbItem(match, breadcrumb, i, breadcrumbs.length);
+    if (resolved.isLast || resolved.to === null) {
       return (
-        <span key={breadcrumbLabel} style={{ textTransform: "lowercase", fontWeight: "bold" }}>
-          {breadcrumbLabel.toLowerCase()}
+        <span key={resolved.key} style={{ textTransform: "lowercase", fontWeight: "bold" }}>
+          {resolved.label}
         </span>
       );
     }
 
-    if (match.route) {
-      const { label, path, dynamic } = match.route;
-      return (
-        <Link key={breadcrumbLabel} component={RouterLink} to={path} underline="none" color="inherit">
-          {dynamic ? breadcrumbLabel.toLowerCase() : label}
-        </Link>
-      );
-    } else {
-      return (
-        <Link key={breadcrumbLabel} component={RouterLink} to="/" underline="none" color="inherit">
-          {breadcrumbLabel.toLowerCase()}
-        </Link>
-      );
-    }
+    return (
+      <Link key={resolved.key} component={RouterLink} to={resolved.to} underline="none" color="inherit">
+        {resolved.label}
+      </Link>
+    );
   });
 
   return (

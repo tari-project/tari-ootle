@@ -42,56 +42,11 @@ import { convertCborValue, type NonFungibleToken } from "@tari-project/ootle-ts-
 import { displayNftId, shortenSubstateId } from "@utils/helpers";
 import type { SyntheticEvent } from "react";
 import { Fragment } from "react/jsx-runtime";
+import { extractNftMetadata, formatNftDataValue, getNftImageUrl, isPlainRecord } from "./nftData";
 import SendNft from "./SendNft";
 
 const ERR_IMG =
   "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzAwIiBoZWlnaHQ9IjIwMCIgdmlld0JveD0iMCAwIDMwMCAyMDAiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxyZWN0IHdpZHRoPSIzMDAiIGhlaWdodD0iMjAwIiBmaWxsPSIjRjVGNUY1Ii8+CjxwYXRoIGQ9Ik0xMjUgNzVIMTc1VjEyNUgxMjVWNzVaIiBmaWxsPSIjRERERUREIi8+CjxwYXRoIGQ9Ik0xNDAgOTBIMTYwVjExMEgxNDBWOTBaIiBmaWxsPSIjQkJCQkJCIi8+Cjx0ZXh0IHg9IjE1MCIgeT0iMTQwIiBmb250LWZhbWlseT0iQXJpYWwiIGZvbnQtc2l6ZT0iMTIiIGZpbGw9IiM5OTk5OTkiIHRleHQtYW5jaG9yPSJtaWRkbGUiPk5GVDwvdGV4dD4KPC9zdmc+";
-
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-export function getNftImageUrl(mutableData: unknown): string | undefined {
-  if (!isPlainRecord(mutableData)) {
-    return undefined;
-  }
-  const url = mutableData.image_url;
-  return typeof url === "string" && url.trim().length > 0 ? url.trim() : undefined;
-}
-
-export function formatNftDataValue(value: unknown): string {
-  if (value === null || value === undefined) {
-    return "";
-  }
-  if (
-    typeof value === "string" ||
-    typeof value === "number" ||
-    typeof value === "boolean" ||
-    typeof value === "bigint"
-  ) {
-    return value.toString();
-  }
-  return JSON.stringify(value, (_key, nested) => (typeof nested === "bigint" ? nested.toString() : nested));
-}
-
-export function extractNftMetadata(data: unknown, limit = 5): [string, string][] {
-  const metadata: [string, string][] = [];
-  if (!isPlainRecord(data)) {
-    return metadata;
-  }
-  for (const [key, value] of Object.entries(data)) {
-    if (
-      typeof value === "string" ||
-      typeof value === "number" ||
-      typeof value === "boolean" ||
-      typeof value === "bigint"
-    ) {
-      metadata.push([key, value.toString()]);
-      if (metadata.length >= limit) break;
-    }
-  }
-  return metadata;
-}
 
 interface NftItemProps {
   nft: NonFungibleToken;

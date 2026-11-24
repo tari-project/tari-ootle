@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 import { describe, expect, it } from "vitest";
-import { extractNftMetadata, formatNftDataValue, getNftImageUrl } from "./NftParts";
+import { extractNftMetadata, formatNftDataValue, getNftImageUrl } from "./nftData";
 
 describe("getNftImageUrl", () => {
   it("returns a trimmed non-empty string image_url from plain mutable data", () => {
@@ -19,7 +19,7 @@ describe("getNftImageUrl", () => {
 });
 
 describe("formatNftDataValue", () => {
-  it("formats primitives and BigInt values without throwing", () => {
+  it("formats primitives and BigInt values cleanly", () => {
     expect(formatNftDataValue("gold")).toBe("gold");
     expect(formatNftDataValue(7)).toBe("7");
     expect(formatNftDataValue(true)).toBe("true");

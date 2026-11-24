@@ -33,7 +33,7 @@ import useAccountStore, { setAccount, setOotleAddress } from "@store/accountStor
 import { AccountsCreateFreeTestCoinsResponse, substateIdToString } from "@tari-project/ootle-ts-bindings";
 import { settingsGet, settingsSet } from "@utils/json_rpc";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { addClaimedAccount, isAccountBalanceQueryKey } from "./claimCoinsHelpers";
+import { applyClaimSuccess, markAccountClaimed } from "./claimCoinsHelpers";
 
 function ClaimCoinsButton() {
   const { mutate: claimTestnetFaucetFunds, isPending } = useAccountsCreateFreeTestCoins();
@@ -70,18 +70,18 @@ function ClaimCoinsButton() {
   }, [accountAddress]);
 
   const markClaimed = useCallback(async (targetAddress: string) => {
-    if (activeAccountRef.current === targetAddress) {
-      setHasClaimed(true);
-    }
     try {
-      const current = await settingsGet();
-      const updated = addClaimedAccount(current.claimed_accounts, targetAddress);
-      if (!updated) return;
-      await settingsSet({
-        indexer_url: null,
-        indexer_urls: null,
-        advanced_ui_features: null,
-        claimed_accounts: updated,
+      await markAccountClaimed(targetAddress, {
+        getActiveAccount: () => activeAccountRef.current,
+        setHasClaimed,
+        getSettings: settingsGet,
+        saveClaimedAccounts: (claimed_accounts) =>
+          settingsSet({
+            indexer_url: null,
+            indexer_urls: null,
+            advanced_ui_features: null,
+            claimed_accounts,
+          }),
       });
     } catch (e) {
       console.error("Failed to persist claimed account:", e);
@@ -110,14 +110,21 @@ function ClaimCoinsButton() {
       },
       {
         onSuccess: async (resp: AccountsCreateFreeTestCoinsResponse) => {
-          if (activeAccountRef.current === claimedAddress) {
-            setAccount(resp.account);
-            setOotleAddress(resp.address);
-          }
+          applyClaimSuccess(claimedAddress, resp, {
+            getActiveAccount: () => activeAccountRef.current,
+            setAccount,
+            setOotleAddress,
+          });
           void markClaimed(claimedAddress);
           showSuccess("Successfully claimed testnet coins!");
           await queryClient.invalidateQueries({
-            predicate: (query) => isAccountBalanceQueryKey(query.queryKey),
+            predicate: (query) => {
+              const key = query.queryKey[0];
+              return (
+                typeof key === "string" &&
+                (key === "balances" || key === "accounts_balances" || key.startsWith("accounts_get_balances"))
+              );
+            },
           });
         },
         onError: (error: any) => {

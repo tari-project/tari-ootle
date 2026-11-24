@@ -32,27 +32,33 @@ export interface Channel {
 export function readChannels(validators: ValidatorNode[], details: Record<number, VnDetail>) {
   const rows = validators.map((vn) => {
     const detail = details[vn.instance_id];
-    const consensus = detail?.consensus ?? null;
+    const consensus = vn.is_running ? (detail?.consensus ?? null) : null;
+    const epoch = consensus && typeof consensus.epoch === "number" && Number.isFinite(consensus.epoch)
+      ? consensus.epoch
+      : null;
+    const height = consensus && typeof consensus.height === "number" && Number.isFinite(consensus.height)
+      ? consensus.height
+      : null;
     return {
       vn,
       detail,
-      epoch: consensus?.epoch ?? null,
-      height: consensus?.height ?? null,
+      epoch,
+      height,
       state: !vn.is_running ? "Stopped" : (consensus?.state ?? "No data"),
     };
   });
 
-  const live = rows.filter((r) => r.height !== null);
-  const tipEpoch = live.length ? Math.max(...live.map((r) => r.epoch ?? 0)) : null;
+  const live = rows.filter((r) => r.epoch !== null && r.height !== null);
+  const tipEpoch = live.length ? Math.max(...live.map((r) => r.epoch as number)) : null;
   const atTip = live.filter((r) => r.epoch === tipEpoch);
-  const tipHeight = atTip.length ? Math.max(...atTip.map((r) => r.height ?? 0)) : null;
+  const tipHeight = atTip.length ? Math.max(...atTip.map((r) => r.height as number)) : null;
 
   const channels: Channel[] = rows.map((r) => {
-    if (r.height === null || tipEpoch === null || tipHeight === null) {
+    if (r.epoch === null || r.height === null || tipEpoch === null || tipHeight === null) {
       return { ...r, deficit: { kind: "unknown" }, tone: r.state === "Stopped" ? "off" : "down" };
     }
     // Being on an older epoch is a different kind of behind: heights are not comparable.
-    const epochsBehind = tipEpoch - (r.epoch ?? 0);
+    const epochsBehind = tipEpoch - r.epoch;
     if (epochsBehind > 0) {
       return { ...r, deficit: { kind: "epochs", n: epochsBehind }, tone: "lag" };
     }
@@ -100,9 +106,9 @@ export const SYNC_STATES = new Set(["CheckSync", "Syncing", "Presyncing"]);
 export function deficitLabel(deficit: Deficit): string | null {
   switch (deficit.kind) {
     case "blocks":
-      return `−${deficit.n}`;
+      return Number.isFinite(deficit.n) && deficit.n > 0 ? `−${deficit.n}` : null;
     case "epochs":
-      return `−${deficit.n} epoch${deficit.n > 1 ? "s" : ""}`;
+      return Number.isFinite(deficit.n) && deficit.n > 0 ? `−${deficit.n} epoch${deficit.n > 1 ? "s" : ""}` : null;
     default:
       return null;
   }

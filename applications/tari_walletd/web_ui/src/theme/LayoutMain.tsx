@@ -47,10 +47,11 @@ import useAccountStore from "@store/accountStore";
 import useAuthStore from "@store/authStore";
 import useSettingsStore from "@store/settingsStore";
 import useThemeStore from "@store/themeStore";
-import { componentSettings, dark, light } from "@tari-project/ootle-web-ui-theming";
+import { componentSettings } from "@tari-project/ootle-web-ui-theming";
 import { settingsGet } from "@utils/json_rpc";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, Outlet } from "react-router-dom";
+import { resolveThemeOptions, syncAdvancedUiFeatures } from "./layoutMainHelpers";
 
 const DRAWER_WIDTH = 300;
 
@@ -82,7 +83,7 @@ const Drawer = styled(MuiDrawer, {
   "& .MuiDrawer-paper": {
     position: "relative",
     whiteSpace: "nowrap",
-    borderRight: `1px solid ${light.palette?.accent?.border}`,
+    borderRight: `1px solid ${theme.palette.accent.border}`,
     boxShadow: "10px 14px 28px rgb(35 11 73 / 5%)",
     width: DRAWER_WIDTH,
     transition: theme.transitions.create("width", {
@@ -116,26 +117,32 @@ export default function Layout() {
     if (!loggedIn) {
       return;
     }
-    settingsGet().then((res) => {
-      setAdvancedUiFeatures(res.advanced_ui_features);
+    let cancelled = false;
+    void syncAdvancedUiFeatures({
+      fetchSettings: settingsGet,
+      setAdvancedUiFeatures,
+      isCancelled: () => cancelled,
     });
+    return () => {
+      cancelled = true;
+    };
   }, [loggedIn, setAdvancedUiFeatures]);
 
   const handleClose = () => {
     setPopup({ visible: false });
   };
   const toggleDrawer = () => {
-    setOpen(!open);
+    setOpen((prev) => !prev);
   };
 
-  const themeOptions = (mode: string) => {
-    return mode === "light" ? light : dark;
-  };
-
-  const theme = createTheme({
-    ...themeOptions(themeMode),
-    ...componentSettings,
-  });
+  const theme = useMemo(
+    () =>
+      createTheme({
+        ...resolveThemeOptions(themeMode),
+        ...componentSettings,
+      }),
+    [themeMode],
+  );
 
   return (
     <ThemeProvider theme={theme}>
@@ -199,7 +206,7 @@ export default function Layout() {
               px: [1],
             }}
           >
-            <IconButton onClick={toggleDrawer}>
+            <IconButton aria-label="close drawer" onClick={toggleDrawer}>
               <MenuOpenOutlinedIcon />
             </IconButton>
           </Toolbar>

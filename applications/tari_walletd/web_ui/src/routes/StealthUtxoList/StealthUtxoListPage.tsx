@@ -35,7 +35,11 @@ import { useEffect } from "react";
 function StealthUtxoListPage() {
   const account = useAccountStore((state) => state.account);
   const { data: defaultAccount, isLoading, isError, error } = useAccountsGetDefault(!account);
-  const { showLoading, showError } = getDefaultAccountFetchState(Boolean(account), isLoading, isError);
+  const { showLoading, showError } = getDefaultAccountFetchState({
+    hasAccount: Boolean(account),
+    isLoading,
+    isError,
+  });
 
   useEffect(() => {
     if (!isError && defaultAccount && !account) {

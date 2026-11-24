@@ -1,16 +1,22 @@
 //  Copyright 2026. The Tari Project
 //  SPDX-License-Identifier: BSD-3-Clause
 
+export interface DefaultAccountFetchStateInput {
+  hasAccount: boolean;
+  isLoading: boolean;
+  isError: boolean;
+}
+
 export interface DefaultAccountFetchState {
   showLoading: boolean;
   showError: boolean;
 }
 
-export function getDefaultAccountFetchState(
-  hasAccount: boolean,
-  isLoading: boolean,
-  isError: boolean,
-): DefaultAccountFetchState {
+export function getDefaultAccountFetchState({
+  hasAccount,
+  isLoading,
+  isError,
+}: DefaultAccountFetchStateInput): DefaultAccountFetchState {
   if (hasAccount) {
     return { showLoading: false, showError: false };
   }

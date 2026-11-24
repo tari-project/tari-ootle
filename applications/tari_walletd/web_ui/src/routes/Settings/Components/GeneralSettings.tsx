@@ -27,39 +27,44 @@ import Typography from "@mui/material/Typography";
 import { SettingsGetResponse } from "@tari-project/ootle-ts-bindings";
 import { settingsGet } from "@utils/json_rpc";
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { formatSettingsError, getNetworkColor, shouldApplySettingsResult } from "./generalSettingsHelpers";
+import { createSettingsLoader } from "./generalSettingsHelpers";
 import IndexerSettings from "./IndexerSettings";
+
+const NETWORK_COLORS: Record<string, string> = {
+  mainnet: "#4caf50",
+  stagenet: "#9c27b0",
+  nextnet: "#2196f3",
+  localnet: "#ff9800",
+  igor: "#00bcd4",
+  esmeralda: "#009688",
+};
 
 function GeneralSettings() {
   const theme = useTheme();
   const [settings, setSettings] = useState<SettingsGetResponse | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const mountedRef = useRef(false);
-  const requestIdRef = useRef(0);
+  const loaderRef = useRef<ReturnType<typeof createSettingsLoader<SettingsGetResponse>> | null>(null);
+
+  if (loaderRef.current === null) {
+    loaderRef.current = createSettingsLoader({
+      fetchSettings: settingsGet,
+      onStart: () => setLoadError(null),
+      onSuccess: setSettings,
+      onError: setLoadError,
+    });
+  }
 
   const loadSettings = useCallback(() => {
-    const requestId = ++requestIdRef.current;
-    setLoadError(null);
-    settingsGet()
-      .then((res) => {
-        if (shouldApplySettingsResult(requestId, requestIdRef.current, mountedRef.current)) {
-          setSettings(res);
-        }
-      })
-      .catch((err) => {
-        if (shouldApplySettingsResult(requestId, requestIdRef.current, mountedRef.current)) {
-          setLoadError(formatSettingsError(err));
-        }
-      });
+    void loaderRef.current?.load();
   }, []);
 
   useEffect(() => {
-    mountedRef.current = true;
-    loadSettings();
+    const loader = loaderRef.current;
+    void loader?.load();
     return () => {
-      mountedRef.current = false;
+      loader?.invalidate();
     };
-  }, [loadSettings]);
+  }, []);
 
   const items = [
     {
@@ -79,9 +84,9 @@ function GeneralSettings() {
     },
   ];
 
-  const renderedItems = items.map((item) => {
+  const renderedItems = items.map((item, i) => {
     return (
-      <React.Fragment key={item.label}>
+      <React.Fragment key={i}>
         <Typography>{item.label}</Typography>
         <Box>{item.content}</Box>
         <Divider />
@@ -116,7 +121,7 @@ function GeneralSettings() {
 }
 
 function NetworkSettings({ network }: { network: string }) {
-  const color = getNetworkColor(network);
+  const color = NETWORK_COLORS[network] ?? "#757575";
 
   return (
     <Chip

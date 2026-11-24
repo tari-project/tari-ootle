@@ -1,25 +1,6 @@
 // Copyright 2026 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-const DEFAULT_NETWORK_COLOR = "#757575";
-
-export const NETWORK_COLORS: Record<string, string> = {
-  mainnet: "#4caf50",
-  stagenet: "#9c27b0",
-  nextnet: "#2196f3",
-  localnet: "#ff9800",
-  igor: "#00bcd4",
-  esmeralda: "#009688",
-};
-
-export function getNetworkColor(network: string): string {
-  return NETWORK_COLORS[network.trim().toLowerCase()] ?? DEFAULT_NETWORK_COLOR;
-}
-
-export function shouldApplySettingsResult(requestId: number, latestRequestId: number, isMounted: boolean): boolean {
-  return isMounted && requestId === latestRequestId;
-}
-
 export function formatSettingsError(error: unknown): string {
   if (error instanceof Error && error.message.trim()) {
     return error.message.trim();
@@ -28,4 +9,35 @@ export function formatSettingsError(error: unknown): string {
     return error.trim();
   }
   return "Failed to load settings.";
+}
+
+export function createSettingsLoader<T>(options: {
+  fetchSettings: () => Promise<T>;
+  onStart?: () => void;
+  onSuccess: (settings: T) => void;
+  onError: (message: string) => void;
+}) {
+  let latestRequestId = 0;
+
+  return {
+    load(): Promise<void> {
+      const requestId = ++latestRequestId;
+      options.onStart?.();
+      return options
+        .fetchSettings()
+        .then((res) => {
+          if (requestId === latestRequestId) {
+            options.onSuccess(res);
+          }
+        })
+        .catch((err) => {
+          if (requestId === latestRequestId) {
+            options.onError(formatSettingsError(err));
+          }
+        });
+    },
+    invalidate(): void {
+      latestRequestId++;
+    },
+  };
 }

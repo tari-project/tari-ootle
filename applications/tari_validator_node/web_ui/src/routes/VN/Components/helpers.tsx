@@ -29,7 +29,7 @@ class U256 {
     if (n.length > 64) {
       throw new Error("U256 input is larger than 64 characters");
     }
-    this.n = n.padStart(64, "0");
+    this.n = n.toLowerCase().padStart(64, "0");
   }
 
   inc() {
@@ -119,7 +119,11 @@ function fromHexString(hexString: string): Uint8Array {
 
 function shortenString(string: string, start: number = 8, end: number = 8) {
   if (typeof string !== "string") throw new Error("Expected input to be a string");
-  return string.substring(0, start) + "..." + string.slice(-end);
+  if (string.length <= start + end) {
+    return string;
+  }
+  const suffix = end > 0 ? string.slice(-end) : "";
+  return string.substring(0, start) + "..." + suffix;
 }
 
 export { U256, compare, fromHexString, shortenString, toHexString };

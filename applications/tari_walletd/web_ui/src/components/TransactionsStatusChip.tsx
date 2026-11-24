@@ -26,60 +26,64 @@ import useMediaQuery from "@mui/material/useMediaQuery";
 import type { TransactionStatus } from "@tari-project/ootle-ts-bindings";
 import { ReactNode } from "react";
 import { IoCheckmarkOutline, IoCloseOutline, IoDiamondOutline, IoHourglassOutline, IoReload } from "react-icons/io5";
+import { getTransactionStatusPresentation } from "./transactionsStatusChipHelpers";
 
 interface StatusChipProps {
   status: TransactionStatus;
   showTitle?: boolean;
 }
 
-const colorList: Record<string, string> = {
-  Accepted: "#5F9C91",
-  Pending: "#ECA86A",
-  DryRun: "#318EFA",
-  New: "#9D5CF9",
-  Rejected: "#DB7E7E",
-  InvalidTransaction: "#DB7E7E",
-  OnlyFeeAccepted: "#FFA500",
-};
+function renderStatusIcon(status: TransactionStatus, iconColor: string): ReactNode {
+  switch (status) {
+    case "Accepted":
+      return <IoCheckmarkOutline style={{ height: 14, width: 14 }} color={iconColor} />;
+    case "Pending":
+      return <IoHourglassOutline style={{ height: 14, width: 14 }} color={iconColor} />;
+    case "DryRun":
+      return <IoReload style={{ height: 14, width: 14 }} color={iconColor} />;
+    case "New":
+      return <IoDiamondOutline style={{ height: 14, width: 14 }} color={iconColor} />;
+    case "Rejected":
+    case "InvalidTransaction":
+      return <IoCloseOutline style={{ height: 14, width: 14 }} color={iconColor} />;
+    case "OnlyFeeAccepted":
+      return (
+        <>
+          <IoCheckmarkOutline style={{ height: 14, width: 14 }} color={iconColor} />
+          <IoCloseOutline style={{ height: 14, width: 14 }} color={iconColor} />
+        </>
+      );
+    default:
+      return <IoHourglassOutline style={{ height: 14, width: 14 }} color={iconColor} />;
+  }
+}
 
 export default function TransactionsStatusChip({ status, showTitle = true }: StatusChipProps) {
   const theme = useTheme();
   const isSm = useMediaQuery(theme.breakpoints.down("sm"));
-
-  const iconList: Record<string, ReactNode> = {
-    Accepted: <IoCheckmarkOutline style={{ height: 14, width: 14 }} color={theme.palette.background.paper} />,
-    Pending: <IoHourglassOutline style={{ height: 14, width: 14 }} color={theme.palette.background.paper} />,
-    DryRun: <IoReload style={{ height: 14, width: 14 }} color={theme.palette.background.paper} />,
-    New: <IoDiamondOutline style={{ height: 14, width: 14 }} color={theme.palette.background.paper} />,
-    Rejected: <IoCloseOutline style={{ height: 14, width: 14 }} color={theme.palette.background.paper} />,
-    InvalidTransaction: <IoCloseOutline style={{ height: 14, width: 14 }} color={theme.palette.background.paper} />,
-    OnlyFeeAccepted: (
-      <>
-        <IoCheckmarkOutline style={{ height: 14, width: 14 }} color={theme.palette.background.paper} />
-        <IoCloseOutline style={{ height: 14, width: 14 }} color={theme.palette.background.paper} />
-      </>
-    ),
-  };
-
-  let bgColor = colorList[status];
-  let background = null;
-
-  if (status === "OnlyFeeAccepted") {
-    const leftColor = colorList["Accepted"];
-    background = `linear-gradient(to right, ${leftColor} 50%, ${colorList["Rejected"]} 50%)`;
-  }
+  const { color, avatarBackground, label } = getTransactionStatusPresentation(status);
+  const icon = renderStatusIcon(status, theme.palette.background.paper);
 
   if (!showTitle) {
-    return <Avatar style={{ background: bgColor, height: 22, width: 22 }}>{iconList[status]}</Avatar>;
-  } else {
     return (
-      <Chip
-        avatar={<Avatar style={{ background: background || bgColor }}>{iconList[status]}</Avatar>}
-        label={status}
-        style={{ color: colorList[status], borderColor: colorList[status] }}
-        variant="outlined"
-        size={isSm ? "small" : "medium"}
-      />
+      <Avatar
+        role="img"
+        aria-label={label}
+        title={label}
+        style={{ background: avatarBackground, height: 22, width: 22 }}
+      >
+        {icon}
+      </Avatar>
     );
   }
+
+  return (
+    <Chip
+      avatar={<Avatar style={{ background: avatarBackground }}>{icon}</Avatar>}
+      label={label}
+      style={{ color, borderColor: color }}
+      variant="outlined"
+      size={isSm ? "small" : "medium"}
+    />
+  );
 }

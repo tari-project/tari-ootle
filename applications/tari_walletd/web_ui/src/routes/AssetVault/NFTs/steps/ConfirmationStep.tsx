@@ -31,7 +31,7 @@ import {
 } from "@tari-project/ootle-ts-bindings";
 import { XTR_CURRENCY } from "@utils/currency";
 import { displayNftId, formatCurrency, nftIdToString, substateIdToString } from "@utils/helpers";
-import { FALLBACK_NFT_IMG, findSelectedNft, getNftAvatarImageUrl, parseMaxFeeAmount } from "./confirmationStepHelpers";
+import { findSelectedNft, parseMaxFeeAmount } from "./confirmationStepHelpers";
 
 interface ConfirmationStepProps {
   accounts: Array<{ account: Account }> | undefined;
@@ -54,7 +54,6 @@ export default function ConfirmationStep({
   const selectedNft = findSelectedNft(availableNfts, preSelectedNftId);
 
   const nftMutableData = selectedNft ? convertCborValue(selectedNft.mutable_data) : null;
-  const nftImageUrl = getNftAvatarImageUrl(nftMutableData);
   const parsedMaxFee = parseMaxFeeAmount(transferFormState.maxFee);
 
   return (
@@ -65,7 +64,7 @@ export default function ConfirmationStep({
             {preSelectedNftId && selectedNft ? (
               <Stack direction="row" spacing={2} alignItems="center">
                 <Avatar
-                  src={nftImageUrl}
+                  src={nftMutableData?.image_url}
                   sx={{
                     width: 215,
                     height: 215,
@@ -73,15 +72,6 @@ export default function ConfirmationStep({
                     backgroundColor: "grey.200",
                   }}
                   variant="rounded"
-                  slotProps={{
-                    img: {
-                      onError: (e) => {
-                        if (e.currentTarget.src !== FALLBACK_NFT_IMG) {
-                          e.currentTarget.src = FALLBACK_NFT_IMG;
-                        }
-                      },
-                    },
-                  }}
                 >
                   NFT
                 </Avatar>

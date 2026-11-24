@@ -40,11 +40,58 @@ import {
 } from "@mui/material";
 import { convertCborValue, type NonFungibleToken } from "@tari-project/ootle-ts-bindings";
 import { displayNftId, shortenSubstateId } from "@utils/helpers";
+import type { SyntheticEvent } from "react";
 import { Fragment } from "react/jsx-runtime";
 import SendNft from "./SendNft";
 
 const ERR_IMG =
   "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzAwIiBoZWlnaHQ9IjIwMCIgdmlld0JveD0iMCAwIDMwMCAyMDAiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxyZWN0IHdpZHRoPSIzMDAiIGhlaWdodD0iMjAwIiBmaWxsPSIjRjVGNUY1Ii8+CjxwYXRoIGQ9Ik0xMjUgNzVIMTc1VjEyNUgxMjVWNzVaIiBmaWxsPSIjRERERUREIi8+CjxwYXRoIGQ9Ik0xNDAgOTBIMTYwVjExMEgxNDBWOTBaIiBmaWxsPSIjQkJCQkJCIi8+Cjx0ZXh0IHg9IjE1MCIgeT0iMTQwIiBmb250LWZhbWlseT0iQXJpYWwiIGZvbnQtc2l6ZT0iMTIiIGZpbGw9IiM5OTk5OTkiIHRleHQtYW5jaG9yPSJtaWRkbGUiPk5GVDwvdGV4dD4KPC9zdmc+";
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+export function getNftImageUrl(mutableData: unknown): string | undefined {
+  if (!isPlainRecord(mutableData)) {
+    return undefined;
+  }
+  const url = mutableData.image_url;
+  return typeof url === "string" && url.trim().length > 0 ? url.trim() : undefined;
+}
+
+export function formatNftDataValue(value: unknown): string {
+  if (value === null || value === undefined) {
+    return "";
+  }
+  if (
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean" ||
+    typeof value === "bigint"
+  ) {
+    return value.toString();
+  }
+  return JSON.stringify(value, (_key, nested) => (typeof nested === "bigint" ? nested.toString() : nested));
+}
+
+export function extractNftMetadata(data: unknown, limit = 5): [string, string][] {
+  const metadata: [string, string][] = [];
+  if (!isPlainRecord(data)) {
+    return metadata;
+  }
+  for (const [key, value] of Object.entries(data)) {
+    if (
+      typeof value === "string" ||
+      typeof value === "number" ||
+      typeof value === "boolean" ||
+      typeof value === "bigint"
+    ) {
+      metadata.push([key, value.toString()]);
+      if (metadata.length >= limit) break;
+    }
+  }
+  return metadata;
+}
 
 interface NftItemProps {
   nft: NonFungibleToken;
@@ -55,8 +102,8 @@ interface NftItemProps {
 
 function NftCard({ nft, selected, selectDisabled, onToggleSelect }: NftItemProps) {
   const mutableData = convertCborValue(nft.mutable_data);
-  const data = convertCborValue(nft.data) as Record<string, any> | undefined;
-  const imageUrl = mutableData?.image_url;
+  const data = convertCborValue(nft.data);
+  const imageUrl = getNftImageUrl(mutableData);
 
   return (
     <Grid size={{ xs: 12, sm: 6, md: 4, lg: 3 }}>
@@ -77,11 +124,13 @@ function NftCard({ nft, selected, selectDisabled, onToggleSelect }: NftItemProps
         <CardMedia
           component="img"
           height="200"
-          image={imageUrl || "/api/placeholder/300/200"}
+          image={imageUrl || ERR_IMG}
           alt={`NFT ${displayNftId(nft.nft_id)}`}
-          style={{ objectFit: "cover", backgroundColor: "grey.200" }}
-          onError={(e: any) => {
-            e.target.src = ERR_IMG;
+          sx={{ objectFit: "cover", backgroundColor: "grey.200" }}
+          onError={(e: SyntheticEvent<HTMLImageElement>) => {
+            if (e.currentTarget.src !== ERR_IMG) {
+              e.currentTarget.src = ERR_IMG;
+            }
           }}
         />
         <CardContent style={{ flexGrow: 1, display: "flex", flexDirection: "column", gap: 8 }}>
@@ -106,7 +155,7 @@ function NftCard({ nft, selected, selectDisabled, onToggleSelect }: NftItemProps
           </Stack>
 
           <Divider />
-          {data ? <NftData data={data} /> : null}
+          {isPlainRecord(data) ? <NftData data={data} /> : null}
 
           <SendNft nftId={nft.nft_id} resourceAddress={nft.resource_address} />
         </CardContent>
@@ -115,18 +164,15 @@ function NftCard({ nft, selected, selectDisabled, onToggleSelect }: NftItemProps
   );
 }
 
-function NftData({ data }: { data: Record<string, any> }) {
+function NftData({ data }: { data: Record<string, unknown> }) {
   return (
     <>
-      {Object.keys(data).map((key, i) => {
-        const value = data[key];
-        return (
-          <Fragment key={i}>
-            <Typography variant="subtitle2">{key}</Typography>
-            <CopyAddress address={String(value)} />
-          </Fragment>
-        );
-      })}
+      {Object.entries(data).map(([key, value]) => (
+        <Fragment key={key}>
+          <Typography variant="subtitle2">{key}</Typography>
+          <CopyAddress address={formatNftDataValue(value)} />
+        </Fragment>
+      ))}
     </>
   );
 }
@@ -134,19 +180,8 @@ function NftData({ data }: { data: Record<string, any> }) {
 function NftRow({ nft, selected, selectDisabled, onToggleSelect }: NftItemProps) {
   const mutableData = convertCborValue(nft.mutable_data);
   const data = convertCborValue(nft.data);
-  const imageUrl = mutableData?.image_url;
-
-  const metadata: [string, string][] = [];
-  if (data && typeof data === "object") {
-    let limit = 5;
-    for (const [key, value] of Object.entries(data)) {
-      if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
-        metadata.push([key, value.toString()]);
-        limit -= 1;
-        if (limit === 0) break;
-      }
-    }
-  }
+  const imageUrl = getNftImageUrl(mutableData);
+  const metadata = extractNftMetadata(data);
 
   return (
     <TableRow>
@@ -159,7 +194,7 @@ function NftRow({ nft, selected, selectDisabled, onToggleSelect }: NftItemProps)
         <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
           <Avatar
             src={imageUrl}
-            style={{
+            sx={{
               width: 60,
               height: 60,
               backgroundColor: "grey.200",
@@ -178,7 +213,7 @@ function NftRow({ nft, selected, selectDisabled, onToggleSelect }: NftItemProps)
       </DataTableCell>
       <DataTableCell>
         {metadata.map(([key, value]) => (
-          <Typography variant="body2" key={`meta_item_${key.slice(0, 4)}:${value}`}>
+          <Typography variant="body2" key={key}>
             <strong>{key}:</strong> {value}
           </Typography>
         ))}

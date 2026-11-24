@@ -72,14 +72,14 @@ function EmptyPlaceholder() {
   );
 }
 
-function EmptyPagePlaceholder({ onManualRefresh }: { onManualRefresh?: () => void }) {
+function FetchingPlaceholder({ onManualRefresh }: { onManualRefresh?: () => void }) {
   return (
     <Stack alignItems="center" justifyContent="center" sx={{ py: 8 }}>
       <Typography variant="h6" color="text.secondary" gutterBottom>
-        No NFTs on this page
+        NFTs loading...
       </Typography>
       <Typography variant="body2" color="text.secondary">
-        No NFTs are available for the current page.
+        Please wait while we fetch your NFTs from the wallet.
       </Typography>
       {onManualRefresh && (
         <Button variant="outlined" onClick={onManualRefresh} size="small" sx={{ mt: 2 }}>
@@ -162,7 +162,7 @@ export default function NFTList(props: NftListProps) {
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [selectedMap, setSelectedMap] = useState<Map<string, NonFungibleToken>>(new Map());
   const [sendDialogOpen, setSendDialogOpen] = useState(false);
-  const displayedNfts = useMemo(() => nftsListData?.nfts ?? [], [nftsListData?.nfts]);
+  const displayedNfts = nftsListData?.nfts || [];
   const lockedResourceAddress = selectedMap.size ? Array.from(selectedMap.values())[0].resource_address : null;
   const maxPage = totalCount > 0 ? Math.ceil(totalCount / rowsPerPage) - 1 : 0;
   const clampedPage = Math.min(page, maxPage);
@@ -186,13 +186,6 @@ export default function NFTList(props: NftListProps) {
     },
     [lockedResourceAddress, selectedMap],
   );
-
-  // Sync out-of-range page back to maxPage once data settles
-  useEffect(() => {
-    if (!nftsListIsFetching && !nftsListIsError && totalCount > 0 && page > maxPage) {
-      onPageChange(null, maxPage);
-    }
-  }, [nftsListIsFetching, nftsListIsError, totalCount, page, maxPage, onPageChange]);
 
   // Prune selections that are no longer in the displayed NFT list
   useEffect(() => {
@@ -258,7 +251,7 @@ export default function NFTList(props: NftListProps) {
         {totalCount === 0 ? (
           <EmptyPlaceholder />
         ) : displayedNfts.length === 0 ? (
-          <EmptyPagePlaceholder onManualRefresh={onManualRefresh} />
+          <FetchingPlaceholder onManualRefresh={onManualRefresh} />
         ) : (
           <NftCollection
             viewMode={viewMode}

@@ -227,15 +227,14 @@ function instructionName(instruction: Instruction): string {
 interface RowDataProps {
   title: string;
   data: Instruction;
-  index: number;
   blobs: Blobs | undefined;
 }
-function RowData({ title, data, index, blobs }: RowDataProps) {
+function RowData({ title, data, blobs }: RowDataProps) {
   const [open, setOpen] = useState(false);
   const theme = useTheme();
   return (
     <>
-      <TableRow key={`${index}-1`}>
+      <TableRow>
         <DataTableCell
           sx={{
             borderTop: 1,
@@ -263,7 +262,7 @@ function RowData({ title, data, index, blobs }: RowDataProps) {
           </AccordionIconButton>
         </DataTableCell>
       </TableRow>
-      <TableRow key={`${index}-2`}>
+      <TableRow>
         <DataTableCell
           style={{
             paddingBottom: theme.spacing(1),
@@ -281,30 +280,65 @@ function RowData({ title, data, index, blobs }: RowDataProps) {
   );
 }
 
+function toJsonFriendly(value: unknown): unknown {
+  if (value === null || value === undefined) {
+    return value;
+  }
+  if (typeof value === "bigint") {
+    return value.toString();
+  }
+  if (value instanceof Uint8Array) {
+    return `0x${toHexString(value)}`;
+  }
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+  if (Array.isArray(value)) {
+    return value.map(toJsonFriendly);
+  }
+  if (value instanceof Map) {
+    return Object.fromEntries(
+      Array.from(value.entries(), ([k, v]) => [typeof k === "string" ? k : compactValue(k), toJsonFriendly(v)]),
+    );
+  }
+  if (typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, toJsonFriendly(v)]));
+  }
+  return value;
+}
+
 function inspectify(instruction: Instruction, blobs: Blobs | undefined) {
-  let method;
   if (typeof instruction !== "object" || instruction === null) {
     return instruction;
   }
 
+  let method: "CallFunction" | "CallMethod";
+  let contents: { args: Array<InstructionArg> };
   if ("CallFunction" in instruction) {
-    method = "CallFunction" as keyof Instruction;
+    method = "CallFunction";
+    contents = instruction.CallFunction;
   } else if ("CallMethod" in instruction) {
-    method = "CallMethod" as keyof Instruction;
+    method = "CallMethod";
+    contents = instruction.CallMethod;
   } else {
     return instruction;
   }
 
   const tags = literalDecodeTags();
-  const contents = instruction[method] as any;
   const args = contents.args.map((arg: InstructionArg) => {
-    if ("Literal" in arg) {
-      return { Literal: decode(arg.Literal, { encoding: "hex", tags }) };
-    }
-    if ("Blob" in arg) {
-      const bytes = blobBytes(blobs, arg.Blob);
-      if (bytes != null) {
-        return { Blob: { index: arg.Blob, value: decodeBlob(bytes) } };
+    if (arg && typeof arg === "object") {
+      if ("Literal" in arg) {
+        try {
+          return { Literal: toJsonFriendly(decode(arg.Literal, { encoding: "hex", tags })) };
+        } catch {
+          return { Literal: `0x${arg.Literal}` };
+        }
+      }
+      if ("Blob" in arg) {
+        const bytes = blobBytes(blobs, arg.Blob);
+        if (bytes != null) {
+          return { Blob: { index: arg.Blob, value: toJsonFriendly(decodeBlob(bytes)) } };
+        }
       }
     }
     return arg;
@@ -361,21 +395,23 @@ export function BlobContents({ blobs }: { blobs: Blobs }) {
 /// `blobs` is the transaction's blob contents when the caller has them; a
 /// blob argument is then shown with the value it holds.
 export default function Instructions({ data, blobs }: { data: Array<Instruction>; blobs?: Blobs }) {
+  if (!data?.length) {
+    return (
+      <Box sx={{ p: 3, textAlign: "center" }}>
+        <Typography variant="body2" color="text.secondary">
+          No instructions available
+        </Typography>
+      </Box>
+    );
+  }
+
   return (
     <TableContainer>
       <Table>
         <TableBody>
-          {data?.length ? (
-            data.map((item: Instruction, index) => {
-              return <RowData key={index} index={index} title={summarize(item, blobs)} data={item} blobs={blobs} />;
-            })
-          ) : (
-            <Box sx={{ p: 3, textAlign: "center" }}>
-              <Typography variant="body2" color="text.secondary">
-                No instructions available
-              </Typography>
-            </Box>
-          )}
+          {data.map((item: Instruction, index) => {
+            return <RowData key={index} title={summarize(item, blobs)} data={item} blobs={blobs} />;
+          })}
         </TableBody>
       </Table>
     </TableContainer>

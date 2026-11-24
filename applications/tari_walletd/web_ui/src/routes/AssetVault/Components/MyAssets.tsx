@@ -22,6 +22,7 @@
 
 import { refreshAccountsBalances, useAccountsGetDefault } from "@api/hooks/useAccounts";
 import queryClient from "@api/queryClient";
+import Error from "@components/Error";
 import Loading from "@components/Loading";
 import PageHeader from "@components/PageHeader";
 import { InnerHeading, StyledPaper } from "@components/StyledComponents";
@@ -37,31 +38,37 @@ import { Navigate } from "react-router-dom";
 import AccountDetails from "./AccountDetails";
 import ActionMenu from "./ActionMenu";
 import Assets from "./Assets";
+import { resolveMyAssetsView } from "./myAssetsHelpers";
 
 function MyAssets() {
   const theme = useTheme();
 
   const account = useAccountStore((s) => s.account);
-  const { data: defaultAccount, error, refetch } = useAccountsGetDefault(false);
+  const { data: defaultAccount, error } = useAccountsGetDefault(!account);
   const refreshBalances = refreshAccountsBalances();
 
   useEffect(() => {
-    refetch();
-
     if (!account && defaultAccount) {
       setAccount(defaultAccount.account);
       setOotleAddress(defaultAccount.address);
     }
   }, [account, defaultAccount]);
 
-  // Default account not found. Redirect to onboarding
-  if (error && (error.cause as any)?.code === 404) {
-    console.error(error);
-    // authStore.clearToken();
+  const view = resolveMyAssetsView({ hasAccount: Boolean(account), error });
+
+  if (view.kind === "redirect-onboarding") {
     return <Navigate replace to={"/onboarding"} />;
   }
 
-  if (!account) {
+  if (view.kind === "error") {
+    return (
+      <Grid size={12}>
+        <Error message={view.message} />
+      </Grid>
+    );
+  }
+
+  if (view.kind === "loading" || !account) {
     return <Loading />;
   }
   const handleRefreshClicked = () => {

@@ -69,6 +69,9 @@ export function topicIcon(topic: string, size = 16): ReactNode {
 }
 
 export function formatTimestamp(millis: number): string {
+  if (!Number.isFinite(millis)) {
+    return "--";
+  }
   return new Date(millis).toLocaleString(undefined, {
     year: "numeric",
     month: "short",
@@ -80,6 +83,9 @@ export function formatTimestamp(millis: number): string {
 }
 
 export function formatRelative(millis: number, now: number): string {
+  if (!Number.isFinite(millis) || !Number.isFinite(now)) {
+    return "--";
+  }
   const seconds = Math.max(0, Math.round((now - millis) / 1000));
   if (seconds < 60) {
     return `${seconds}s ago`;
@@ -97,11 +103,16 @@ export function formatRelative(millis: number, now: number): string {
 
 /// Fields that name something the UI can link to.
 export function fieldLink(key: string, value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+  const encoded = encodeURIComponent(trimmed);
   switch (key) {
     case "block_id":
-      return `/blocks/${value}`;
+      return `/blocks/${encoded}`;
     case "transaction_id":
-      return `/transactions/${value}`;
+      return `/transactions/${encoded}`;
     default:
       return null;
   }

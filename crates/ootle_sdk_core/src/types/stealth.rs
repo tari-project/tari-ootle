@@ -5,10 +5,9 @@
 //!
 //! These are the typed records the stealth surface builds on. They follow the exact
 //! conventions established in [`crate::types::bytes`]: crypto material crosses as **lowercase-hex
-//! byte newtypes** (no `0x` prefix), blinded amounts are plain `u64`/[`BoundaryAmount`], revealed amounts are
-//! [`U128`], addresses are
-//! `…Str`, and **no `tari_*` type leaks** into a boundary record. Every record derives
-//! `Debug + Clone + PartialEq + Serialize + Deserialize`.
+//! byte newtypes** (no `0x` prefix), stealth output values and the fee are plain `u64`/[`BoundaryAmount`],
+//! revealed amounts are [`U128`], addresses are `…Str`, and **no `tari_*` type leaks** into a boundary record.
+//! Every record derives `Debug + Clone + PartialEq + Serialize + Deserialize`.
 //!
 //! Two families live here:
 //!

@@ -750,7 +750,6 @@ mod tests {
             .collect()
     }
 
-    // (a) Balanced statement → Ok with exactly one StealthTransfer instruction.
     #[test]
     fn inputs_statement_carries_a_revealed_input_above_u64_max() {
         let mut intent = serde_json::to_value(balanced_intent(1_000, 1_000)).unwrap();
@@ -764,6 +763,7 @@ mod tests {
         );
     }
 
+    // (a) Balanced statement → Ok with exactly one StealthTransfer instruction.
     #[test]
     fn balanced_statement_assembles_one_stealth_transfer() {
         let intent = balanced_intent(1_000_000, 1_000_000);

@@ -43,7 +43,7 @@ export default function AuthDialog(props: LoginDialogProps) {
         aria-labelledby="auth-dialog-title"
         aria-describedby="auth-dialog-description"
       >
-        <DialogTitle id="auth-dialog-title">
+        <DialogTitle>
           <Lock />
           Authentication Required
         </DialogTitle>

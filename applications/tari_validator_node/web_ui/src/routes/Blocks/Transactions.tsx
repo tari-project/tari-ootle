@@ -28,11 +28,11 @@ import StatusChip from "../../Components/StatusChip";
 import { renderJson } from "../../utils/helpers";
 
 function Transaction({ transaction }: { transaction: MultiShardAtom | LocalOnlyAtom }) {
-  const decision = typeof transaction.decision === "object" ? "Abort" : "Commit";
+  const decision = transaction.decision !== null && typeof transaction.decision === "object" ? "Abort" : "Commit";
   return (
     <TableRow>
       <TableCell>
-        <Link to={`/transactions/${transaction.id}`}>{transaction.id}</Link>
+        <Link to={`/transactions/${encodeURIComponent(transaction.id)}`}>{transaction.id}</Link>
       </TableCell>
       <TableCell>
         <StatusChip status={decision} />
@@ -44,7 +44,7 @@ function Transaction({ transaction }: { transaction: MultiShardAtom | LocalOnlyA
           </CodeBlockDialog>
         )}
       </TableCell>
-      <TableCell>{transaction.leader_fee?.fee}</TableCell>
+      <TableCell>{transaction.leader_fee?.fee ?? "-"}</TableCell>
       <TableCell>{transaction.transaction_fee}</TableCell>
     </TableRow>
   );
@@ -64,9 +64,15 @@ export default function Transactions({ transactions }: { transactions: (MultiSha
           </TableRow>
         </TableHead>
         <TableBody>
-          {transactions.map((tx) => (
-            <Transaction key={tx.id} transaction={tx} />
-          ))}
+          {transactions.length === 0 ? (
+            <TableRow>
+              <TableCell colSpan={5} align="center">
+                No transactions found
+              </TableCell>
+            </TableRow>
+          ) : (
+            transactions.map((tx) => <Transaction key={tx.id} transaction={tx} />)
+          )}
         </TableBody>
       </Table>
     </TableContainer>

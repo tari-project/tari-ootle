@@ -2,11 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 export function formatRelativeTime(date: Date, nowMs: number = Date.now()): string {
-  const diffSeconds = Math.floor((nowMs - date.getTime()) / 1000);
-  if (!Number.isFinite(diffSeconds)) {
-    return "Unknown";
-  }
-  const seconds = Math.max(0, diffSeconds);
+  const seconds = Math.max(0, Math.floor((nowMs - date.getTime()) / 1000));
   if (seconds < 60) return `${seconds}s ago`;
   const minutes = Math.floor(seconds / 60);
   if (minutes < 60) return `${minutes}m ago`;
@@ -19,13 +15,7 @@ export function formatUnixTime(seconds: number | null | undefined, nowMs: number
   if (seconds == null) {
     return "Never";
   }
-  if (!Number.isFinite(seconds) || seconds < 0) {
-    return "Invalid timestamp";
-  }
   const date = new Date(seconds * 1000);
-  if (Number.isNaN(date.getTime())) {
-    return "Invalid timestamp";
-  }
   return `${date.toLocaleString()} (${formatRelativeTime(date, nowMs)})`;
 }
 

@@ -141,7 +141,7 @@ function ValidatorSetPage() {
       return <Loading />;
     }
     if (status.isError) {
-      return <Error message={status.error?.message || "Failed to load validator set status"} />;
+      return <Error message={status.error.message || "Failed to load validator set status"} />;
     }
     if (!status.data) {
       return null;
@@ -164,7 +164,7 @@ function ValidatorSetPage() {
           <TrustedSet
             trusted={trusted}
             networkEpoch={settings.data?.current_epoch ?? null}
-            settingsLoading={settings.isLoading && settings.data == null}
+            settingsLoading={settings.isLoading}
           />
         ) : (
           indexer_trust === "verify" && (

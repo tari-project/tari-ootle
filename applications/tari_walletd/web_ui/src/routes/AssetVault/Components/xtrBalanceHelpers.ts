@@ -6,20 +6,6 @@ import { bigintToDecimalString } from "@utils/helpers";
 
 export const XTR_RESOURCE = "resource_0101010101010101010101010101010101010101010101010101010101010101";
 
-export function parseBalanceBigInt(value: string | number | bigint | null | undefined): bigint {
-  if (value === null || value === undefined || value === "") {
-    return 0n;
-  }
-  if (typeof value === "bigint") {
-    return value;
-  }
-  try {
-    return BigInt(value);
-  } catch {
-    return 0n;
-  }
-}
-
 export function formatXtrBalance(
   balances: BalanceEntry[] | undefined,
   {
@@ -43,8 +29,8 @@ export function formatXtrBalance(
     return { formattedBalance: "************", symbol };
   }
 
-  const confidential = parseBalanceBigInt(balanceObj?.confidential_balance);
-  const amount = mode === "total" ? parseBalanceBigInt(balanceObj?.balance) + confidential : confidential;
+  const confidential = BigInt(balanceObj?.confidential_balance ?? 0);
+  const amount = mode === "total" ? BigInt(balanceObj?.balance ?? 0) + confidential : confidential;
   const decimals = balanceObj?.divisibility ?? 6;
 
   return {

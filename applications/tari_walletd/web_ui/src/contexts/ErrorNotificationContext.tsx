@@ -21,7 +21,7 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { Alert, AlertColor, Snackbar } from "@mui/material";
-import React, { createContext, useContext, useRef, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 
 interface ErrorNotification {
   message: string;
@@ -41,34 +41,51 @@ const ErrorNotificationContext = createContext<ErrorNotificationContextType | un
 
 export const ErrorNotificationProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [notification, setNotification] = useState<ErrorNotification | null>(null);
-  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const showNotification = (message: string, severity: AlertColor = "error", duration: number = 8000) => {
-    if (timeoutRef.current) {
+  const clearTimer = useCallback(() => {
+    if (timeoutRef.current !== null) {
       clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
     }
+  }, []);
 
-    setNotification({ message, severity, duration });
+  useEffect(() => {
+    return () => {
+      clearTimer();
+    };
+  }, [clearTimer]);
 
-    timeoutRef.current = setTimeout(() => {
-      setNotification(null);
-    }, duration);
-  };
+  const showNotification = useCallback(
+    (message: string, severity: AlertColor = "error", duration: number = 8000) => {
+      clearTimer();
+      setNotification({ message, severity, duration });
 
-  const clearNotification = () => {
-    if (timeoutRef.current) {
-      clearTimeout(timeoutRef.current);
-    }
+      if (duration > 0) {
+        timeoutRef.current = setTimeout(() => {
+          timeoutRef.current = null;
+          setNotification(null);
+        }, duration);
+      }
+    },
+    [clearTimer],
+  );
+
+  const clearNotification = useCallback(() => {
+    clearTimer();
     setNotification(null);
-  };
+  }, [clearTimer]);
 
-  const contextValue: ErrorNotificationContextType = {
-    showError: (message, severity = "error", duration = 8000) => showNotification(message, severity, duration),
-    showSuccess: (message, duration = 4000) => showNotification(message, "success", duration),
-    showWarning: (message, duration = 6000) => showNotification(message, "warning", duration),
-    showInfo: (message, duration = 4000) => showNotification(message, "info", duration),
-    clearNotification,
-  };
+  const contextValue = useMemo<ErrorNotificationContextType>(
+    () => ({
+      showError: (message, severity = "error", duration = 8000) => showNotification(message, severity, duration),
+      showSuccess: (message, duration = 4000) => showNotification(message, "success", duration),
+      showWarning: (message, duration = 6000) => showNotification(message, "warning", duration),
+      showInfo: (message, duration = 4000) => showNotification(message, "info", duration),
+      clearNotification,
+    }),
+    [showNotification, clearNotification],
+  );
 
   return (
     <ErrorNotificationContext.Provider value={contextValue}>

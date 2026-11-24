@@ -9,11 +9,10 @@ import {
   webauthnRemovePasskey,
   webauthnRenamePasskey,
 } from "@utils/json_rpc";
-import { invalidatePasskeysList, WEBAUTHN_PASSKEYS_QUERY_KEY } from "./useWebauthnHelpers";
 
-export { WEBAUTHN_PASSKEYS_QUERY_KEY };
+export const WEBAUTHN_PASSKEYS_QUERY_KEY = ["webauthn_passkeys"] as const;
 
-const refetchPasskeys = () => invalidatePasskeysList(queryClient);
+const refetchPasskeys = () => queryClient.invalidateQueries({ queryKey: WEBAUTHN_PASSKEYS_QUERY_KEY });
 
 export const useWebauthnAlreadyRegistered = () => {
   return useQuery({

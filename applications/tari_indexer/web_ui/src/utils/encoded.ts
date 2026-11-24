@@ -36,17 +36,28 @@ const UNLOADED: Decoder = {
 };
 
 let loaded = false;
+let loadPromise: Promise<void> | null = null;
 const listeners = new Set<() => void>();
 
 /** Loads the decoder. Resolves whether or not it loads. */
-export async function loadDecoder(): Promise<void> {
-  try {
-    await initOotleWasm();
-    loaded = true;
-    listeners.forEach((listener) => listener());
-  } catch (error) {
-    console.error("Could not load ootle-wasm-bor; values are shown in their CBOR encoding", error);
+export function loadDecoder(): Promise<void> {
+  if (loaded) {
+    return Promise.resolve();
   }
+  if (!loadPromise) {
+    loadPromise = (async () => {
+      try {
+        await initOotleWasm();
+        loaded = true;
+        listeners.forEach((listener) => listener());
+      } catch (error) {
+        console.error("Could not load ootle-wasm-bor; values are shown in their CBOR encoding", error);
+      } finally {
+        loadPromise = null;
+      }
+    })();
+  }
+  return loadPromise;
 }
 
 /** The decoder. The caller re-renders, with a new `Decoder`, once the module loads. */
@@ -70,6 +81,10 @@ function decode<T>(encoded: string, decoder: (encoded: string) => string): T | u
 
 /** The number of bytes `encoded` (base64) holds. */
 export function encodedByteLength(encoded: string): number {
-  const padding = encoded.endsWith("==") ? 2 : encoded.endsWith("=") ? 1 : 0;
-  return Math.floor((encoded.length * 3) / 4) - padding;
+  const trimmed = encoded.trim();
+  if (trimmed.length === 0) {
+    return 0;
+  }
+  const padding = trimmed.endsWith("==") ? 2 : trimmed.endsWith("=") ? 1 : 0;
+  return Math.max(0, Math.floor((trimmed.length * 3) / 4) - padding);
 }

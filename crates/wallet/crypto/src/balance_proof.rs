@@ -10,7 +10,7 @@ use tari_crypto::{
     ristretto::{RistrettoPublicKey, RistrettoSecretKey, pedersen::PedersenCommitment},
 };
 use tari_engine_types::{
-    crypto::{commit_amount, messages},
+    crypto::{commit_amount_unchecked, messages},
     hashing::EngineSchnorrSignature,
 };
 use tari_template_lib_types::{
@@ -161,19 +161,13 @@ pub fn validate_balance_proof_signature(
 
     // We assume that the input amount is available and only check that the maths is correct. The engine is responsible
     // for checking that the input amount is actually available.
-    let Some(revealed_input_commit) = commit_amount(&RistrettoSecretKey::default(), inputs_statement.revealed_amount)
-    else {
-        warn!(target: LOG_TARGET, "Revealed input amount must be non-negative");
-        return false;
-    };
-
-    let Some(revealed_output_commit) = commit_amount(
+    // Revealed amounts are public and carry no range proof, so they are committed at full `Amount` width.
+    let revealed_input_commit =
+        commit_amount_unchecked(&RistrettoSecretKey::default(), inputs_statement.revealed_amount);
+    let revealed_output_commit = commit_amount_unchecked(
         &RistrettoSecretKey::default(),
         outputs_statement.revealed_output_amount(),
-    ) else {
-        warn!(target: LOG_TARGET, "Revealed output amount must be non-negative");
-        return false;
-    };
+    );
 
     let public_excess =
         agg_inputs + revealed_input_commit.as_public_key() - &agg_outputs - revealed_output_commit.as_public_key();

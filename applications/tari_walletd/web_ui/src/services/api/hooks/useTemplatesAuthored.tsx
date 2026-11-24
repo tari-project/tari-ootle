@@ -5,15 +5,15 @@ import { useQuery } from "@tanstack/react-query";
 import { TemplatesListAuthoredRequest } from "@tari-project/ootle-ts-bindings";
 import { templatesListAuthored } from "@utils/json_rpc";
 
-export const useListTemplatesAuthored = (request: TemplatesListAuthoredRequest) => {
+export const useListTemplatesAuthored = (request: TemplatesListAuthoredRequest, options = {}) => {
   return useQuery({
     queryKey: ["templates_list_authored", request],
     queryFn: () => {
       return templatesListAuthored(request);
     },
     refetchInterval: false,
-    notifyOnChangeProps: ["data", "error"],
     retryOnMount: false,
     retry: false,
+    ...options,
   });
 };

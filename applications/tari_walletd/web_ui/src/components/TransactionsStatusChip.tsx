@@ -30,7 +30,6 @@ import { getTransactionStatusPresentation } from "./transactionsStatusChipHelper
 
 interface StatusChipProps {
   status: TransactionStatus;
-  showTitle?: boolean;
 }
 
 function renderStatusIcon(status: TransactionStatus, iconColor: string): ReactNode {
@@ -58,24 +57,11 @@ function renderStatusIcon(status: TransactionStatus, iconColor: string): ReactNo
   }
 }
 
-export default function TransactionsStatusChip({ status, showTitle = true }: StatusChipProps) {
+export default function TransactionsStatusChip({ status }: StatusChipProps) {
   const theme = useTheme();
   const isSm = useMediaQuery(theme.breakpoints.down("sm"));
   const { color, avatarBackground, label } = getTransactionStatusPresentation(status);
   const icon = renderStatusIcon(status, theme.palette.background.paper);
-
-  if (!showTitle) {
-    return (
-      <Avatar
-        role="img"
-        aria-label={label}
-        title={label}
-        style={{ background: avatarBackground, height: 22, width: 22 }}
-      >
-        {icon}
-      </Avatar>
-    );
-  }
 
   return (
     <Chip

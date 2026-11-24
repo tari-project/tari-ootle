@@ -39,11 +39,22 @@ const BreadcrumbsComponent: React.FC<BreadcrumbsProps> = ({ items }) => {
   const breadcrumbs = useBreadcrumbs(items);
 
   const links = breadcrumbs.map(({ match, breadcrumb }: any) => {
-    const breadcrumbLabel = breadcrumb.props.children;
-    const { label, path, dynamic } = match.route;
+    const breadcrumbLabel = breadcrumb?.props?.children;
+    const { label, path, dynamic } = match.route ?? {};
+    const displayLabel = dynamic
+      ? typeof breadcrumbLabel === "string"
+        ? breadcrumbLabel.toLowerCase()
+        : (breadcrumbLabel ?? label ?? match.pathname)
+      : (label ?? breadcrumbLabel ?? match.pathname);
     return (
-      <Link key={breadcrumbLabel} component={RouterLink} to={path} underline="none" color="inherit">
-        {dynamic ? breadcrumbLabel.toLowerCase() : label}
+      <Link
+        key={match.pathname}
+        component={RouterLink}
+        to={match.pathname || path || "/"}
+        underline="none"
+        color="inherit"
+      >
+        {displayLabel}
       </Link>
     );
   });

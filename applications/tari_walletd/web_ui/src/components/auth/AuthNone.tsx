@@ -4,7 +4,7 @@
 import Loading from "@components/Loading";
 import { Typography } from "@mui/material";
 import { getClientInstance } from "@utils/json_rpc";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useState } from "react";
 import { runAuthNone } from "./authNoneHelpers";
 import { DEFAULT_PERMISSIONS } from "./web_authn/Webauthn";
 
@@ -16,10 +16,15 @@ export interface AuthNoneProps {
 export function AuthNone(props: AuthNoneProps) {
   const { onAuthenticated, onError } = props;
   const [error, setError] = useState<string | null>(null);
-  const onAuthenticatedRef = useRef(onAuthenticated);
-  const onErrorRef = useRef(onError);
-  onAuthenticatedRef.current = onAuthenticated;
-  onErrorRef.current = onError;
+
+  const notifyAuthenticated = useEffectEvent(() => {
+    onAuthenticated();
+  });
+
+  const notifyError = useEffectEvent((authError: Error) => {
+    setError(authError.message);
+    onError?.(authError);
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -29,11 +34,10 @@ export function AuthNone(props: AuthNoneProps) {
       permissions: DEFAULT_PERMISSIONS,
       isCancelled: () => cancelled,
       onAuthenticated: () => {
-        onAuthenticatedRef.current();
+        notifyAuthenticated();
       },
       onError: (authError) => {
-        setError(authError.message);
-        onErrorRef.current?.(authError);
+        notifyError(authError);
       },
     });
 

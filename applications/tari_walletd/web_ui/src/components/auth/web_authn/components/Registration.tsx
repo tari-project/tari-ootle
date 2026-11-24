@@ -13,7 +13,7 @@ import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
 import { getClientInstance, webauthnFinishRegistration, webauthnStartRegistration } from "@utils/json_rpc";
 import { Buffer } from "buffer";
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { Form } from "react-router-dom";
 import {
   assertWebauthnCreateSupported,
@@ -135,6 +135,7 @@ function WebauthnRegistration(props: WebauthnProps) {
   const theme = useTheme();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const inFlightRef = useRef(false);
   const [label, setLabel] = useState("");
   const [backupLabel, setBackupLabel] = useState("Backup Passkey");
   const [showBackupPrompt, setShowBackupPrompt] = useState(false);
@@ -155,7 +156,7 @@ function WebauthnRegistration(props: WebauthnProps) {
 
   const handleRegister = async (e: FormEvent) => {
     e.preventDefault();
-    if (loading) {
+    if (inFlightRef.current) {
       return;
     }
     const trimmedToken = setupToken.trim();
@@ -164,6 +165,7 @@ function WebauthnRegistration(props: WebauthnProps) {
       return;
     }
 
+    inFlightRef.current = true;
     setLoading(true);
     setError("");
 
@@ -178,15 +180,17 @@ function WebauthnRegistration(props: WebauthnProps) {
       console.error("Error registering WebAuthn key:", error);
       setError(formatWebauthnRegistrationError(error));
     } finally {
+      inFlightRef.current = false;
       setLoading(false);
     }
   };
 
   const handleAddBackupPasskey = async (e: FormEvent) => {
     e.preventDefault();
-    if (loading) {
+    if (inFlightRef.current) {
       return;
     }
+    inFlightRef.current = true;
     setLoading(true);
     setError("");
 
@@ -200,6 +204,7 @@ function WebauthnRegistration(props: WebauthnProps) {
       console.error("Error registering backup WebAuthn key:", error);
       setError(formatWebauthnRegistrationError(error));
     } finally {
+      inFlightRef.current = false;
       setLoading(false);
     }
   };

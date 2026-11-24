@@ -27,14 +27,14 @@ describe("breadcrumbsHelpers", () => {
     );
 
     expect(item).toEqual({
-      key: "/accounts/alice-1",
+      key: "/accounts/alice",
       label: "alice",
       to: "/accounts/alice",
       isLast: false,
     });
   });
 
-  it("uses static route labels, terminal lowercase text, and unique keys", () => {
+  it("uses static route labels, terminal lowercase text, and unique pathname keys", () => {
     const first = resolveBreadcrumbItem(
       {
         pathname: "/accounts",
@@ -55,15 +55,14 @@ describe("breadcrumbsHelpers", () => {
     );
 
     expect(first).toEqual({
-      key: "/accounts-0",
+      key: "/accounts",
       label: "Accounts",
       to: "/accounts",
       isLast: false,
     });
     expect(last).toEqual({
-      key: "/accounts/accounts-1",
+      key: "/accounts/accounts",
       label: "accounts",
-      to: null,
       isLast: true,
     });
     expect(first.key).not.toBe(last.key);
@@ -76,7 +75,11 @@ describe("breadcrumbsHelpers", () => {
       0,
       2,
     );
-    expect(fallback.to).toBe("/");
-    expect(fallback.label).toBe("unknown");
+    expect(fallback).toEqual({
+      key: "/unknown",
+      label: "unknown",
+      to: "/",
+      isLast: false,
+    });
   });
 });

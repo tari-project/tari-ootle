@@ -35,7 +35,7 @@ const BreadcrumbsComponent: React.FC<BreadcrumbsProps> = ({ items }) => {
 
   const links = breadcrumbs.map(({ match, breadcrumb }, i) => {
     const resolved = resolveBreadcrumbItem(match, breadcrumb, i, breadcrumbs.length);
-    if (resolved.isLast || resolved.to === null) {
+    if (resolved.isLast) {
       return (
         <span key={resolved.key} style={{ textTransform: "lowercase", fontWeight: "bold" }}>
           {resolved.label}

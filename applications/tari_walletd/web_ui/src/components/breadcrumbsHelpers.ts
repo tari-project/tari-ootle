@@ -10,16 +10,22 @@ export interface BreadcrumbRouteConfig {
 }
 
 export interface BreadcrumbMatchLike {
-  pathname?: string;
+  pathname: string;
   route?: Partial<BreadcrumbRouteConfig>;
 }
 
-export interface ResolvedBreadcrumbItem {
-  key: string;
-  label: string;
-  to: string | null;
-  isLast: boolean;
-}
+export type ResolvedBreadcrumbItem =
+  | {
+      key: string;
+      label: string;
+      isLast: true;
+    }
+  | {
+      key: string;
+      label: string;
+      to: string;
+      isLast: false;
+    };
 
 export function extractBreadcrumbText(breadcrumb: React.ReactNode): string {
   if (typeof breadcrumb === "string" || typeof breadcrumb === "number") {
@@ -41,24 +47,22 @@ export function resolveBreadcrumbItem(
   total: number,
 ): ResolvedBreadcrumbItem {
   const rawLabel = extractBreadcrumbText(breadcrumb);
-  const key = match.pathname ? `${match.pathname}-${index}` : `breadcrumb-${index}`;
-  const isLast = index === total - 1;
+  const key = match.pathname;
 
-  if (isLast) {
+  if (index === total - 1) {
     return {
       key,
       label: rawLabel.toLowerCase(),
-      to: null,
       isLast: true,
     };
   }
 
   if (match.route) {
-    const { label, path, dynamic } = match.route;
+    const { label, dynamic } = match.route;
     return {
       key,
       label: dynamic ? rawLabel.toLowerCase() : (label ?? rawLabel),
-      to: match.pathname || path || "/",
+      to: match.pathname,
       isLast: false,
     };
   }

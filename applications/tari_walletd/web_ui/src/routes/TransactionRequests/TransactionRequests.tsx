@@ -34,6 +34,7 @@ import type { AccountWithdrawal, InstructionsDescription, WithdrawalDestination 
 import { describeInstructions } from "../SigningRequests/describe";
 import Inputs from "../Transactions/Inputs";
 import Instructions, { BlobContents } from "../Transactions/Instructions";
+import { formatCountdownLabel, getRemainingSeconds } from "./countdownHelpers";
 
 function formatKeyId(keyId: KeyId): string {
   if ("Derived" in keyId) {
@@ -78,15 +79,30 @@ function statusColor(status: EffectiveStatus): "default" | "warning" | "success"
 
 function Countdown({ expiresAt }: { expiresAt: bigint }) {
   const [now, setNow] = useState(() => Date.now() / 1000);
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now() / 1000), 1000);
-    return () => clearInterval(t);
-  }, []);
+  const remaining = getRemainingSeconds(expiresAt, now);
 
-  const remaining = Math.max(0, Math.floor(Number(expiresAt) - now));
-  const mins = Math.floor(remaining / 60);
-  const secs = remaining % 60;
-  return <Chip label={`expires in ${mins}:${secs.toString().padStart(2, "0")}`} size="small" variant="outlined" />;
+  useEffect(() => {
+    if (getRemainingSeconds(expiresAt, Date.now() / 1000) === 0) {
+      return;
+    }
+    const t = setInterval(() => {
+      const current = Date.now() / 1000;
+      setNow(current);
+      if (getRemainingSeconds(expiresAt, current) === 0) {
+        clearInterval(t);
+      }
+    }, 1000);
+    return () => clearInterval(t);
+  }, [expiresAt]);
+
+  return (
+    <Chip
+      label={formatCountdownLabel(remaining)}
+      size="small"
+      color={remaining === 0 ? "error" : "default"}
+      variant="outlined"
+    />
+  );
 }
 
 function ValueSummaries({ request }: { request: TransactionRequestInfo }) {

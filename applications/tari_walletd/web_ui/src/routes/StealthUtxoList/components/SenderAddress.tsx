@@ -18,7 +18,7 @@ import {
   Typography,
 } from "@mui/material";
 import { shortenString } from "@utils/helpers";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { MdCheckCircle, MdPerson, MdPersonAdd } from "react-icons/md";
 import { formatAddressBookAddError, identityKey, parseSenderAddress } from "./senderAddressHelpers";
 
@@ -30,7 +30,6 @@ export function SenderAddress({ address }: { address: string }) {
   const [name, setName] = useState("");
   const [note, setNote] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
-  const sessionRef = useRef(0);
 
   // The sender may be one of the wallet's own accounts (e.g. a self-transfer or change) — there's nothing to
   // "add to contacts" in that case. We compare on the (account_key, view_key) identity so a SenderAddress that
@@ -58,14 +57,6 @@ export function SenderAddress({ address }: { address: string }) {
     setFormError(null);
   };
 
-  useEffect(() => {
-    sessionRef.current += 1;
-    resetDialog();
-    return () => {
-      sessionRef.current += 1;
-    };
-  }, [address]);
-
   const handleClose = () => {
     if (addMutation.isPending) {
       return;
@@ -81,16 +72,11 @@ export function SenderAddress({ address }: { address: string }) {
       setFormError("Name is required");
       return;
     }
-    const requestSession = sessionRef.current;
     try {
       await addMutation.mutateAsync({ name: name.trim(), address, note: note.trim() || null });
-      if (sessionRef.current === requestSession) {
-        resetDialog();
-      }
+      resetDialog();
     } catch (e: unknown) {
-      if (sessionRef.current === requestSession) {
-        setFormError(formatAddressBookAddError(e));
-      }
+      setFormError(formatAddressBookAddError(e));
     }
   };
 

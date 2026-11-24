@@ -18,15 +18,6 @@ export function formatDestinationTag(destinationTag: string | Uint8Array | null 
     .join("");
 }
 
-// Identity key for "is this the same account?" comparisons. We drop the optional destination tag so an incoming
-// SenderAddress with a destination tag still matches the wallet's own account address (which has no tag) or an
-// address-book entry stored without one.
-export function identityKey(address: string): string | null {
-  const decoded = decodeOotleAddressOrNull(address);
-  if (!decoded) return null;
-  return `${decoded.accountPublicKey}:${decoded.viewOnlyKey}`;
-}
-
 export function parseSenderAddress(address: string): ParsedSenderAddress {
   const decoded = decodeOotleAddressOrNull(address);
   if (!decoded) {
@@ -38,21 +29,15 @@ export function parseSenderAddress(address: string): ParsedSenderAddress {
   };
 }
 
+// Identity key for "is this the same account?" comparisons. We drop the optional destination tag so an incoming
+// SenderAddress with a destination tag still matches the wallet's own account address (which has no tag) or an
+// address-book entry stored without one.
+export function identityKey(address: string): string | null {
+  return parseSenderAddress(address).identityKey;
+}
+
 export function formatAddressBookAddError(error: unknown): string {
-  const causeMsg =
-    typeof error === "object" &&
-    error !== null &&
-    "cause" in error &&
-    typeof (error as { cause?: { message?: unknown } }).cause?.message === "string"
-      ? (error as { cause: { message: string } }).cause.message
-      : undefined;
-  const directMsg =
-    typeof error === "object" &&
-    error !== null &&
-    "message" in error &&
-    typeof (error as { message?: unknown }).message === "string"
-      ? (error as { message: string }).message
-      : undefined;
-  const msg = causeMsg || directMsg || "Failed to add contact";
+  const err = error as { cause?: { message?: string }; message?: string } | null | undefined;
+  const msg = err?.cause?.message || err?.message || "Failed to add contact";
   return msg.includes("DuplicateName") ? "An entry with this name already exists" : msg;
 }

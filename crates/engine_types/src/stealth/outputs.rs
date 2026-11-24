@@ -42,6 +42,32 @@ pub fn validate_stealth_outputs_statement(
     stmt: &StealthOutputsStatement,
     view_key: Option<&RistrettoPublicKey>,
 ) -> Result<Vec<ValidatedStealthOutput>, ResourceError> {
+    validate_outputs(stmt, view_key, OutputCommitments::CheckUnique)
+}
+
+/// [`validate_stealth_outputs_statement`] for outputs whose commitments a
+/// [`CheckedStealthTransfer`](super::CheckedStealthTransfer) has already proven unique, so the duplicate pass is
+/// skipped.
+pub(super) fn validate_unique_stealth_outputs_statement(
+    stmt: &StealthOutputsStatement,
+    view_key: Option<&RistrettoPublicKey>,
+) -> Result<Vec<ValidatedStealthOutput>, ResourceError> {
+    validate_outputs(stmt, view_key, OutputCommitments::KnownUnique)
+}
+
+#[derive(Clone, Copy)]
+enum OutputCommitments {
+    /// Reject the statement if an output commitment appears more than once.
+    CheckUnique,
+    /// The caller holds proof that the output commitments are unique.
+    KnownUnique,
+}
+
+fn validate_outputs(
+    stmt: &StealthOutputsStatement,
+    view_key: Option<&RistrettoPublicKey>,
+    commitments: OutputCommitments,
+) -> Result<Vec<ValidatedStealthOutput>, ResourceError> {
     if stmt.outputs.len() > MAX_LAZY_BP_AGG_FACTORS {
         return Err(ResourceError::InvalidConfidentialProof {
             details: format!(
@@ -68,7 +94,7 @@ pub fn validate_stealth_outputs_statement(
     let mut decoded = Vec::with_capacity(stmt.outputs.len());
     for statement in &stmt.outputs {
         let output = &statement.output;
-        if !seen_commitments.insert(output.commitment) {
+        if matches!(commitments, OutputCommitments::CheckUnique) && !seen_commitments.insert(output.commitment) {
             return Err(ResourceError::InvalidConfidentialProof {
                 details: format!(
                     "Duplicate output commitment {} in stealth outputs statement",

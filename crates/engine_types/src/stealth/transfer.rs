@@ -60,12 +60,50 @@ pub fn transfer_native_points_for_shape(num_inputs: usize, num_outputs: usize, h
         .saturating_add(P::PER_INPUT.saturating_mul(num_inputs as u64))
 }
 
+/// A [`StealthTransferStatement`] that has passed the structural checks: every commitment is unique across inputs and
+/// outputs ([`validate_transfer_commitments`]) and every covenant claim names a distinct input
+/// ([`validate_covenant_claims`]). [`CheckedStealthTransfer::check`] is the only way to build one, and the statement is
+/// reachable by shared reference only, so holding one proves those checks ran on exactly this statement.
+#[derive(Debug)]
+pub struct CheckedStealthTransfer(StealthTransferStatement);
+
+impl CheckedStealthTransfer {
+    pub fn check(statement: StealthTransferStatement) -> Result<Self, ResourceError> {
+        check_structure(&statement)?;
+        Ok(Self(statement))
+    }
+
+    pub fn statement(&self) -> &StealthTransferStatement {
+        &self.0
+    }
+}
+
+/// Validates `transfer` in full: the structural checks of [`CheckedStealthTransfer::check`], then the revealed
+/// amounts, balance proof and range proof.
 pub fn validate_transfer(
     transfer: &StealthTransferStatement,
     view_key: Option<&RistrettoPublicKey>,
 ) -> Result<ValidatedStealthTransfer, ResourceError> {
-    basic_validations(transfer)?;
-    let validated_outputs = stealth::validate_stealth_outputs_statement(&transfer.outputs_statement, view_key)?;
+    check_structure(transfer)?;
+    validate_structurally_checked(transfer, view_key)
+}
+
+/// Runs the checks [`validate_transfer`] runs beyond those a [`CheckedStealthTransfer`] has already passed: the
+/// revealed amounts, balance proof and range proof.
+pub fn validate_checked_transfer(
+    transfer: &CheckedStealthTransfer,
+    view_key: Option<&RistrettoPublicKey>,
+) -> Result<ValidatedStealthTransfer, ResourceError> {
+    validate_structurally_checked(transfer.statement(), view_key)
+}
+
+/// `transfer` must have passed [`check_structure`].
+fn validate_structurally_checked(
+    transfer: &StealthTransferStatement,
+    view_key: Option<&RistrettoPublicKey>,
+) -> Result<ValidatedStealthTransfer, ResourceError> {
+    check_revealed_amounts_and_balance_proof_presence(transfer)?;
+    let validated_outputs = stealth::validate_unique_stealth_outputs_statement(&transfer.outputs_statement, view_key)?;
 
     let balance_proof = transfer
         .balance_proof
@@ -202,8 +240,8 @@ pub fn validate_covenant_claims(transfer: &StealthTransferStatement) -> Result<(
 /// - no output commitment appears more than once.
 ///
 /// Balance proofs fold inputs and outputs positionally while the engine downs and creates each UTXO substate once.
-/// Running this check on admission rejects non-executable duplicate-commitment statements upfront, before native
-/// execution charging, resource auth hooks, or spend-script predicates run.
+/// [`CheckedStealthTransfer::check`] runs this, so the engine rejects a duplicate-commitment statement on admission,
+/// before native execution charging, resource auth hooks, or spend-script predicates run.
 pub fn validate_transfer_commitments(transfer: &StealthTransferStatement) -> Result<(), ResourceError> {
     let mut seen_inputs = BTreeSet::new();
     for input in &transfer.inputs_statement.inputs {
@@ -232,10 +270,14 @@ pub fn validate_transfer_commitments(transfer: &StealthTransferStatement) -> Res
     Ok(())
 }
 
-fn basic_validations(transfer: &StealthTransferStatement) -> Result<(), ResourceError> {
+/// The checks [`CheckedStealthTransfer`] guarantees. Covenant predicates look claims up by partition, so the claim list
+/// is bounded here, before any predicate runs.
+fn check_structure(transfer: &StealthTransferStatement) -> Result<(), ResourceError> {
     validate_transfer_commitments(transfer)?;
-    validate_covenant_claims(transfer)?;
+    validate_covenant_claims(transfer)
+}
 
+fn check_revealed_amounts_and_balance_proof_presence(transfer: &StealthTransferStatement) -> Result<(), ResourceError> {
     if let Some(revealed) = transfer.outputs_statement.revealed_output {
         // The presence of this field and the presence of a revealed bucket are the same fact, which holds only while
         // `None` is the sole encoding of "no revealed output".
@@ -455,5 +497,92 @@ mod tests {
             covenant_claims: vec![],
         };
         validate_transfer_commitments(&unique_commitments).unwrap();
+    }
+
+    #[test]
+    fn checked_stealth_transfer_rejects_what_validate_transfer_rejects_structurally() {
+        use tari_template_lib::types::{
+            Amount,
+            crypto::{BalanceProofSignature, RangeProofBytes},
+            stealth::{
+                CovenantBalanceClaim,
+                StealthInput,
+                StealthInputsStatement,
+                StealthOutputsStatement,
+                StealthUnspentOutput,
+            },
+        };
+
+        fn statement(
+            inputs: Vec<StealthInput>,
+            outputs: Vec<StealthUnspentOutput>,
+            claim_indices: &[u32],
+        ) -> StealthTransferStatement {
+            StealthTransferStatement {
+                inputs_statement: StealthInputsStatement::new(inputs, Amount::ZERO),
+                outputs_statement: StealthOutputsStatement {
+                    outputs,
+                    revealed_output: None,
+                    agg_range_proof: RangeProofBytes::empty(),
+                },
+                balance_proof: None,
+                covenant_claims: claim_indices
+                    .iter()
+                    .map(|&partition_input_index| CovenantBalanceClaim {
+                        partition_input_index,
+                        revealed_amount: Amount::ZERO,
+                        signature: BalanceProofSignature::zero(),
+                    })
+                    .collect(),
+            }
+        }
+
+        let out1 = make_output(1, 100);
+        let out2 = make_output(2, 100);
+        let input1 = StealthInput::new(out1.output.commitment);
+
+        let cases = [
+            (
+                statement(vec![input1.clone(), input1.clone()], vec![], &[]),
+                "Duplicate input commitment",
+            ),
+            (
+                statement(vec![input1.clone()], vec![out1.clone()], &[]),
+                "duplicates an input commitment",
+            ),
+            (
+                statement(vec![input1.clone()], vec![out2.clone(), out2.clone()], &[]),
+                "Duplicate output commitment",
+            ),
+            (
+                statement(vec![input1.clone()], vec![out2.clone()], &[1]),
+                "names input 1, but the transfer has 1 inputs",
+            ),
+            (
+                statement(vec![input1.clone()], vec![out2.clone()], &[0, 0]),
+                "a second claim for input 0",
+            ),
+        ];
+        for (stmt, expected) in cases {
+            let unchecked_err = validate_transfer(&stmt, None).unwrap_err();
+            let checked_err = CheckedStealthTransfer::check(stmt).unwrap_err();
+            assert_eq!(checked_err.to_string(), unchecked_err.to_string());
+            assert!(
+                checked_err.to_string().contains(expected),
+                "expected `{expected}`, got: {checked_err:?}"
+            );
+        }
+
+        // A structurally sound statement is checked, and the remaining checks still reject its missing balance proof.
+        let stmt = statement(vec![input1], vec![out2], &[0]);
+        let unchecked_err = validate_transfer(&stmt, None).unwrap_err();
+        let checked = CheckedStealthTransfer::check(stmt).unwrap();
+        let checked_err = validate_checked_transfer(&checked, None).unwrap_err();
+        assert!(
+            matches!(&checked_err, ResourceError::InvalidBalanceProof { details }
+                if details.contains("Balance proof must be provided")),
+            "unexpected error: {checked_err:?}"
+        );
+        assert_eq!(checked_err.to_string(), unchecked_err.to_string());
     }
 }

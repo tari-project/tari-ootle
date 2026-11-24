@@ -33,7 +33,7 @@ use tari_engine_types::{
     resource::Resource,
     resource_container::{ConfidentialOutputEffects, ResourceContainer, ResourceError},
     stealth,
-    stealth::ValidatedStealthTransfer,
+    stealth::{CheckedStealthTransfer, ValidatedStealthTransfer},
     substate::{Substate, SubstateDiff, SubstateId, SubstateValue},
     transaction_receipt::{DiffSummary, FinalizeOutcome, TransactionReceipt},
     vault::Vault,
@@ -94,13 +94,15 @@ use crate::{
 
 const LOG_TARGET: &str = "tari::ootle::engine::runtime::working_state";
 
-/// A [`StealthTransferStatement`] that has passed [`WorkingState::admit_stealth_transfer`].
+/// A [`StealthTransferStatement`] that has passed [`WorkingState::admit_stealth_transfer`]: it is within the
+/// stealth-transfer limits, has passed the structural checks of [`CheckedStealthTransfer`], and is counted against the
+/// per-transaction totals.
 #[derive(Debug)]
-pub(super) struct AdmittedStealthTransfer(StealthTransferStatement);
+pub(super) struct AdmittedStealthTransfer(CheckedStealthTransfer);
 
 impl AdmittedStealthTransfer {
     pub(super) fn statement(&self) -> &StealthTransferStatement {
-        &self.0
+        self.0.statement()
     }
 }
 
@@ -521,14 +523,15 @@ impl<TStore: StateReader> WorkingState<TStore> {
     pub fn validate_and_spend_stealth_utxos(
         &mut self,
         resource_address: ResourceAddress,
-        stmt: &StealthTransferStatement,
+        transfer: &CheckedStealthTransfer,
         view_key: Option<&RistrettoPublicKey>,
     ) -> Result<ValidatedStealthTransfer, RuntimeError> {
-        // The statement is checked in full before anything is downed, so a statement rejected on its own terms
-        // (duplicate inputs among them) leaves the ledger untouched.
-        let valid_transfer = stealth::validate_transfer(stmt, view_key)?;
+        // The statement is checked in full before anything is downed, so a statement rejected on its own terms leaves
+        // the ledger untouched. `CheckedStealthTransfer` already holds unique input commitments, so each input below
+        // downs a distinct UTXO.
+        let valid_transfer = stealth::validate_checked_transfer(transfer, view_key)?;
 
-        for input in &stmt.inputs_statement.inputs {
+        for input in &transfer.statement().inputs_statement.inputs {
             let address = UtxoAddress::new(resource_address, input.commitment.into());
             let lock_id = self.try_lock(address.clone().into(), LockFlag::Write)?;
             let utxo = self.store.down_utxo(lock_id)?;
@@ -2417,18 +2420,19 @@ impl<TStore: StateReader> WorkingState<TStore> {
         Ok(component.contains_substate(address)?)
     }
 
-    /// Enforces the stealth-transfer limits, validates commitment uniqueness across inputs and outputs, and counts
-    /// this transfer against the per-transaction totals. Must be called before the transfer's input authorization,
-    /// hooks and proof crypto run, so an over-limit or duplicate-commitment statement is rejected before that work is
-    /// done.
+    /// Enforces the stealth-transfer limits, runs the structural checks of [`CheckedStealthTransfer`] (commitment
+    /// uniqueness across inputs and outputs, covenant claims naming distinct inputs), and counts this transfer against
+    /// the per-transaction totals. Input authorization takes the [`AdmittedStealthTransfer`] this returns, so an
+    /// over-limit or structurally invalid statement is rejected before its hooks, predicates and proof crypto run.
     pub(super) fn admit_stealth_transfer(
         &mut self,
         statement: StealthTransferStatement,
     ) -> Result<AdmittedStealthTransfer, RuntimeError> {
         check_stealth_transfer_limits(&limits::STEALTH_LIMITS, &statement)?;
-        stealth::validate_transfer_commitments(&statement)?;
-        self.stealth_totals.admit(&limits::STEALTH_LIMITS, &statement)?;
-        Ok(AdmittedStealthTransfer(statement))
+        let checked = CheckedStealthTransfer::check(statement)?;
+        self.stealth_totals
+            .admit(&limits::STEALTH_LIMITS, checked.statement())?;
+        Ok(AdmittedStealthTransfer(checked))
     }
 
     /// Executes an admitted stealth transfer.
@@ -2438,7 +2442,8 @@ impl<TStore: StateReader> WorkingState<TStore> {
         transfer: AdmittedStealthTransfer,
         revealed_funds_bucket_id: Option<BucketId>,
     ) -> Result<Option<ResourceContainer>, RuntimeError> {
-        let AdmittedStealthTransfer(statement) = transfer;
+        let AdmittedStealthTransfer(checked) = transfer;
+        let statement = checked.statement();
         let resource_address = self.resolve_resource_address_ref(resource_address)?;
 
         let resource_lock = self.read_lock_substate(SubstateId::Resource(resource_address))?;
@@ -2528,7 +2533,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
                 }
             })?;
 
-        let valid_transfer = self.validate_and_spend_stealth_utxos(resource_address, &statement, view_key.as_ref())?;
+        let valid_transfer = self.validate_and_spend_stealth_utxos(resource_address, &checked, view_key.as_ref())?;
 
         for output in valid_transfer.outputs {
             let address = UtxoAddress::new(resource_address, output.output.commitment.to_byte_type().into());
@@ -2848,6 +2853,47 @@ mod tests {
         ));
 
         // None of the rejected statements may advance the per-transaction transfer counter.
+        for _ in 0..limits::STEALTH_LIMITS.max_transfers_per_transaction {
+            state.admit_stealth_transfer(base.clone()).unwrap();
+        }
+    }
+
+    #[test]
+    fn admit_stealth_transfer_rejects_invalid_covenant_claims_without_consuming_budget() {
+        use tari_template_lib::types::{crypto::BalanceProofSignature, stealth::CovenantBalanceClaim};
+
+        fn claim(partition_input_index: u32) -> CovenantBalanceClaim {
+            CovenantBalanceClaim {
+                partition_input_index,
+                revealed_amount: Amount::zero(),
+                signature: BalanceProofSignature::zero(),
+            }
+        }
+
+        let mut state = test_working_state();
+        let base =
+            StealthTransferStatement::revealed_only(Amount::new(1), Amount::new(1), RistrettoPublicKeyBytes::default());
+
+        let mut missing_input = base.clone();
+        missing_input.covenant_claims = vec![claim(0)];
+        assert!(matches!(
+            state.admit_stealth_transfer(missing_input),
+            Err(RuntimeError::ResourceError(ResourceError::InvalidSpend { details }))
+                if details.contains("names input 0, but the transfer has 0 inputs")
+        ));
+
+        let mut second_claim = base.clone();
+        second_claim.inputs_statement.inputs = vec![StealthInput::new(
+            PedersenCommitmentBytes::from_bytes(&[1u8; 32]).unwrap(),
+        )];
+        second_claim.covenant_claims = vec![claim(0), claim(0)];
+        assert!(matches!(
+            state.admit_stealth_transfer(second_claim),
+            Err(RuntimeError::ResourceError(ResourceError::InvalidSpend { details }))
+                if details.contains("a second claim for input 0")
+        ));
+
+        // Neither rejected statement may advance the per-transaction transfer counter.
         for _ in 0..limits::STEALTH_LIMITS.max_transfers_per_transaction {
             state.admit_stealth_transfer(base.clone()).unwrap();
         }

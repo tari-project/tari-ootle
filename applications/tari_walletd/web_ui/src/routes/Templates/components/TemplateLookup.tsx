@@ -36,13 +36,10 @@ export default function TemplateLookup() {
   const functions = data?.template_definition?.V2?.functions || [];
 
   function handleLookup() {
-    if (isFetching) {
-      return;
-    }
     const action = resolveTemplateLookupAction(input, address);
     if (action.kind === "set-address") {
       setAddress(action.address);
-    } else if (action.kind === "refetch") {
+    } else if (action.kind === "refetch" && !isFetching) {
       void refetch();
     }
   }

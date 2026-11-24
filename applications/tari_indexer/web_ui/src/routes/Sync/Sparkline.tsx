@@ -27,17 +27,25 @@ export default function Sparkline({ values, bucketSecs, unit, height = 36 }: Pro
   const n = values.length;
   const x = (i: number) => (n <= 1 ? width : (i / (n - 1)) * width);
   const y = (v: number) => (max === 0 ? height - 1 : height - 1 - (v / max) * (height - 4));
-  const line = values.map((v, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join("");
-  const area = `${line}L${width},${height}L0,${height}Z`;
+  const line =
+    n > 0 ? values.map((v, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join("") : "";
+  const area = n > 1 ? `${line}L${width},${height}L0,${height}Z` : "";
   const colour = theme.palette.primary.main;
 
   const onMove = (e: React.PointerEvent<SVGSVGElement>) => {
+    if (n === 0) return;
+    if (n === 1) {
+      setHover(0);
+      return;
+    }
     const rect = e.currentTarget.getBoundingClientRect();
+    if (rect.width <= 0) return;
     const i = Math.round(((e.clientX - rect.left) / rect.width) * (n - 1));
     setHover(Math.max(0, Math.min(n - 1, i)));
   };
 
-  const hoverAgo = hover === null ? 0 : (n - 1 - hover) * bucketSecs;
+  const activeHover = hover !== null && hover < n ? hover : null;
+  const hoverAgo = activeHover === null ? 0 : (n - 1 - activeHover) * bucketSecs;
 
   return (
     <Box sx={{ position: "relative", width: "100%" }}>
@@ -52,13 +60,13 @@ export default function Sparkline({ values, bucketSecs, unit, height = 36 }: Pro
         onPointerLeave={() => setHover(null)}
         style={{ display: "block", overflow: "visible", cursor: "crosshair" }}
       >
-        <path d={area} fill={alpha(colour, 0.12)} />
-        <path d={line} fill="none" stroke={colour} strokeWidth={2} vectorEffect="non-scaling-stroke" />
-        {hover !== null && (
+        {area && <path d={area} fill={alpha(colour, 0.12)} />}
+        {line && <path d={line} fill="none" stroke={colour} strokeWidth={2} vectorEffect="non-scaling-stroke" />}
+        {activeHover !== null && (
           <>
             <line
-              x1={x(hover)}
-              x2={x(hover)}
+              x1={x(activeHover)}
+              x2={x(activeHover)}
               y1={0}
               y2={height}
               stroke={theme.palette.text.secondary}
@@ -66,8 +74,8 @@ export default function Sparkline({ values, bucketSecs, unit, height = 36 }: Pro
               vectorEffect="non-scaling-stroke"
             />
             <circle
-              cx={x(hover)}
-              cy={y(values[hover])}
+              cx={x(activeHover)}
+              cy={y(values[activeHover])}
               r={3}
               fill={colour}
               stroke={theme.palette.background.paper}
@@ -77,13 +85,13 @@ export default function Sparkline({ values, bucketSecs, unit, height = 36 }: Pro
           </>
         )}
       </svg>
-      {hover !== null && (
+      {activeHover !== null && (
         <Typography
           variant="caption"
           sx={{
             position: "absolute",
             bottom: height + 4,
-            left: `${(x(hover) / width) * 100}%`,
+            left: `${(x(activeHover) / width) * 100}%`,
             transform: "translateX(-50%)",
             whiteSpace: "nowrap",
             bgcolor: "background.paper",
@@ -97,7 +105,8 @@ export default function Sparkline({ values, bucketSecs, unit, height = 36 }: Pro
           }}
           aria-hidden
         >
-          {formatRate(values[hover])} {unit}, {hoverAgo === 0 ? "now" : `${Math.round(hoverAgo / 60) || "<1"}m ago`}
+          {formatRate(values[activeHover])} {unit},{" "}
+          {hoverAgo === 0 ? "now" : `${Math.round(hoverAgo / 60) || "<1"}m ago`}
         </Typography>
       )}
     </Box>

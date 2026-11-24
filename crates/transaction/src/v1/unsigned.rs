@@ -255,9 +255,14 @@ impl UnsignedTransactionV1 {
     /// Returns the substates this transaction references that it may declare as inputs (see
     /// [`SubstateId::is_declarable_input`]).
     pub fn to_referenced_substates(&self) -> Result<HashSet<SubstateId>, IndexedValueError> {
-        let all_instructions = self.instructions().iter().chain(self.fee_instructions());
+        // Execution order: fee instructions run before the main instructions.
+        let all_instructions = self.fee_instructions().iter().chain(self.instructions());
 
         let mut substates = HashSet::new();
+        // UTXOs that earlier `StealthTransfer` instructions of this transaction create. A later transfer spending one
+        // spends it within the transaction, so it is left out of the referenced substates. UTXOs that template calls
+        // create are invisible here, so an input spending one of them is still listed.
+        let mut created_utxos = HashSet::<UtxoAddress>::new();
         for instruction in all_instructions {
             match instruction {
                 Instruction::CallFunction { args, .. } => {
@@ -293,17 +298,18 @@ impl UnsignedTransactionV1 {
                     statement,
                     ..
                 } => {
-                    if let ResourceAddressRef::Address(addr) = resource_address_ref {
+                    if let ResourceAddressRef::Address(addr) = resource_address_ref &&
+                        *addr != TARI_TOKEN
+                    {
                         substates.insert(SubstateId::Resource(*addr));
-                        substates.extend(
-                            statement
-                                .inputs_statement
-                                .inputs
-                                .iter()
-                                .map(|i| UtxoAddress::new(*addr, i.commitment.into()))
-                                .map(SubstateId::Utxo),
-                        );
                     }
+                    substates.extend(
+                        instruction
+                            .stealth_input_utxos()
+                            .filter(|utxo| !created_utxos.contains(utxo))
+                            .map(SubstateId::Utxo),
+                    );
+                    created_utxos.extend(instruction.stealth_output_utxos());
                     for arg in statement.script_path_template_functions().flat_map(|tf| &tf.args) {
                         let value = IndexedValue::from_raw(arg)?;
                         substates.extend(value.referenced_substates().filter(|id| id.is_declarable_input()));

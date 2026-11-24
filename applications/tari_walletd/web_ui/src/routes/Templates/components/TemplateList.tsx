@@ -12,7 +12,7 @@ import TableContainer from "@mui/material/TableContainer";
 import TemplateItem from "@routes/Templates/components/TemplateItem";
 import useAccountStore from "@store/accountStore";
 import { handleChangePage, handleChangeRowsPerPage } from "@utils/helpers";
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useState } from "react";
 import { buildAuthoredTemplatesQuery, extractAuthorPublicKey } from "./templateListHelpers";
 
 const COLUMNS = ["Address", "Name", "ABI Version", ""];
@@ -21,14 +21,13 @@ export default function TemplateList() {
   const ootleAddress = useAccountStore((s) => s.address);
   const authorPublicKey = extractAuthorPublicKey(ootleAddress);
 
+  return <TemplateListContent key={authorPublicKey ?? "none"} authorPublicKey={authorPublicKey} />;
+}
+
+function TemplateListContent({ authorPublicKey }: { authorPublicKey: string | null }) {
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const [openItem, setOpenItem] = useState<string | undefined>();
-
-  useEffect(() => {
-    setPage(0);
-    setOpenItem(undefined);
-  }, [authorPublicKey]);
 
   const { request, enabled } = buildAuthoredTemplatesQuery(authorPublicKey, page, rowsPerPage);
   const { data, isLoading, isError, error } = useListTemplatesAuthored(request, { enabled });

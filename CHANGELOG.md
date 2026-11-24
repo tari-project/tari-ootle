@@ -14,7 +14,7 @@ types is bounded the same way CBOR decoding already was.
 
 - **Validators and indexers upgrade together.** The engine changes below take effect on deployment
   with no activation epoch, so validators on different binaries reach different results for the
-  same transaction. (#3773, #3726, #3866)
+  same transaction. (#3773, #3726, #3866, #3710, #3716, #3818)
 - **Operators:** each node recompiles every template once, on first use, because the
   compiled-module cache key now covers the branch-table limit. Fees and metering are unchanged.
   (#3898)
@@ -29,6 +29,10 @@ types is bounded the same way CBOR decoding already was.
     integer, and `substate_id!(var)` encodes a `SubstateId`, as `substate_id!("...")` does. Both
     `substate_id!(var)` and `address!(var)` reject a variable that is not an address. (#3709,
     #3774)
+  - Manifests reject a negated unsigned literal such as `-0u8`, and `fee_main()` rejects
+    instructions a fee intent may not carry, such as `publish_template!`. (#3642)
+  - `CreateAccount`, `SetComponentAccessRules` and `SetComponentOwnerRule` weigh every node of
+    their owner and access rules, so instructions carrying large rules cost more. (#3818)
   - `TemplateMetadata::commit_hash` is an `Option<CommitHash>`, replacing `gix_hash::ObjectId`;
     the CBOR encoding is unchanged. (#3897)
 
@@ -46,6 +50,17 @@ types is bounded the same way CBOR decoding already was.
   or another component can no longer read a vault it does not own. (#3773)
 - **engine_types:** stealth outputs with an unspendable spend key are rejected instead of locking
   their funds, and malformed output proofs fail before range-proof verification. (#3726)
+- **engine:** freezing or unfreezing a burnt stealth UTXO is rejected with
+  `ResourceRestricted`. (#3716)
+- **engine_types:** confidential withdraws check revealed amounts and the balance proof encoding
+  before range-proof verification, and a revealed amount above `u64::MAX` now balances. (#3710)
+- **transaction:** instruction weight counts the nodes of owner and access rules in
+  `CreateAccount` and `SetComponent*`, matching the instruction limit tracker. (#3818)
+- **transaction:** the builder declares the on-chain UTXO inputs of a stealth transfer, leaving
+  out UTXOs an earlier transfer in the same transaction outputs, and referenced substates skip
+  the implicit TARI resource. (#3644)
+- **transaction_manifest:** negated unsigned literals and disallowed `fee_main()` instructions are
+  rejected; `cbor!` and `metadata!` accept byte literals. (#3642)
 - **storage:** a transaction aborted locally drops the locks a foreign shard group's commit
   would otherwise leave in its pool record. (#3866)
 - **serde:** transactions, blobs and template types cap sequence lengths and preallocation during
@@ -69,6 +84,8 @@ types is bounded the same way CBOR decoding already was.
   XTR fee vault, and send a single revealed output straight from the bucket. (#3500)
 - **wallet_cli:** template address arguments, NFT mint outputs and WebRTC arguments parse
   correctly. (#3581)
+- **bindings:** CBOR decoding renders non-fungible, UTXO and validator fee pool addresses as
+  `nft_…`, `utxo_…` and `vnfp_…` strings. (#3911)
 - **indexer:** a `state_scanning_interval` of zero no longer panics the state sync. (#3886)
 - **ootle_address:** builds outside the workspace. (#3772)
 

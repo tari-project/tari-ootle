@@ -21,26 +21,13 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { describe, expect, it } from "vitest";
-import { getLogLevelColor, normalizeLogLevelLabel } from "./logsHelpers";
+import { getLogLevelColor } from "./logsHelpers";
 
 describe("logsHelpers", () => {
-  it("maps standard log levels case-insensitively and ignores surrounding whitespace", () => {
-    expect(getLogLevelColor("ERROR")).toBe("error");
-    expect(getLogLevelColor(" warn ")).toBe("warning");
-    expect(getLogLevelColor("Warning")).toBe("warning");
+  it("maps every LogLevel variant to its expected chip color", () => {
+    expect(getLogLevelColor("Error")).toBe("error");
+    expect(getLogLevelColor("Warn")).toBe("warning");
     expect(getLogLevelColor("Info")).toBe("info");
-    expect(getLogLevelColor("DEBUG")).toBe("secondary");
-    expect(getLogLevelColor("trace")).toBe("default");
-  });
-
-  it("handles missing or unrecognized log levels safely", () => {
-    expect(getLogLevelColor(undefined)).toBe("primary");
-    expect(getLogLevelColor(null)).toBe("primary");
-    expect(getLogLevelColor("")).toBe("primary");
-    expect(getLogLevelColor("custom")).toBe("primary");
-
-    expect(normalizeLogLevelLabel(undefined)).toBe("Unknown");
-    expect(normalizeLogLevelLabel("   ")).toBe("Unknown");
-    expect(normalizeLogLevelLabel(" Info ")).toBe("Info");
+    expect(getLogLevelColor("Debug")).toBe("secondary");
   });
 });

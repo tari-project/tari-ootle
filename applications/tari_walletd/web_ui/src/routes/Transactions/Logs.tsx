@@ -21,21 +21,11 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { DataTableCell } from "@components/StyledComponents";
-import { Box, Chip, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Typography } from "@mui/material";
+import { Chip, Table, TableBody, TableCell, TableContainer, TableHead, TableRow } from "@mui/material";
 import type { LogEntry } from "@tari-project/ootle-ts-bindings";
-import { getLogLevelColor, normalizeLogLevelLabel } from "./logsHelpers";
+import { getLogLevelColor } from "./logsHelpers";
 
-export default function Logs({ data }: { data?: Array<LogEntry> }) {
-  if (!data || data.length === 0) {
-    return (
-      <Box sx={{ p: 3, textAlign: "center" }}>
-        <Typography variant="body2" color="text.secondary">
-          No logs recorded for this transaction
-        </Typography>
-      </Box>
-    );
-  }
-
+export default function Logs({ data }: { data: Array<LogEntry> }) {
   return (
     <TableContainer>
       <Table>
@@ -46,17 +36,14 @@ export default function Logs({ data }: { data?: Array<LogEntry> }) {
           </TableRow>
         </TableHead>
         <TableBody>
-          {data.map(({ level, message }: LogEntry, index: number) => {
-            const label = normalizeLogLevelLabel(level);
-            return (
-              <TableRow key={`${index}-${label}`}>
-                <DataTableCell>
-                  <Chip label={label} size="small" color={getLogLevelColor(level)} variant="outlined" />
-                </DataTableCell>
-                <DataTableCell sx={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{message}</DataTableCell>
-              </TableRow>
-            );
-          })}
+          {data.map(({ level, message }: LogEntry, index: number) => (
+            <TableRow key={index}>
+              <DataTableCell>
+                <Chip label={level} size="small" color={getLogLevelColor(level)} variant="outlined" />
+              </DataTableCell>
+              <DataTableCell sx={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{message}</DataTableCell>
+            </TableRow>
+          ))}
         </TableBody>
       </Table>
     </TableContainer>

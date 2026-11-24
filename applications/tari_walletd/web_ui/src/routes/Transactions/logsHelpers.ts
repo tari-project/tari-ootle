@@ -20,27 +20,19 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+import type { LogLevel } from "@tari-project/ootle-ts-bindings";
+
 export type LogChipColor = "default" | "primary" | "secondary" | "error" | "info" | "success" | "warning";
 
-export function getLogLevelColor(level: string | null | undefined): LogChipColor {
-  switch ((level ?? "").trim().toLowerCase()) {
-    case "error":
+export function getLogLevelColor(level: LogLevel): LogChipColor {
+  switch (level) {
+    case "Error":
       return "error";
-    case "warn":
-    case "warning":
+    case "Warn":
       return "warning";
-    case "info":
+    case "Info":
       return "info";
-    case "debug":
+    case "Debug":
       return "secondary";
-    case "trace":
-      return "default";
-    default:
-      return "primary";
   }
-}
-
-export function normalizeLogLevelLabel(level: string | null | undefined): string {
-  const trimmed = (level ?? "").trim();
-  return trimmed || "Unknown";
 }

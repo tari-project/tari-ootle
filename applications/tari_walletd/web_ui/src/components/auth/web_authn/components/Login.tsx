@@ -10,7 +10,7 @@ import { useTheme } from "@mui/material/styles";
 import Typography from "@mui/material/Typography";
 import { WebauthnFinishAuthRequest } from "@tari-project/ootle-ts-bindings";
 import { getClientInstance, webauthnStartAuth } from "@utils/json_rpc";
-import { FormEvent, useState } from "react";
+import { FormEvent, useRef, useState } from "react";
 import { Form } from "react-router-dom";
 import {
   assertWebauthnGetSupported,
@@ -36,12 +36,14 @@ function WebauthnLogin(props: WebauthnProps) {
   const theme = useTheme();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const inFlightRef = useRef(false);
 
   const handleLogin = async (e: FormEvent) => {
     e.preventDefault();
-    if (loading) {
+    if (inFlightRef.current) {
       return;
     }
+    inFlightRef.current = true;
     setLoading(true);
     setError("");
 
@@ -79,6 +81,7 @@ function WebauthnLogin(props: WebauthnProps) {
       console.error(error);
       setError(formatWebauthnLoginError(error));
     } finally {
+      inFlightRef.current = false;
       setLoading(false);
     }
   };

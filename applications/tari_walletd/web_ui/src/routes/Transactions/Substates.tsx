@@ -34,6 +34,7 @@ import {
   substateIdToString,
   TransactionResult,
 } from "@tari-project/ootle-ts-bindings";
+import { nftIdToString } from "@utils/helpers";
 import { useState } from "react";
 import { IoArrowDownCircle, IoArrowUpCircle } from "react-icons/io5";
 
@@ -44,20 +45,7 @@ interface SubstateRowDataProps {
 }
 
 function stringifyValue(value: unknown): string {
-  if (value === undefined) {
-    return "undefined";
-  }
-  return JSON.stringify(value, (_key, v) => (typeof v === "bigint" ? v.toString() : v));
-}
-
-function formatNftTokenId(token: unknown): string {
-  if (token && typeof token === "object") {
-    if ("Uint64" in token && token.Uint64 != null) return String(token.Uint64);
-    if ("Uint32" in token && token.Uint32 != null) return String(token.Uint32);
-    if ("String" in token && token.String != null) return String(token.String);
-    if ("U256" in token && token.U256 != null) return String(token.U256);
-  }
-  return stringifyValue(token);
+  return JSON.stringify(value, (_key, v) => (typeof v === "bigint" ? v.toString() : v)) ?? "undefined";
 }
 
 function cborObjectEntries(value: any): [string, string][] | null {
@@ -181,13 +169,7 @@ function renderSubstateDetails(substate: any) {
                       </Typography>
                       <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
                         {vault.resource_container.NonFungible.token_ids.map((token: any, index: number) => (
-                          <Chip
-                            key={index}
-                            label={formatNftTokenId(token)}
-                            size="small"
-                            color="info"
-                            variant="outlined"
-                          />
+                          <Chip key={index} label={nftIdToString(token)} size="small" color="info" variant="outlined" />
                         ))}
                       </Box>
                     </Box>

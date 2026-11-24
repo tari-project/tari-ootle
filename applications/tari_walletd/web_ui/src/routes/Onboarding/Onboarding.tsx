@@ -22,6 +22,7 @@
 
 import { useAccountsCreate, useAccountsGetDefault } from "@api/hooks/useAccounts";
 import Loading from "@components/Loading";
+import Alert from "@mui/material/Alert";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import Grid from "@mui/material/Grid";
@@ -31,6 +32,7 @@ import { useTheme } from "@mui/material/styles";
 import useAccountStore, { setAccount, setOotleAddress } from "@store/accountStore";
 import { FormEvent, useEffect, useState } from "react";
 import { Form, Navigate } from "react-router-dom";
+import { resolveOnboardingView } from "./onboardingHelpers";
 
 function Onboarding() {
   const { mutate, isPending } = useAccountsCreate();
@@ -39,28 +41,42 @@ function Onboarding() {
   const [accountFormState, setAccountFormState] = useState({
     accountName: "",
   });
-  const { data: defaultAccount, isLoading, error, refetch } = useAccountsGetDefault(false);
+  const { data: defaultAccount, error, refetch } = useAccountsGetDefault(!account);
 
   useEffect(() => {
-    refetch();
-    if (defaultAccount) {
+    if (!account && defaultAccount) {
       setAccount(defaultAccount.account);
       setOotleAddress(defaultAccount.address);
     }
   }, [account, defaultAccount]);
 
-  // Any error other than not found, display it.
-  if (error && (error.cause as any)?.code !== 404) {
-    console.error(error);
-    return <Typography variant="h6">Error loading account: {error.message}</Typography>;
-  }
+  const view = resolveOnboardingView({ account, defaultAccount, error });
 
-  if (isLoading) {
-    return <Loading />;
-  }
-
-  if (defaultAccount || account) {
+  if (view.kind === "redirect-home") {
     return <Navigate replace to={"/"} />;
+  }
+
+  if (view.kind === "error") {
+    console.error(error);
+    return (
+      <Grid size={12}>
+        <Alert
+          severity="error"
+          variant="standard"
+          action={
+            <Button color="inherit" size="small" onClick={() => void refetch()}>
+              Retry
+            </Button>
+          }
+        >
+          Error loading account: {view.message}
+        </Alert>
+      </Grid>
+    );
+  }
+
+  if (view.kind === "loading") {
+    return <Loading />;
   }
 
   const handleCreateAccount = (e: FormEvent) => {

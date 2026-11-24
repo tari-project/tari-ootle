@@ -15,6 +15,11 @@ import { getClientInstance, webauthnFinishRegistration, webauthnStartRegistratio
 import { Buffer } from "buffer";
 import { FormEvent, useEffect, useState } from "react";
 import { Form } from "react-router-dom";
+import {
+  assertWebauthnCreateSupported,
+  formatWebauthnRegistrationError,
+  resolveBackupPasskeyLabel,
+} from "./webauthnRegistrationHelpers";
 
 const WEBAUTHN_RP_ID = import.meta.env.VITE_DAEMON_WEBAUTHN_RP_ID || window.location.hostname;
 
@@ -25,6 +30,7 @@ const createCredential = async (
   pubKeyCredParams: PublicKeyCredentialParameters[],
   excludeCredentials: PublicKeyCredentialDescriptor[] = [],
 ) => {
+  const credentials = assertWebauthnCreateSupported(navigator.credentials);
   const publicKeyCredentialCreationOptions: PublicKeyCredentialCreationOptions = {
     rp: {
       name: rpOptions.rpName,
@@ -43,7 +49,7 @@ const createCredential = async (
       userVerification: "required",
     },
   };
-  return await navigator.credentials.create({
+  return await credentials.create({
     publicKey: publicKeyCredentialCreationOptions,
   });
 };
@@ -149,6 +155,9 @@ function WebauthnRegistration(props: WebauthnProps) {
 
   const handleRegister = async (e: FormEvent) => {
     e.preventDefault();
+    if (loading) {
+      return;
+    }
     const trimmedToken = setupToken.trim();
     if (!trimmedToken) {
       setError("A one-time setup token is required to register the first passkey.");
@@ -167,11 +176,7 @@ function WebauthnRegistration(props: WebauthnProps) {
       setShowBackupPrompt(true);
     } catch (error) {
       console.error("Error registering WebAuthn key:", error);
-      if (error instanceof Error) {
-        setError(error.message);
-      } else {
-        setError(error as string);
-      }
+      setError(formatWebauthnRegistrationError(error));
     } finally {
       setLoading(false);
     }
@@ -179,22 +184,21 @@ function WebauthnRegistration(props: WebauthnProps) {
 
   const handleAddBackupPasskey = async (e: FormEvent) => {
     e.preventDefault();
+    if (loading) {
+      return;
+    }
     setLoading(true);
     setError("");
 
     try {
       await performPasskeyRegistration({
-        label: backupLabel || "Backup Passkey",
+        label: resolveBackupPasskeyLabel(backupLabel),
         updateClientToken: false,
       });
       onAuthenticated();
     } catch (error) {
       console.error("Error registering backup WebAuthn key:", error);
-      if (error instanceof Error) {
-        setError(error.message);
-      } else {
-        setError(error as string);
-      }
+      setError(formatWebauthnRegistrationError(error));
     } finally {
       setLoading(false);
     }
@@ -334,7 +338,7 @@ function WebauthnRegistration(props: WebauthnProps) {
               >
                 <Alert severity={"error"}>
                   <Typography variant="h6" style={{ color: "red" }}>
-                    {error.toString()}
+                    {error}
                   </Typography>
                 </Alert>
               </Box>

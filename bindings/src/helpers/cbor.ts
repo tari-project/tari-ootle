@@ -81,7 +81,9 @@ export function tariCborTagHandler(tag: number, value: any): any {
     case TariTypeTag.ValidatorNodeFeePool:
       return bytesValueToAddressString("vnfp", value);
     case TariTypeTag.Utxo:
-      return decodeUtxoAddress(value, tag);
+      return decodeResourceScopedBytesAddress("utxo", value, tag);
+    case TariTypeTag.ConfidentialOutput:
+      return decodeResourceScopedBytesAddress("coutput", value, tag);
     case TariTypeTag.TransactionReceipt:
       return bytesValueToAddressString("txreceipt", value);
     case TariTypeTag.Metadata:
@@ -205,12 +207,12 @@ function decodeNonFungibleAddress(value: any, tag: number): any {
   return { tag, value };
 }
 
-function decodeUtxoAddress(value: any, tag: number): any {
+function decodeResourceScopedBytesAddress(prefix: string, value: any, tag: number): any {
   if (Array.isArray(value) && value.length === 2) {
     const resourceHex = extractResourceHex(value[0]);
     const idHex = isByteArray(value[1]) ? bytesToHex(value[1]) : null;
     if (resourceHex !== null && idHex !== null) {
-      return `utxo_${resourceHex}_${idHex}`;
+      return `${prefix}_${resourceHex}_${idHex}`;
     }
   }
   return { tag, value };

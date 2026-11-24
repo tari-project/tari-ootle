@@ -7,10 +7,9 @@ export interface LabeledTabItem {
 
 /**
  * Resolves the active MUI Tabs index from the selected tab label.
- * Keeps the user on the same logical tab when items are inserted or removed
- * (for example, when the Passkeys tab appears after useAuthMethod resolves),
- * falls back to index 0 if the selected label is no longer present, and
- * returns `false` when the menu is empty.
+ * Keeps the user on the same logical tab if items are inserted, removed, or
+ * reordered, falls back to index 0 when the selected label is no longer
+ * present, and returns `false` when the menu is empty.
  */
 export function resolveActiveTabIndex(
   menuItems: readonly LabeledTabItem[],

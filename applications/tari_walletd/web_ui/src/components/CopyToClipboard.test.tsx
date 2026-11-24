@@ -4,6 +4,9 @@
 import { type ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+// Minimal hook harness because tari_walletd/web_ui runs Vitest in the Node
+// environment without jsdom or @testing-library/react. Replace with a real
+// DOM test renderer if one is added to this package.
 interface EffectRecord {
   deps?: unknown[];
   cleanup?: (() => void) | void;

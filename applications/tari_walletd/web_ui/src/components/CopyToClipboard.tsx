@@ -37,7 +37,6 @@ const TOOLTIP_RESET_MS = 2000;
 const CopyToClipboard = ({ copy, title, iconWidth = "14px", iconHeight = "14px" }: CopyProps) => {
   const [tooltip, setTooltip] = useState<string | null>(null);
   const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const isMountedRef = useRef(true);
   const copyIdRef = useRef(0);
 
   const clearResetTimer = () => {
@@ -48,17 +47,11 @@ const CopyToClipboard = ({ copy, title, iconWidth = "14px", iconHeight = "14px" 
   };
 
   useEffect(() => {
-    isMountedRef.current = true;
+    setTooltip(null);
     return () => {
-      isMountedRef.current = false;
+      copyIdRef.current += 1;
       clearResetTimer();
     };
-  }, []);
-
-  useEffect(() => {
-    copyIdRef.current += 1;
-    clearResetTimer();
-    setTooltip(null);
   }, [copy]);
 
   const handleClick = async (copyThis: string) => {
@@ -70,12 +63,12 @@ const CopyToClipboard = ({ copy, title, iconWidth = "14px", iconHeight = "14px" 
     } else {
       try {
         await navigator.clipboard.writeText(copyThis);
-        if (!isMountedRef.current || copyIdRef.current !== requestId) {
+        if (copyIdRef.current !== requestId) {
           return;
         }
         setTooltip("Copied to clipboard");
       } catch (err) {
-        if (!isMountedRef.current || copyIdRef.current !== requestId) {
+        if (copyIdRef.current !== requestId) {
           return;
         }
         setTooltip("Permission denied to copy");
@@ -85,9 +78,7 @@ const CopyToClipboard = ({ copy, title, iconWidth = "14px", iconHeight = "14px" 
 
     resetTimerRef.current = setTimeout(() => {
       resetTimerRef.current = null;
-      if (isMountedRef.current && copyIdRef.current === requestId) {
-        setTooltip(null);
-      }
+      setTooltip(null);
     }, TOOLTIP_RESET_MS);
   };
 

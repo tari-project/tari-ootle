@@ -1,7 +1,7 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 import { ChevronRight } from "@mui/icons-material";
-import { Chip, Stack } from "@mui/material";
+import { Chip, Stack, Typography } from "@mui/material";
 import Fade from "@mui/material/Fade";
 import IconButton from "@mui/material/IconButton";
 import { useTheme } from "@mui/material/styles";
@@ -75,6 +75,7 @@ function ReceiptRow({ entry }: { entry: ReceiptEntry }) {
         <IconButton
           component={Link}
           to={`/transaction-receipts/${encodeURIComponent(address)}`}
+          aria-label="View receipt details"
           style={{ color: theme.palette.text.secondary }}
         >
           <ChevronRight />
@@ -104,14 +105,19 @@ function TransactionReceiptsList() {
   );
 
   const visibleReceipts = filteredReceipts.filter((r) => r.show !== false);
-  const paginatedReceipts = visibleReceipts.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage);
+  const maxPage = Math.max(0, Math.ceil(visibleReceipts.length / rowsPerPage) - 1);
+  const safePage = Math.min(page, maxPage);
+  const paginatedReceipts = visibleReceipts.slice(safePage * rowsPerPage, safePage * rowsPerPage + rowsPerPage);
 
   const handleChangePage = (_event: React.MouseEvent<HTMLButtonElement> | null, newPage: number) => {
     setPage(newPage);
   };
   const handleChangeRowsPerPage = (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-    setRowsPerPage(parseInt(event.target.value, 10));
-    setPage(0);
+    const nextRowsPerPage = parseInt(event.target.value, 10);
+    if (Number.isFinite(nextRowsPerPage) && nextRowsPerPage > 0) {
+      setRowsPerPage(nextRowsPerPage);
+      setPage(0);
+    }
   };
 
   return (
@@ -149,15 +155,23 @@ function TransactionReceiptsList() {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {paginatedReceipts.map((entry) => (
-                  <ReceiptRow key={entry.address} entry={entry} />
-                ))}
+                {paginatedReceipts.length > 0 ? (
+                  paginatedReceipts.map((entry) => <ReceiptRow key={entry.address} entry={entry} />)
+                ) : (
+                  <TableRow>
+                    <DataTableCell colSpan={6} align="center">
+                      <Typography variant="body2" color="text.secondary">
+                        No transaction receipts found
+                      </Typography>
+                    </DataTableCell>
+                  </TableRow>
+                )}
               </TableBody>
             </Table>
             <TablePagination
               component="div"
               count={visibleReceipts.length}
-              page={page}
+              page={safePage}
               onPageChange={handleChangePage}
               rowsPerPage={rowsPerPage}
               onRowsPerPageChange={handleChangeRowsPerPage}

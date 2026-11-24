@@ -21,7 +21,7 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { ChevronRight } from "@mui/icons-material";
-import { Chip, Stack, ToggleButton, ToggleButtonGroup } from "@mui/material";
+import { Chip, Stack, ToggleButton, ToggleButtonGroup, Typography } from "@mui/material";
 import Fade from "@mui/material/Fade";
 import IconButton from "@mui/material/IconButton";
 import { useTheme } from "@mui/material/styles";
@@ -53,6 +53,7 @@ function TransactionRow({ entry }: { entry: ExtendedTransactionEntry }) {
   const theme = useTheme();
   const isSm = useMediaQuery(theme.breakpoints.down("sm"));
   const shortLen = isSm ? 4 : 8;
+  const txPath = `/transactions/${encodeURIComponent(transaction_id)}`;
 
   return (
     <TableRow>
@@ -62,10 +63,7 @@ function TransactionRow({ entry }: { entry: ExtendedTransactionEntry }) {
           spacing={isSm ? 0.1 : 1.5}
           alignItems={isSm ? "flex-start" : "center"}
         >
-          <Link
-            to={`/transactions/${transaction_id}`}
-            style={{ textDecoration: "none", color: theme.palette.text.secondary }}
-          >
+          <Link to={txPath} style={{ textDecoration: "none", color: theme.palette.text.secondary }}>
             {shortenString(transaction_id, shortLen, shortLen)}
           </Link>
           <TimeChip timestamp={created_at} />
@@ -86,7 +84,8 @@ function TransactionRow({ entry }: { entry: ExtendedTransactionEntry }) {
       <DataTableCell>
         <IconButton
           component={Link}
-          to={`/transactions/${transaction_id}`}
+          to={txPath}
+          aria-label="View transaction details"
           style={{ color: theme.palette.text.secondary }}
         >
           <ChevronRight />
@@ -114,14 +113,19 @@ function RecentTransactions() {
   );
 
   const visibleTransactions = filteredTransactions.filter((tx) => tx.show !== false);
-  const paginatedTransactions = visibleTransactions.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage);
+  const maxPage = Math.max(0, Math.ceil(visibleTransactions.length / rowsPerPage) - 1);
+  const safePage = Math.min(page, maxPage);
+  const paginatedTransactions = visibleTransactions.slice(safePage * rowsPerPage, safePage * rowsPerPage + rowsPerPage);
 
   const handleChangePage = (_event: React.MouseEvent<HTMLButtonElement> | null, newPage: number) => {
     setPage(newPage);
   };
   const handleChangeRowsPerPage = (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-    setRowsPerPage(parseInt(event.target.value, 10));
-    setPage(0);
+    const nextRowsPerPage = parseInt(event.target.value, 10);
+    if (Number.isFinite(nextRowsPerPage) && nextRowsPerPage > 0) {
+      setRowsPerPage(nextRowsPerPage);
+      setPage(0);
+    }
   };
 
   return (
@@ -173,15 +177,23 @@ function RecentTransactions() {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {paginatedTransactions.map((entry) => (
-                  <TransactionRow key={entry.transaction_id} entry={entry} />
-                ))}
+                {paginatedTransactions.length > 0 ? (
+                  paginatedTransactions.map((entry) => <TransactionRow key={entry.transaction_id} entry={entry} />)
+                ) : (
+                  <TableRow>
+                    <DataTableCell colSpan={4} align="center">
+                      <Typography variant="body2" color="text.secondary">
+                        No transactions found
+                      </Typography>
+                    </DataTableCell>
+                  </TableRow>
+                )}
               </TableBody>
             </Table>
             <TablePagination
               component="div"
               count={visibleTransactions.length}
-              page={page}
+              page={safePage}
               onPageChange={handleChangePage}
               rowsPerPage={rowsPerPage}
               onRowsPerPageChange={handleChangeRowsPerPage}

@@ -2,8 +2,6 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use std::ops::Deref;
-#[cfg(feature = "serde")]
-use std::{fmt, marker::PhantomData};
 
 use tari_engine_types::hashing::{EngineHashDomainLabel, hasher32};
 use tari_template_lib_types::{Hash32, MaxBytes, bytes::Bytes};
@@ -129,49 +127,15 @@ pub fn hash_blob(blob: &Blob) -> Hash32 {
 pub struct Blobs(
     #[n(0)]
     #[cbor(decode_with = "decode_blobs")]
-    #[cfg_attr(feature = "serde", serde(deserialize_with = "deserialize_bounded_blobs"))]
+    #[cfg_attr(
+        feature = "serde",
+        serde(deserialize_with = "ootle_serde::bounded_seq::deserialize::<{ Blobs::MAX_BLOBS }, _, _>")
+    )]
     Vec<Blob>,
 );
 
 fn decode_blobs<'b, C>(d: &mut minicbor::Decoder<'b>, ctx: &mut C) -> Result<Vec<Blob>, minicbor::decode::Error> {
     tari_bor::adapters::bounded_vec::decode(d, ctx, Blobs::MAX_BLOBS)
-}
-
-#[cfg(feature = "serde")]
-struct BoundedBlobVecVisitor<T>(PhantomData<T>);
-
-#[cfg(feature = "serde")]
-impl<'de, T: serde::Deserialize<'de>> serde::de::Visitor<'de> for BoundedBlobVecVisitor<T> {
-    type Value = Vec<T>;
-
-    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        write!(formatter, "a sequence of at most {} blob entries", Blobs::MAX_BLOBS)
-    }
-
-    fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
-    where A: serde::de::SeqAccess<'de> {
-        let max = Blobs::MAX_BLOBS;
-        let mut items = Vec::with_capacity(seq.size_hint().unwrap_or(0).min(max).min(64));
-        while let Some(item) = seq.next_element()? {
-            if items.len() == max {
-                return Err(serde::de::Error::custom(format!(
-                    "blob sequence length exceeds maximum of {}",
-                    max
-                )));
-            }
-            items.push(item);
-        }
-        Ok(items)
-    }
-}
-
-#[cfg(feature = "serde")]
-pub(crate) fn deserialize_bounded_blobs<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-    T: serde::Deserialize<'de>,
-{
-    deserializer.deserialize_seq(BoundedBlobVecVisitor(PhantomData))
 }
 
 impl Blobs {
@@ -250,7 +214,10 @@ impl IntoIterator for Blobs {
 pub struct BlobHashes(
     #[n(0)]
     #[cbor(decode_with = "decode_blob_hashes")]
-    #[cfg_attr(feature = "serde", serde(deserialize_with = "deserialize_bounded_blobs"))]
+    #[cfg_attr(
+        feature = "serde",
+        serde(deserialize_with = "ootle_serde::bounded_seq::deserialize::<{ Blobs::MAX_BLOBS }, _, _>")
+    )]
     Vec<Hash32>,
 );
 

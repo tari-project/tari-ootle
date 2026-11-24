@@ -99,6 +99,7 @@ const ENGINE_FINGERPRINT_BITS: u64 = {
     let h = const_hash::part(h, include_bytes!("../bulk_metering.rs"));
     // The operators and segments refused at compile, and the globals exported for restoring.
     let h = const_hash::part(h, include_bytes!("../instance_reset.rs"));
+    let h = const_hash::part(h, include_bytes!("../branch_table_limit.rs"));
     // The memory and table bounds, which reach codegen through the style each one is adjusted to.
     let h = const_hash::part(h, include_bytes!("../limiting_tunable.rs"));
     // Which count a hit reads out of each header slot. Swapping two of these is a fee change.
@@ -124,6 +125,7 @@ const ENGINE_FINGERPRINT_BITS: u64 = {
         max_tables,
         max_table_elements,
         max_element_segments,
+        max_br_table_targets,
     } = limits::WASM_LIMITS;
     const_hash::finish(const_hash::values(h, &[
         limits::MAX_WASM_POINTS_PER_CALL as u128,
@@ -143,6 +145,7 @@ const ENGINE_FINGERPRINT_BITS: u64 = {
         max_tables as u128,
         max_table_elements as u128,
         max_element_segments as u128,
+        max_br_table_targets as u128,
         // The compile work `validate_module_structure` refuses a module for is these counts at these
         // prices, against the size cap.
         limits::ENGINE_LIMITS.max_template_binary_size_bytes as u128,

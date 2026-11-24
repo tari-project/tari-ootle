@@ -19,6 +19,7 @@ pub use cache::{
     WasmModuleCache,
 };
 
+mod branch_table_limit;
 mod bulk_metering;
 mod engine;
 mod metering;

@@ -64,6 +64,7 @@ function TransactionsLayout() {
                 value={selected}
                 onChange={onChange}
                 displayEmpty
+                notched
               >
                 <MenuItem value={ALL_ACCOUNTS}>All accounts</MenuItem>
                 {accounts.map(({ account }) => (

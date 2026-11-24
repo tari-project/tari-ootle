@@ -446,6 +446,7 @@ impl Display for TransactionV1 {
 fn calc_instruction_weight(instruction: &Instruction) -> u64 {
     // TODO: formalize costing numbers
     const CLAIM_FIXED_COST: u64 = 1100;
+    const CLAIM_PROOF_BYTE_DIVISOR: u64 = 3;
     match instruction {
         Instruction::CreateAccount {
             owner_rule,
@@ -463,7 +464,12 @@ fn calc_instruction_weight(instruction: &Instruction) -> u64 {
         Instruction::CallFunction { args, .. } => calc_args_weight(args).max(INVOCATION_FLOOR),
         Instruction::CallMethod { args, .. } => calc_args_weight(args).max(INVOCATION_FLOOR),
         Instruction::PutLastInstructionOutputOnWorkspace { .. } => 0, // Call already costs
-        Instruction::ClaimBurn { .. } => CLAIM_FIXED_COST,
+        // `claim` embeds variable-length L1 witness bytes (script, covenant, encrypted data, metadata signature,
+        // and two MMR inclusion proofs) that are never persisted as substates, so its encoded size contributes at
+        // the same 3-byte divisor as blobs, literal args, and stealth spend witnesses.
+        Instruction::ClaimBurn { claim } => {
+            CLAIM_FIXED_COST + (tari_bor::encoded_len(claim.as_ref()) as u64 / CLAIM_PROOF_BYTE_DIVISOR)
+        },
         Instruction::ClaimValidatorFees { .. } => 1,
         Instruction::DropAllProofsInWorkspace => 1,
         Instruction::Assert { .. } => 1,
@@ -1243,5 +1249,79 @@ mod weight_tests {
             tari_bor::encode(&workspace_call()).unwrap().len(),
             MIN_INVOCATION_ENCODED_BYTES
         );
+    }
+
+    #[test]
+    fn claim_burn_weight_scales_with_encoded_proof_bytes() {
+        use tari_engine_types::confidential::{
+            BurnOutput,
+            BurnOutputFeatures,
+            BurnOutputInclusionProof,
+            MAX_BURN_OUTPUT_COVENANT_LEN,
+            MAX_BURN_OUTPUT_SCRIPT_LEN,
+            MAX_MMR_PROOF_HASHES,
+            MinotariBurnClaimProof,
+            MmrInclusionProof,
+        };
+        use tari_template_lib_types::crypto::{PedersenCommitmentBytes, SchnorrSignatureBytes};
+
+        let minimal_mmr = || MmrInclusionProof {
+            leaf_index: 0,
+            mmr_size: 1,
+            path: vec![],
+            peaks: vec![],
+        };
+
+        let minimal_claim = MinotariBurnClaimProof {
+            commitment: PedersenCommitmentBytes::zero(),
+            ownership_proof: SchnorrSignatureBytes::zero(),
+            value: 1_000,
+            output: BurnOutput {
+                version: 0,
+                features: BurnOutputFeatures {
+                    version: 0,
+                    maturity: 0,
+                    claim_public_key: RistrettoPublicKeyBytes::zero(),
+                    sidechain_id: None,
+                    range_proof_type: 0,
+                },
+                rangeproof_hash: Hash32::zero(),
+                script: vec![0u8; 1].try_into().unwrap(),
+                sender_offset_public_key: RistrettoPublicKeyBytes::zero(),
+                metadata_signature: vec![0u8; 1].try_into().unwrap(),
+                covenant: vec![0u8; 1].try_into().unwrap(),
+                encrypted_data: vec![0u8; 1].try_into().unwrap(),
+                minimum_value_promise: 0,
+            },
+            inclusion_proof: BurnOutputInclusionProof {
+                block_hash: Hash32::zero(),
+                normal_output_proof: minimal_mmr(),
+                normal_output_mr: Hash32::zero(),
+                block_output_proof: minimal_mmr(),
+            },
+        };
+
+        let mut maximal_claim = minimal_claim.clone();
+        maximal_claim.output.script = vec![0xAA; MAX_BURN_OUTPUT_SCRIPT_LEN].try_into().unwrap();
+        maximal_claim.output.covenant = vec![0xBB; MAX_BURN_OUTPUT_COVENANT_LEN].try_into().unwrap();
+        maximal_claim.inclusion_proof.normal_output_proof.path = vec![Hash32::zero(); MAX_MMR_PROOF_HASHES];
+        maximal_claim.inclusion_proof.normal_output_proof.peaks = vec![Hash32::zero(); MAX_MMR_PROOF_HASHES];
+        maximal_claim.inclusion_proof.block_output_proof.path = vec![Hash32::zero(); MAX_MMR_PROOF_HASHES];
+        maximal_claim.inclusion_proof.block_output_proof.peaks = vec![Hash32::zero(); MAX_MMR_PROOF_HASHES];
+
+        let min_len = tari_bor::encoded_len(&minimal_claim) as u64;
+        let max_len = tari_bor::encoded_len(&maximal_claim) as u64;
+        assert!(max_len > min_len + 15_000);
+
+        let small = Instruction::ClaimBurn {
+            claim: Box::new(minimal_claim),
+        };
+        let large = Instruction::ClaimBurn {
+            claim: Box::new(maximal_claim),
+        };
+
+        assert_eq!(calc_instruction_weight(&small), 1100 + min_len / 3);
+        assert_eq!(calc_instruction_weight(&large), 1100 + max_len / 3);
+        assert!(calc_instruction_weight(&large) * 3 >= max_len);
     }
 }

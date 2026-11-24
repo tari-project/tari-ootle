@@ -72,7 +72,6 @@ export async function getClientAddress(): Promise<URL> {
 
 let clientInstance: IndexerClient | null = null;
 let pendingClientInstance: Promise<IndexerClient> | null = null;
-let outerAddress: URL | null = null;
 
 export async function client() {
   if (clientInstance) {
@@ -83,12 +82,9 @@ export async function client() {
     return pendingClientInstance;
   }
 
-  const getAddress = outerAddress ? Promise.resolve(outerAddress) : getClientAddress();
-
-  pendingClientInstance = getAddress
+  pendingClientInstance = getClientAddress()
     .then((addr) => {
       const instance = IndexerClient.usingFetchTransport(addr.toString());
-      outerAddress = addr;
       clientInstance = instance;
       return instance;
     })

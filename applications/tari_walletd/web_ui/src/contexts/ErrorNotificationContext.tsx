@@ -30,9 +30,13 @@ interface ErrorNotification {
 }
 
 interface ErrorNotificationContextType {
+  /** Show an error toast; pass duration <= 0 to keep it open until dismissed. */
   showError: (message: string, severity?: AlertColor, duration?: number) => void;
+  /** Show a success toast; pass duration <= 0 to keep it open until dismissed. */
   showSuccess: (message: string, duration?: number) => void;
+  /** Show a warning toast; pass duration <= 0 to keep it open until dismissed. */
   showWarning: (message: string, duration?: number) => void;
+  /** Show an info toast; pass duration <= 0 to keep it open until dismissed. */
   showInfo: (message: string, duration?: number) => void;
   clearNotification: () => void;
 }

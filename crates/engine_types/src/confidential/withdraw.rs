@@ -6,7 +6,7 @@ use tari_template_lib::types::{Amount, confidential::ConfidentialWithdrawProof};
 
 use super::{ValidatedConfidentialProof, validate_confidential_statement};
 use crate::{
-    crypto::{ValidateOutputBody, commit_amount, messages, try_decode_to_signature},
+    crypto::{ValidateOutputBody, commit_amount_unchecked, messages, try_decode_to_signature},
     resource_container::ResourceError,
 };
 
@@ -82,48 +82,34 @@ fn is_empty_non_revealed_withdraw(withdraw_proof: &ConfidentialWithdrawProof) ->
         stmt.range_proof.is_empty()
 }
 
-fn check_revealed_amounts(withdraw_proof: &ConfidentialWithdrawProof) -> Result<(Amount, Amount), ResourceError> {
-    let input_revealed_amount = withdraw_proof.input_revealed_amount;
-    // We expect the revealed amount to be excluded from the output commitment.
-    let total_output_revealed_amount = withdraw_proof
-        .output_proof
-        .output_revealed_amount
-        .checked_add(withdraw_proof.output_proof.change_revealed_amount)
+/// Returns the total revealed output amount (output + change). The balance proof signs this total, so it must fit in
+/// an `Amount`.
+fn check_revealed_amounts(withdraw_proof: &ConfidentialWithdrawProof) -> Result<Amount, ResourceError> {
+    let output_revealed_amount = withdraw_proof.output_proof.output_revealed_amount;
+    let change_revealed_amount = withdraw_proof.output_proof.change_revealed_amount;
+    output_revealed_amount
+        .checked_add(change_revealed_amount)
         .ok_or_else(|| ResourceError::InvalidConfidentialProof {
             details: format!(
-                "Output revealed amount {} + change revealed amount {} cannot be negative",
-                withdraw_proof.output_proof.output_revealed_amount, withdraw_proof.output_proof.change_revealed_amount
+                "Output revealed amount {output_revealed_amount} + change revealed amount {change_revealed_amount} \
+                 overflows the maximum amount {}",
+                Amount::MAX
             ),
-        })?;
-    Ok((input_revealed_amount, total_output_revealed_amount))
-}
-
-fn commit_revealed_amounts(
-    input_revealed_amount: Amount,
-    total_output_revealed_amount: Amount,
-) -> Result<(PedersenCommitment, PedersenCommitment), ResourceError> {
-    // 0.G + v.H - users may convert revealed funds to confidential outputs so this must be part of the balance proof
-    let revealed_input_commitment = commit_amount(&Default::default(), input_revealed_amount).ok_or_else(|| {
-        ResourceError::InvalidBalanceProof {
-            details: "Input revealed amount is too large to commit".to_string(),
-        }
-    })?;
-    // 0.G + v.H
-    let revealed_output_commitment =
-        commit_amount(&Default::default(), total_output_revealed_amount).ok_or_else(|| {
-            ResourceError::InvalidBalanceProof {
-                details: "Total output revealed amount is too large to commit".to_string(),
-            }
-        })?;
-    Ok((revealed_input_commitment, revealed_output_commitment))
+        })
 }
 
 fn compute_public_excess<'a, I: IntoIterator<Item = &'a PedersenCommitment>>(
     inputs: I,
     validated_proof: &ValidatedConfidentialProof,
-    revealed_input_commitment: &PedersenCommitment,
-    revealed_output_commitment: &PedersenCommitment,
+    input_revealed_amount: Amount,
+    total_output_revealed_amount: Amount,
 ) -> RistrettoPublicKey {
+    // Revealed amounts are public values, so they commit over the full `Amount` range.
+    // 0.G + v.H - users may convert revealed funds to confidential outputs so this must be part of the balance proof
+    let revealed_input_commitment = commit_amount_unchecked(&Default::default(), input_revealed_amount);
+    // 0.G + v.H
+    let revealed_output_commitment = commit_amount_unchecked(&Default::default(), total_output_revealed_amount);
+
     // k.G + v.H or 0.G if None
     let output_commitment = validated_proof
         .output
@@ -151,7 +137,8 @@ pub(crate) fn validate_confidential_withdraw<'a, I: IntoIterator<Item = &'a Pede
     view_key: Option<&RistrettoPublicKey>,
     withdraw_proof: ConfidentialWithdrawProof,
 ) -> Result<ValidatedConfidentialWithdrawProof, ResourceError> {
-    let (input_revealed_amount, total_output_revealed_amount) = check_revealed_amounts(&withdraw_proof)?;
+    let input_revealed_amount = withdraw_proof.input_revealed_amount;
+    let total_output_revealed_amount = check_revealed_amounts(&withdraw_proof)?;
 
     // Balance proof not required if only revealed funds are transferred
     if withdraw_proof.is_revealed_only() {
@@ -169,9 +156,6 @@ pub(crate) fn validate_confidential_withdraw<'a, I: IntoIterator<Item = &'a Pede
         });
     }
 
-    let (revealed_input_commitment, revealed_output_commitment) =
-        commit_revealed_amounts(input_revealed_amount, total_output_revealed_amount)?;
-
     let balance_proof =
         try_decode_to_signature(&withdraw_proof.balance_proof).ok_or_else(|| ResourceError::InvalidBalanceProof {
             details: "Malformed balance proof".to_string(),
@@ -181,8 +165,8 @@ pub(crate) fn validate_confidential_withdraw<'a, I: IntoIterator<Item = &'a Pede
     let public_excess = compute_public_excess(
         inputs,
         &validated_proof,
-        &revealed_input_commitment,
-        &revealed_output_commitment,
+        input_revealed_amount,
+        total_output_revealed_amount,
     );
 
     let message = messages::confidential_withdraw64(
@@ -213,13 +197,19 @@ mod tests {
     use tari_crypto::{keys::PublicKey, ristretto::RistrettoSecretKey, tari_utilities::ByteArray};
     use tari_template_lib::types::{
         EncryptedData,
+        confidential::ConfidentialOutputStatement,
         constants::STEALTH_TARI_RESOURCE_ADDRESS,
         crypto::{BalanceProofSignature, RangeProofBytes, RistrettoPublicKeyBytes, Scalar32Bytes},
         stealth::UnspentOutput,
     };
 
     use super::*;
-    use crate::{crypto::commit_u64_amount, limits::NativeExecutionPoints, resource_container::ResourceContainer};
+    use crate::{
+        crypto::commit_u64_amount,
+        hashing::EngineSchnorrSignature,
+        limits::NativeExecutionPoints,
+        resource_container::ResourceContainer,
+    };
 
     /// A revealed withdraw carrying a decodable, non-zero balance proof: no inputs and no
     /// confidential outputs, but not revealed-only.
@@ -296,30 +286,18 @@ mod tests {
     }
 
     #[test]
-    fn withdraw_rejects_overflowing_or_uncommittable_revealed_amounts_before_statement_crypto() {
+    fn withdraw_rejects_overflowing_revealed_amounts_and_malformed_balance_proof_before_statement_crypto() {
         let mut overflow_proof = withdraw_with_bogus_range_proof();
         overflow_proof.output_proof.output_revealed_amount = Amount::MAX;
         overflow_proof.output_proof.change_revealed_amount = Amount::from(1u64);
         let err = validate_confidential_withdraw([], None, overflow_proof).unwrap_err();
-        assert!(matches!(err, ResourceError::InvalidConfidentialProof { .. }));
-
-        let mut uncommittable_in = withdraw_with_bogus_range_proof();
-        uncommittable_in.input_revealed_amount = Amount::from(u64::MAX) + Amount::from(1u64);
-        let err = validate_confidential_withdraw([], None, uncommittable_in).unwrap_err();
-        assert!(matches!(
-            &err,
-            ResourceError::InvalidBalanceProof { details }
-                if details.contains("Input revealed amount is too large to commit")
-        ));
-
-        let mut uncommittable_out = withdraw_with_bogus_range_proof();
-        uncommittable_out.output_proof.output_revealed_amount = Amount::from(u64::MAX) + Amount::from(1u64);
-        let err = validate_confidential_withdraw([], None, uncommittable_out).unwrap_err();
-        assert!(matches!(
-            &err,
-            ResourceError::InvalidBalanceProof { details }
-                if details.contains("Total output revealed amount is too large to commit")
-        ));
+        assert!(
+            matches!(
+                &err,
+                ResourceError::InvalidConfidentialProof { details } if details.contains("overflows")
+            ),
+            "unexpected error: {err:?}"
+        );
 
         let mut malformed_sig = withdraw_with_bogus_range_proof();
         malformed_sig.balance_proof = BalanceProofSignature::new(
@@ -331,5 +309,42 @@ mod tests {
             &err,
             ResourceError::InvalidBalanceProof { details } if details.contains("Malformed balance proof")
         ));
+    }
+
+    #[test]
+    fn withdraw_balances_revealed_amounts_above_u64_max() {
+        let input_mask = RistrettoSecretKey::from(11u64);
+        let input = commit_u64_amount(&input_mask, 10);
+        let input_revealed_amount = Amount::new(1u128 << 64);
+        let output_revealed_amount = input_revealed_amount + 10u64;
+
+        // k.G + 10.H + 2^64.H - (2^64 + 10).H = k.G
+        let public_excess = RistrettoPublicKey::from_secret_key(&input_mask);
+        let nonce_secret = RistrettoSecretKey::from(999u64);
+        let nonce_public = RistrettoPublicKey::from_secret_key(&nonce_secret);
+        let message = messages::confidential_withdraw64(
+            &public_excess,
+            &nonce_public,
+            &input_revealed_amount,
+            &output_revealed_amount,
+        );
+        let balance_proof = EngineSchnorrSignature::sign_raw_uniform(&input_mask, nonce_secret, &message)
+            .unwrap()
+            .to_byte_type();
+
+        let proof = ConfidentialWithdrawProof {
+            inputs: vec![input.to_byte_type()],
+            input_revealed_amount,
+            output_proof: ConfidentialOutputStatement::mint_revealed(output_revealed_amount),
+            balance_proof,
+        };
+        assert!(!proof.is_revealed_only());
+
+        let validated = validate_confidential_withdraw([&input], None, proof).unwrap();
+        assert!(validated.output.is_none());
+        assert!(validated.change_output.is_none());
+        assert_eq!(validated.input_revealed_amount, input_revealed_amount);
+        assert_eq!(validated.output_revealed_amount, output_revealed_amount);
+        assert_eq!(validated.change_revealed_amount, Amount::zero());
     }
 }

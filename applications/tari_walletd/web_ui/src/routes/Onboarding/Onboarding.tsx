@@ -41,6 +41,7 @@ function Onboarding() {
   const [accountFormState, setAccountFormState] = useState({
     accountName: "",
   });
+  const [retrying, setRetrying] = useState(false);
   const { data: defaultAccount, error, refetch } = useAccountsGetDefault(!account);
 
   useEffect(() => {
@@ -49,6 +50,16 @@ function Onboarding() {
       setOotleAddress(defaultAccount.address);
     }
   }, [account, defaultAccount]);
+
+  const handleRetry = () => {
+    if (retrying) {
+      return;
+    }
+    setRetrying(true);
+    void refetch().finally(() => {
+      setRetrying(false);
+    });
+  };
 
   const view = resolveOnboardingView({ account, defaultAccount, error });
 
@@ -64,8 +75,8 @@ function Onboarding() {
           severity="error"
           variant="standard"
           action={
-            <Button color="inherit" size="small" onClick={() => void refetch()}>
-              Retry
+            <Button color="inherit" size="small" disabled={retrying} onClick={handleRetry}>
+              {retrying ? "Retrying..." : "Retry"}
             </Button>
           }
         >

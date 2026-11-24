@@ -15,9 +15,9 @@ export function isAccountNotFoundError(error: unknown): boolean {
   return Boolean(cause && typeof cause === "object" && (cause as { code?: unknown }).code === 404);
 }
 
-export function resolveOnboardingView<TAccount, TDefaultAccount>(params: {
-  account: TAccount | null | undefined;
-  defaultAccount: TDefaultAccount | null | undefined;
+export function resolveOnboardingView(params: {
+  account: unknown;
+  defaultAccount: unknown;
   error: Error | null;
 }): OnboardingView {
   if (params.account || params.defaultAccount) {

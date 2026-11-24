@@ -69,12 +69,34 @@ pub struct CheckedStealthTransfer(StealthTransferStatement);
 
 impl CheckedStealthTransfer {
     pub fn check(statement: StealthTransferStatement) -> Result<Self, ResourceError> {
-        check_structure(&statement)?;
+        CheckedStatementRef::check(&statement)?;
         Ok(Self(statement))
     }
 
     pub fn statement(&self) -> &StealthTransferStatement {
         &self.0
+    }
+
+    fn as_checked_ref(&self) -> CheckedStatementRef<'_> {
+        CheckedStatementRef(&self.0)
+    }
+}
+
+/// The borrowed form of [`CheckedStealthTransfer`]: a statement reference that has passed the same structural checks.
+/// [`CheckedStatementRef::check`] and [`CheckedStealthTransfer::as_checked_ref`] are the only ways to build one.
+#[derive(Clone, Copy)]
+struct CheckedStatementRef<'a>(&'a StealthTransferStatement);
+
+impl<'a> CheckedStatementRef<'a> {
+    /// Covenant predicates look claims up by partition, so the claim list is bounded here, before any predicate runs.
+    fn check(statement: &'a StealthTransferStatement) -> Result<Self, ResourceError> {
+        validate_transfer_commitments(statement)?;
+        validate_covenant_claims(statement)?;
+        Ok(Self(statement))
+    }
+
+    fn statement(self) -> &'a StealthTransferStatement {
+        self.0
     }
 }
 
@@ -84,26 +106,27 @@ pub fn validate_transfer(
     transfer: &StealthTransferStatement,
     view_key: Option<&RistrettoPublicKey>,
 ) -> Result<ValidatedStealthTransfer, ResourceError> {
-    check_structure(transfer)?;
-    validate_structurally_checked(transfer, view_key)
+    validate_checked_statement(CheckedStatementRef::check(transfer)?, view_key)
 }
 
-/// Runs the checks [`validate_transfer`] runs beyond those a [`CheckedStealthTransfer`] has already passed: the
-/// revealed amounts, balance proof and range proof.
+/// Validates the revealed amounts, balance proof and range proof of a transfer that holds the structural checks of
+/// [`CheckedStealthTransfer`].
 pub fn validate_checked_transfer(
     transfer: &CheckedStealthTransfer,
     view_key: Option<&RistrettoPublicKey>,
 ) -> Result<ValidatedStealthTransfer, ResourceError> {
-    validate_structurally_checked(transfer.statement(), view_key)
+    validate_checked_statement(transfer.as_checked_ref(), view_key)
 }
 
-/// `transfer` must have passed [`check_structure`].
-fn validate_structurally_checked(
-    transfer: &StealthTransferStatement,
+/// Validates the revealed amounts, balance proof and range proof of `transfer`. The witness holds unique commitments
+/// across inputs and outputs, which [`stealth::validate_outputs`] requires.
+fn validate_checked_statement(
+    transfer: CheckedStatementRef<'_>,
     view_key: Option<&RistrettoPublicKey>,
 ) -> Result<ValidatedStealthTransfer, ResourceError> {
+    let transfer = transfer.statement();
     check_revealed_amounts_and_balance_proof_presence(transfer)?;
-    let validated_outputs = stealth::validate_unique_stealth_outputs_statement(&transfer.outputs_statement, view_key)?;
+    let validated_outputs = stealth::validate_outputs(&transfer.outputs_statement, view_key)?;
 
     let balance_proof = transfer
         .balance_proof
@@ -268,13 +291,6 @@ pub fn validate_transfer_commitments(transfer: &StealthTransferStatement) -> Res
     }
 
     Ok(())
-}
-
-/// The checks [`CheckedStealthTransfer`] guarantees. Covenant predicates look claims up by partition, so the claim list
-/// is bounded here, before any predicate runs.
-fn check_structure(transfer: &StealthTransferStatement) -> Result<(), ResourceError> {
-    validate_transfer_commitments(transfer)?;
-    validate_covenant_claims(transfer)
 }
 
 fn check_revealed_amounts_and_balance_proof_presence(transfer: &StealthTransferStatement) -> Result<(), ResourceError> {

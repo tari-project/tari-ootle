@@ -1,8 +1,11 @@
 //  Copyright 2026 The Tari Project
 //  SPDX-License-Identifier: BSD-3-Clause
 
+import type { AuthGetMethodResponse } from "@tari-project/ootle-ts-bindings";
 import { describe, expect, it } from "vitest";
 import { resolveGuardedRouteView } from "./guardedRouteHelpers";
+
+const SAMPLE_AUTH_METHOD: AuthGetMethodResponse = { method: "webauthn" };
 
 describe("resolveGuardedRouteView", () => {
   it("returns error when auth method fetch fails even if authMethod is missing or hasToken is null", () => {
@@ -10,11 +13,11 @@ describe("resolveGuardedRouteView", () => {
       resolveGuardedRouteView({
         isLoading: false,
         authMethodsIsError: true,
-        hasAuthMethod: false,
+        authMethod: undefined,
         hasToken: null,
         loggedIn: false,
       }),
-    ).toBe("error");
+    ).toEqual({ view: "error" });
   });
 
   it("returns loading while auth method or initial token check is pending", () => {
@@ -22,42 +25,42 @@ describe("resolveGuardedRouteView", () => {
       resolveGuardedRouteView({
         isLoading: true,
         authMethodsIsError: false,
-        hasAuthMethod: false,
+        authMethod: undefined,
         hasToken: null,
         loggedIn: false,
       }),
-    ).toBe("loading");
+    ).toEqual({ view: "loading" });
 
     expect(
       resolveGuardedRouteView({
         isLoading: false,
         authMethodsIsError: false,
-        hasAuthMethod: true,
+        authMethod: SAMPLE_AUTH_METHOD,
         hasToken: null,
         loggedIn: false,
       }),
-    ).toBe("loading");
+    ).toEqual({ view: "loading" });
   });
 
-  it("returns auth when unauthenticated and render when authenticated", () => {
+  it("returns auth with narrowed authMethod when unauthenticated and render when authenticated", () => {
     expect(
       resolveGuardedRouteView({
         isLoading: false,
         authMethodsIsError: false,
-        hasAuthMethod: true,
+        authMethod: SAMPLE_AUTH_METHOD,
         hasToken: false,
         loggedIn: false,
       }),
-    ).toBe("auth");
+    ).toEqual({ view: "auth", authMethod: SAMPLE_AUTH_METHOD });
 
     expect(
       resolveGuardedRouteView({
         isLoading: false,
         authMethodsIsError: false,
-        hasAuthMethod: true,
+        authMethod: SAMPLE_AUTH_METHOD,
         hasToken: true,
         loggedIn: true,
       }),
-    ).toBe("render");
+    ).toEqual({ view: "render", authMethod: SAMPLE_AUTH_METHOD });
   });
 });

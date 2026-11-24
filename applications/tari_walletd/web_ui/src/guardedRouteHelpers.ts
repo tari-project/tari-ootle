@@ -1,25 +1,31 @@
 //  Copyright 2026 The Tari Project
 //  SPDX-License-Identifier: BSD-3-Clause
 
-export type GuardedRouteView = "error" | "loading" | "auth" | "render";
+import type { AuthGetMethodResponse } from "@tari-project/ootle-ts-bindings";
+
+export type GuardedRouteDecision =
+  | { view: "error" }
+  | { view: "loading" }
+  | { view: "auth"; authMethod: AuthGetMethodResponse }
+  | { view: "render"; authMethod: AuthGetMethodResponse };
 
 export interface GuardedRouteState {
   isLoading: boolean;
   authMethodsIsError: boolean;
-  hasAuthMethod: boolean;
+  authMethod: AuthGetMethodResponse | undefined;
   hasToken: boolean | null;
   loggedIn: boolean;
 }
 
-export function resolveGuardedRouteView(state: GuardedRouteState): GuardedRouteView {
+export function resolveGuardedRouteView(state: GuardedRouteState): GuardedRouteDecision {
   if (state.authMethodsIsError) {
-    return "error";
+    return { view: "error" };
   }
-  if (state.isLoading || !state.hasAuthMethod || state.hasToken === null) {
-    return "loading";
+  if (state.isLoading || !state.authMethod || state.hasToken === null) {
+    return { view: "loading" };
   }
   if (!state.hasToken || !state.loggedIn) {
-    return "auth";
+    return { view: "auth", authMethod: state.authMethod };
   }
-  return "render";
+  return { view: "render", authMethod: state.authMethod };
 }

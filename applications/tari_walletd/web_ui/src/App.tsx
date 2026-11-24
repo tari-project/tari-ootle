@@ -197,15 +197,14 @@ const GuardedRoute = ({ component: Component, redirect = "/", ...rest }: Guarded
       // the server-side refresh token cookie before falling back to the dialog.
       try {
         const response = await client.authRefresh();
-        if (cancelled) {
-          return;
-        }
         if (response.token) {
           console.log("AUTH: refresh succeeded");
           client.setToken(response.token);
-          setHasToken(true);
-          setLoggedIn(true);
-        } else {
+          if (!cancelled) {
+            setHasToken(true);
+            setLoggedIn(true);
+          }
+        } else if (!cancelled) {
           setHasToken(false);
         }
       } catch (e) {
@@ -252,26 +251,26 @@ const GuardedRoute = ({ component: Component, redirect = "/", ...rest }: Guarded
     setNeedsReauth(false);
   };
 
-  const view = resolveGuardedRouteView({
+  const decision = resolveGuardedRouteView({
     isLoading,
     authMethodsIsError,
-    hasAuthMethod: Boolean(authMethod),
+    authMethod,
     hasToken,
     loggedIn,
   });
 
-  if (view === "error") {
+  if (decision.view === "error") {
     console.error("Error fetching auth method:", authMethodsError);
     return <div>Error fetching authentication method: {authMethodsError?.message || "Unknown error"}</div>;
   }
 
-  if (view === "loading") {
+  if (decision.view === "loading") {
     return <Loading />;
   }
 
-  if (view === "auth") {
-    console.log(`AUTH: User not authenticated, showing auth dialog for ${authMethod!.method}`);
-    return <AuthDialog open={true} authMethod={authMethod!.method} onAuthenticated={handleOnAuthenticated} />;
+  if (decision.view === "auth") {
+    console.log(`AUTH: User not authenticated, showing auth dialog for ${decision.authMethod.method}`);
+    return <AuthDialog open={true} authMethod={decision.authMethod.method} onAuthenticated={handleOnAuthenticated} />;
   }
 
   return <Component {...rest} />;

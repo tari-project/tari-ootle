@@ -20,34 +20,45 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { Chip, Divider } from "@mui/material";
+import { Alert, Button, Chip, Divider } from "@mui/material";
 import Box from "@mui/material/Box";
 import { useTheme } from "@mui/material/styles";
 import Typography from "@mui/material/Typography";
 import { SettingsGetResponse } from "@tari-project/ootle-ts-bindings";
 import { settingsGet } from "@utils/json_rpc";
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { formatSettingsError, getNetworkColor, shouldApplySettingsResult } from "./generalSettingsHelpers";
 import IndexerSettings from "./IndexerSettings";
-
-const NETWORK_COLORS: Record<string, string> = {
-  mainnet: "#4caf50",
-  stagenet: "#9c27b0",
-  nextnet: "#2196f3",
-  localnet: "#ff9800",
-  igor: "#00bcd4",
-  esmeralda: "#009688",
-};
 
 function GeneralSettings() {
   const theme = useTheme();
   const [settings, setSettings] = useState<SettingsGetResponse | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const mountedRef = useRef(false);
+  const requestIdRef = useRef(0);
 
   const loadSettings = useCallback(() => {
-    settingsGet().then(setSettings);
+    const requestId = ++requestIdRef.current;
+    setLoadError(null);
+    settingsGet()
+      .then((res) => {
+        if (shouldApplySettingsResult(requestId, requestIdRef.current, mountedRef.current)) {
+          setSettings(res);
+        }
+      })
+      .catch((err) => {
+        if (shouldApplySettingsResult(requestId, requestIdRef.current, mountedRef.current)) {
+          setLoadError(formatSettingsError(err));
+        }
+      });
   }, []);
 
   useEffect(() => {
+    mountedRef.current = true;
     loadSettings();
+    return () => {
+      mountedRef.current = false;
+    };
   }, [loadSettings]);
 
   const items = [
@@ -68,9 +79,9 @@ function GeneralSettings() {
     },
   ];
 
-  const renderedItems = items.map((item, i) => {
+  const renderedItems = items.map((item) => {
     return (
-      <React.Fragment key={i}>
+      <React.Fragment key={item.label}>
         <Typography>{item.label}</Typography>
         <Box>{item.content}</Box>
         <Divider />
@@ -87,13 +98,25 @@ function GeneralSettings() {
         paddingTop: theme.spacing(3),
       }}
     >
+      {loadError && (
+        <Alert
+          severity="error"
+          action={
+            <Button color="inherit" size="small" onClick={loadSettings}>
+              Retry
+            </Button>
+          }
+        >
+          {loadError}
+        </Alert>
+      )}
       {renderedItems}
     </Box>
   );
 }
 
 function NetworkSettings({ network }: { network: string }) {
-  const color = NETWORK_COLORS[network] ?? "#757575";
+  const color = getNetworkColor(network);
 
   return (
     <Chip

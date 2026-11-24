@@ -22,11 +22,12 @@
 
 import { refreshAccountsBalances, useAccountsGetDefault } from "@api/hooks/useAccounts";
 import queryClient from "@api/queryClient";
-import Error from "@components/Error";
 import Loading from "@components/Loading";
 import PageHeader from "@components/PageHeader";
 import { InnerHeading, StyledPaper } from "@components/StyledComponents";
 import { Refresh } from "@mui/icons-material";
+import Alert from "@mui/material/Alert";
+import Button from "@mui/material/Button";
 import Grid from "@mui/material/Grid";
 import IconButton from "@mui/material/IconButton";
 import { useTheme } from "@mui/material/styles";
@@ -44,7 +45,7 @@ function MyAssets() {
   const theme = useTheme();
 
   const account = useAccountStore((s) => s.account);
-  const { data: defaultAccount, error } = useAccountsGetDefault(!account);
+  const { data: defaultAccount, error, refetch } = useAccountsGetDefault(!account);
   const refreshBalances = refreshAccountsBalances();
 
   useEffect(() => {
@@ -54,7 +55,7 @@ function MyAssets() {
     }
   }, [account, defaultAccount]);
 
-  const view = resolveMyAssetsView({ hasAccount: Boolean(account), error });
+  const view = resolveMyAssetsView({ account, error });
 
   if (view.kind === "redirect-onboarding") {
     return <Navigate replace to={"/onboarding"} />;
@@ -63,16 +64,28 @@ function MyAssets() {
   if (view.kind === "error") {
     return (
       <Grid size={12}>
-        <Error message={view.message} />
+        <Alert
+          severity="error"
+          variant="standard"
+          action={
+            <Button color="inherit" size="small" onClick={() => void refetch()}>
+              Retry
+            </Button>
+          }
+        >
+          {view.message}
+        </Alert>
       </Grid>
     );
   }
 
-  if (view.kind === "loading" || !account) {
+  if (view.kind === "loading") {
     return <Loading />;
   }
+
+  const activeAccount = view.account;
   const handleRefreshClicked = () => {
-    refreshBalances.mutate(substateIdToString(account.component_address));
+    refreshBalances.mutate(substateIdToString(activeAccount.component_address));
     queryClient.invalidateQueries({
       predicate: (query) => {
         const key = query.queryKey[0];
@@ -108,13 +121,13 @@ function MyAssets() {
               <Refresh />
             </IconButton>
           </InnerHeading>
-          <Assets account={account} />
+          <Assets account={activeAccount} />
         </StyledPaper>
       </Grid>
       <Grid size={12}>
         <StyledPaper>
           <InnerHeading>Transactions</InnerHeading>
-          <Transactions account={account} />
+          <Transactions account={activeAccount} />
         </StyledPaper>
       </Grid>
     </>

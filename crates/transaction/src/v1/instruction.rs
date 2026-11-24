@@ -9,8 +9,10 @@ use tari_template_lib_types::{
     Amount,
     FunctionName,
     OwnerRule,
+    ResourceAddress,
     TemplateAddress,
     TemplateMetadataHash,
+    UtxoAddress,
     ValidatorFeePoolAddress,
     access_rules::ComponentAccessRules,
     crypto::RistrettoPublicKeyBytes,
@@ -464,6 +466,43 @@ impl Instruction {
             Self::PutLastInstructionOutputOnWorkspace { key } => Some(*key),
             Self::TakeFromBucket { output_bucket, .. } => Some(*output_bucket),
             Self::AllocateAddress { workspace_id, .. } => Some(*workspace_id),
+            _ => None,
+        }
+    }
+
+    /// The UTXOs a `StealthTransfer` of a resource given by address spends.
+    pub fn stealth_input_utxos(&self) -> impl Iterator<Item = UtxoAddress> + '_ {
+        self.addressed_stealth_transfer()
+            .into_iter()
+            .flat_map(|(resource_address, statement)| {
+                statement
+                    .inputs_statement
+                    .inputs
+                    .iter()
+                    .map(move |input| UtxoAddress::new(*resource_address, input.commitment.into()))
+            })
+    }
+
+    /// The UTXOs a `StealthTransfer` of a resource given by address creates.
+    pub fn stealth_output_utxos(&self) -> impl Iterator<Item = UtxoAddress> + '_ {
+        self.addressed_stealth_transfer()
+            .into_iter()
+            .flat_map(|(resource_address, statement)| {
+                statement
+                    .outputs_statement
+                    .outputs
+                    .iter()
+                    .map(move |output| UtxoAddress::new(*resource_address, output.commitment().into()))
+            })
+    }
+
+    fn addressed_stealth_transfer(&self) -> Option<(&ResourceAddress, &StealthTransferStatement)> {
+        match self {
+            Self::StealthTransfer {
+                resource_address_ref: ResourceAddressRef::Address(resource_address),
+                statement,
+                ..
+            } => Some((resource_address, statement)),
             _ => None,
         }
     }

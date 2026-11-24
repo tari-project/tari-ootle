@@ -10,7 +10,7 @@ use tari_template_lib::types::{
     crypto::{BalanceProofSignature, PedersenCommitmentBytes},
 };
 
-use crate::crypto::{commit_amount_unchecked, messages, try_decode_to_signature};
+use crate::crypto::{commit_amount, messages, try_decode_to_signature};
 
 const LOG_TARGET: &str = "tari::ootle::engine::crypto::covenant";
 
@@ -46,7 +46,7 @@ pub fn validate_covenant_balance_proof(
         return false;
     };
 
-    let revealed_commit = commit_amount_unchecked(&RistrettoSecretKey::default(), revealed_amount);
+    let revealed_commit = commit_amount(&RistrettoSecretKey::default(), revealed_amount);
 
     let public_excess = agg_inputs - &agg_outputs - revealed_commit.as_public_key();
 

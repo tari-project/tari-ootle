@@ -6,7 +6,7 @@ use tari_template_lib::types::{Amount, confidential::ConfidentialWithdrawProof};
 
 use super::{ValidatedConfidentialProof, validate_confidential_statement};
 use crate::{
-    crypto::{ValidateOutputBody, commit_amount_unchecked, messages, try_decode_to_signature},
+    crypto::{ValidateOutputBody, commit_amount, messages, try_decode_to_signature},
     resource_container::ResourceError,
 };
 
@@ -106,9 +106,9 @@ fn compute_public_excess<'a, I: IntoIterator<Item = &'a PedersenCommitment>>(
 ) -> RistrettoPublicKey {
     // Revealed amounts are public values, so they commit over the full `Amount` range.
     // 0.G + v.H - users may convert revealed funds to confidential outputs so this must be part of the balance proof
-    let revealed_input_commitment = commit_amount_unchecked(&Default::default(), input_revealed_amount);
+    let revealed_input_commitment = commit_amount(&Default::default(), input_revealed_amount);
     // 0.G + v.H
-    let revealed_output_commitment = commit_amount_unchecked(&Default::default(), total_output_revealed_amount);
+    let revealed_output_commitment = commit_amount(&Default::default(), total_output_revealed_amount);
 
     // k.G + v.H or 0.G if None
     let output_commitment = validated_proof

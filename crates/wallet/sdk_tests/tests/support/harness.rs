@@ -13,7 +13,7 @@ use tari_crypto::{
 use tari_engine_types::{
     Utxo,
     UtxoOutput,
-    crypto::{OutputBody, commit_amount},
+    crypto::{OutputBody, commit_range_provable_amount},
     encoded::Encoded,
     resource::Resource,
     substate::{Substate, SubstateId, SubstateValue},
@@ -217,7 +217,7 @@ impl<TNetwork: WalletNetworkInterface> TestWithNetwork<TNetwork> {
         let amount = amount.into();
 
         let outputs_api = self.sdk.confidential_outputs_api();
-        let commitment = commit_amount(&Default::default(), amount)
+        let commitment = commit_range_provable_amount(&Default::default(), amount)
             .expect("Cannot add unspent output with negative amount")
             .to_byte_type();
         outputs_api
@@ -281,7 +281,9 @@ impl<TNetwork: WalletNetworkInterface> TestWithNetwork<TNetwork> {
             resource_address,
         );
         let mask = random_key();
-        let commitment = commit_amount(&mask, amount.into()).unwrap().to_byte_type();
+        let commitment = commit_range_provable_amount(&mask, amount.into())
+            .unwrap()
+            .to_byte_type();
         let encrypted_data = sdk
             .stealth_crypto_api()
             .encrypt_value_and_mask(amount, &mask, &view_public_key, nonce_secret, None)

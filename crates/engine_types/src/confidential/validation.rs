@@ -42,6 +42,32 @@ pub fn statement_native_points(proof: &ConfidentialOutputStatement, has_view_key
 /// binds every commitment to a value of at least this.
 pub const MIN_CONFIDENTIAL_OUTPUT_VALUE_PROMISE: u64 = 1;
 
+/// Validates that a confidential output statement does not reuse the same commitment for both its output and change.
+pub fn validate_confidential_statement_commitments(proof: &ConfidentialOutputStatement) -> Result<(), ResourceError> {
+    if let (Some(output), Some(change)) = (&proof.output, &proof.change_statement) &&
+        output.commitment == change.commitment
+    {
+        return Err(ResourceError::InvalidConfidentialProof {
+            details: "Confidential output and change commitments cannot be identical".to_string(),
+        });
+    }
+
+    Ok(())
+}
+
+/// Validates the pre-crypto structural invariants of a confidential mint statement.
+pub fn validate_confidential_mint_statement(proof: &ConfidentialOutputStatement) -> Result<(), ResourceError> {
+    if proof.change_statement.is_some() {
+        return Err(ResourceError::InvalidConfidentialMintWithChange);
+    }
+    if !proof.change_revealed_amount.is_zero() {
+        return Err(ResourceError::InvalidConfidentialProof {
+            details: "Change revealed amount must be zero for minting".to_string(),
+        });
+    }
+    validate_confidential_statement_commitments(proof)
+}
+
 pub fn validate_confidential_statement(
     proof: &ConfidentialOutputStatement,
     view_key: Option<&RistrettoPublicKey>,
@@ -60,13 +86,7 @@ pub fn validate_confidential_statement(
         });
     }
 
-    if let (Some(output), Some(change)) = (&proof.output, &proof.change_statement) &&
-        output.commitment == change.commitment
-    {
-        return Err(ResourceError::InvalidConfidentialProof {
-            details: "Confidential output and change commitments cannot be identical".to_string(),
-        });
-    }
+    validate_confidential_statement_commitments(proof)?;
 
     let decoded_output = proof
         .output

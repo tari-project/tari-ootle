@@ -128,14 +128,7 @@ impl ResourceContainer {
         proof: ConfidentialOutputStatement,
         view_key: Option<&RistrettoPublicKey>,
     ) -> Result<(Self, Vec<(PedersenCommitmentBytes, OutputBody)>), ResourceError> {
-        if proof.change_statement.is_some() {
-            return Err(ResourceError::InvalidConfidentialMintWithChange);
-        }
-        if !proof.change_revealed_amount.is_zero() {
-            return Err(ResourceError::InvalidConfidentialProof {
-                details: "Change revealed amount must be zero for minting".to_string(),
-            });
-        }
+        confidential::validate_confidential_mint_statement(&proof)?;
         let validated_proof = confidential::validate_confidential_statement(&proof, view_key)?;
         assert!(
             validated_proof.change_output.is_none(),
@@ -495,21 +488,20 @@ impl ResourceContainer {
                 revealed_amount,
                 locked_commitments,
                 locked_revealed_amount,
-                ..
             } => {
                 let address = *address;
+                confidential::validate_confidential_withdraw_commitments(&proof)?;
+
                 let mut inputs = Vec::with_capacity(proof.inputs.len());
                 let mut spent_commitments = Vec::with_capacity(proof.inputs.len());
-                let mut seen_inputs = BTreeSet::new();
                 for input in &proof.inputs {
                     let commitment = PedersenCommitment::from_canonical_bytes(input.as_bytes()).map_err(|_| {
                         ResourceError::InvalidConfidentialProof {
                             details: "Malformed input commitment".to_string(),
                         }
                     })?;
-                    // Set membership is the spend authorization: only commitments the vault owns can be spent,
-                    // and the same commitment cannot be spent twice in one proof.
-                    if commitments.contains(input) && seen_inputs.insert(*input) {
+                    // Set membership is the spend authorization: only commitments the vault owns can be spent.
+                    if commitments.contains(input) {
                         inputs.push(commitment);
                         spent_commitments.push(*input);
                     } else {
@@ -522,15 +514,13 @@ impl ResourceContainer {
                     }
                 }
 
-                let validated_proof = confidential::validate_confidential_withdraw(&inputs, view_key, proof)?;
-
-                // Withdraw revealed amount
-                if *revealed_amount < validated_proof.input_revealed_amount {
+                // Check container balances and commitment collisions before running proof verification.
+                if *revealed_amount < proof.input_revealed_amount {
                     return Err(ResourceError::InsufficientBalance {
                         details: format!(
                             "Bucket contained insufficient funds with withdrawing revealed amount. Required: {}, \
                              Available: {}",
-                            validated_proof.input_revealed_amount, revealed_amount
+                            proof.input_revealed_amount, revealed_amount
                         ),
                     });
                 }
@@ -538,28 +528,28 @@ impl ResourceContainer {
                 // Revealed change always returns to the container, so the balance proof — not a sufficiency check —
                 // is what constrains it. Only the sum can fail here.
                 let new_revealed_amount = checked_deposit(
-                    *revealed_amount - validated_proof.input_revealed_amount,
+                    *revealed_amount - proof.input_revealed_amount,
                     *locked_revealed_amount,
-                    validated_proof.change_revealed_amount,
+                    proof.output_proof.change_revealed_amount,
                     "withdraw_confidential change",
                 )?;
 
-                if let Some(ref change) = validated_proof.change_output {
-                    let change_commitment = change.commitment.to_byte_type();
-                    if commitments.contains(&change_commitment) || locked_commitments.contains(&change_commitment) {
-                        return Err(ResourceError::InvariantError(
-                            "Confidential withdraw contained duplicate commitment in change commitment".to_string(),
-                        ));
-                    }
+                if let Some(ref change) = proof.output_proof.change_statement &&
+                    (commitments.contains(&change.commitment) || locked_commitments.contains(&change.commitment))
+                {
+                    return Err(ResourceError::InvariantError(
+                        "Confidential withdraw contained duplicate commitment in change commitment".to_string(),
+                    ));
                 }
-                if let Some(ref output) = validated_proof.output {
-                    let output_commitment = output.commitment.to_byte_type();
-                    if commitments.contains(&output_commitment) || locked_commitments.contains(&output_commitment) {
-                        return Err(ResourceError::InvariantError(
-                            "Confidential withdraw contained duplicate commitment in output commitment".to_string(),
-                        ));
-                    }
+                if let Some(ref output) = proof.output_proof.output &&
+                    (commitments.contains(&output.commitment) || locked_commitments.contains(&output.commitment))
+                {
+                    return Err(ResourceError::InvariantError(
+                        "Confidential withdraw contained duplicate commitment in output commitment".to_string(),
+                    ));
                 }
+
+                let validated_proof = confidential::validate_confidential_withdraw(&inputs, view_key, proof)?;
 
                 for spent in &spent_commitments {
                     commitments.remove(spent);

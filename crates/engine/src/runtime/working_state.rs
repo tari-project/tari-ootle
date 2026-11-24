@@ -892,13 +892,62 @@ impl<TStore: StateReader> WorkingState<TStore> {
         Ok(())
     }
 
-    /// Enforces the confidential-withdraw limits and counts this withdraw against the per-transaction totals. Must be
-    /// called before the withdraw's proof crypto runs, so an over-limit transaction is rejected before the unmetered
-    /// verification and substate-access work is done.
+    /// Enforces the confidential-withdraw limits, validates commitment uniqueness and statement invariants, and counts
+    /// this withdraw against the per-transaction totals. Must be called before the withdraw's authorization hooks,
+    /// metering, and proof crypto run, so an over-limit or malformed withdraw is rejected without advancing totals or
+    /// doing expensive work.
     pub fn admit_confidential_withdraw(&mut self, proof: &ConfidentialWithdrawProof) -> Result<(), RuntimeError> {
         check_confidential_withdraw_limits(&limits::CONFIDENTIAL_LIMITS, proof)?;
+        tari_engine_types::confidential::validate_confidential_withdraw_commitments(proof)?;
         self.confidential_totals.admit(&limits::CONFIDENTIAL_LIMITS, proof)?;
         Ok(())
+    }
+
+    /// Rejects any confidential output or change commitment in `statement` whose [`ConfidentialOutput`] substate
+    /// already exists on `resource_address`, before proof verification or native execution charging runs.
+    pub fn check_confidential_outputs_unused(
+        &self,
+        resource_address: ResourceAddress,
+        statement: &tari_template_lib::types::confidential::ConfidentialOutputStatement,
+    ) -> Result<(), RuntimeError> {
+        for output in statement.output.iter().chain(&statement.change_statement) {
+            let address =
+                SubstateId::ConfidentialOutput(ConfidentialOutputAddress::new(resource_address, output.commitment));
+            if self.substate_exists(&address)? {
+                return Err(RuntimeError::SubstateAlreadyExists { address });
+            }
+        }
+        Ok(())
+    }
+
+    /// Validates the pre-crypto invariants of a confidential mint against `resource_address`, ensuring statement
+    /// shape, required supply value-proof entries, and output commitment freshness hold before authorization hooks,
+    /// native charging, or range-proof verification run.
+    pub fn admit_confidential_mint(
+        &self,
+        resource_address: ResourceAddress,
+        mint_arg: &MintArg,
+        is_total_supply_tracking_enabled: bool,
+    ) -> Result<(), RuntimeError> {
+        let MintArg::Confidential {
+            statement,
+            value_proofs,
+        } = mint_arg
+        else {
+            return Ok(());
+        };
+
+        tari_engine_types::confidential::validate_confidential_mint_statement(statement)?;
+        if is_total_supply_tracking_enabled &&
+            let Some(output) = statement.output.as_ref() &&
+            !value_proofs.contains_key(&output.commitment)
+        {
+            return Err(RuntimeError::MissingValueProofForCommitment {
+                resource_address,
+                commitment: output.commitment,
+            });
+        }
+        self.check_confidential_outputs_unused(resource_address, statement)
     }
 
     /// Decreases the total supply of the locked resource, rejecting the transaction rather than wrapping if the
@@ -1119,6 +1168,17 @@ impl<TStore: StateReader> WorkingState<TStore> {
                 statement,
                 value_proofs,
             } => {
+                self.check_confidential_outputs_unused(resource_address, &statement)?;
+                if is_total_supply_tracking_enabled &&
+                    let Some(output) = statement.output.as_ref() &&
+                    !value_proofs.contains_key(&output.commitment)
+                {
+                    return Err(RuntimeError::MissingValueProofForCommitment {
+                        resource_address,
+                        commitment: output.commitment,
+                    });
+                }
+
                 let resource = self.get_resource(locked_resource)?;
                 debug!(
                     target: LOG_TARGET,

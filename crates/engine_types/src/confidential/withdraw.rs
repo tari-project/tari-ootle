@@ -1,10 +1,12 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use std::collections::BTreeSet;
+
 use tari_crypto::ristretto::{RistrettoPublicKey, pedersen::PedersenCommitment};
 use tari_template_lib::types::{Amount, confidential::ConfidentialWithdrawProof};
 
-use super::{ValidatedConfidentialProof, validate_confidential_statement};
+use super::{ValidatedConfidentialProof, validate_confidential_statement, validate_confidential_statement_commitments};
 use crate::{
     crypto::{ValidateOutputBody, commit_amount_unchecked, messages, try_decode_to_signature},
     resource_container::ResourceError,
@@ -132,11 +134,42 @@ fn compute_public_excess<'a, I: IntoIterator<Item = &'a PedersenCommitment>>(
             .unwrap_or(&RistrettoPublicKey::default())
 }
 
+/// Validates the commitment uniqueness invariants of `proof` before authorization hooks, metering, or proof
+/// verification run.
+pub fn validate_confidential_withdraw_commitments(proof: &ConfidentialWithdrawProof) -> Result<(), ResourceError> {
+    let mut seen_inputs = BTreeSet::new();
+    for input in &proof.inputs {
+        if !seen_inputs.insert(*input) {
+            return Err(ResourceError::InvalidConfidentialProof {
+                details: "Duplicate input commitment in confidential withdraw".to_string(),
+            });
+        }
+    }
+
+    if let Some(ref change) = proof.output_proof.change_statement &&
+        seen_inputs.contains(&change.commitment)
+    {
+        return Err(ResourceError::InvariantError(
+            "Confidential withdraw contained duplicate commitment in change commitment".to_string(),
+        ));
+    }
+    if let Some(ref output) = proof.output_proof.output &&
+        seen_inputs.contains(&output.commitment)
+    {
+        return Err(ResourceError::InvariantError(
+            "Confidential withdraw contained duplicate commitment in output commitment".to_string(),
+        ));
+    }
+
+    validate_confidential_statement_commitments(&proof.output_proof)
+}
+
 pub(crate) fn validate_confidential_withdraw<'a, I: IntoIterator<Item = &'a PedersenCommitment>>(
     inputs: I,
     view_key: Option<&RistrettoPublicKey>,
     withdraw_proof: ConfidentialWithdrawProof,
 ) -> Result<ValidatedConfidentialWithdrawProof, ResourceError> {
+    validate_confidential_withdraw_commitments(&withdraw_proof)?;
     let input_revealed_amount = withdraw_proof.input_revealed_amount;
     let total_output_revealed_amount = check_revealed_amounts(&withdraw_proof)?;
 
@@ -346,5 +379,52 @@ mod tests {
         assert_eq!(validated.input_revealed_amount, input_revealed_amount);
         assert_eq!(validated.output_revealed_amount, output_revealed_amount);
         assert_eq!(validated.change_revealed_amount, Amount::zero());
+    }
+
+    #[test]
+    fn validate_confidential_withdraw_commitments_rejects_duplicate_and_colliding_commitments() {
+        use tari_template_lib::types::crypto::PedersenCommitmentBytes;
+
+        let unspent = |byte: u8| UnspentOutput {
+            commitment: PedersenCommitmentBytes::from_bytes(&[byte; 32]).unwrap(),
+            sender_public_nonce: RistrettoPublicKeyBytes::zero(),
+            encrypted_data: EncryptedData::empty(),
+            minimum_value_promise: 1,
+            viewable_balance_proof: None,
+        };
+
+        let commit_a = PedersenCommitmentBytes::from_bytes(&[1u8; 32]).unwrap();
+        let mut dup_inputs = ConfidentialWithdrawProof::revealed_withdraw(10u64);
+        dup_inputs.inputs = vec![commit_a, commit_a];
+        assert!(matches!(
+            validate_confidential_withdraw_commitments(&dup_inputs),
+            Err(ResourceError::InvalidConfidentialProof { details })
+                if details.contains("Duplicate input commitment")
+        ));
+
+        let mut output_collides_input = ConfidentialWithdrawProof::revealed_withdraw(10u64);
+        output_collides_input.inputs = vec![commit_a];
+        output_collides_input.output_proof.output = Some(unspent(1));
+        assert!(matches!(
+            validate_confidential_withdraw_commitments(&output_collides_input),
+            Err(ResourceError::InvariantError(msg)) if msg.contains("output commitment")
+        ));
+
+        let mut change_collides_input = ConfidentialWithdrawProof::revealed_withdraw(10u64);
+        change_collides_input.inputs = vec![commit_a];
+        change_collides_input.output_proof.change_statement = Some(unspent(1));
+        assert!(matches!(
+            validate_confidential_withdraw_commitments(&change_collides_input),
+            Err(ResourceError::InvariantError(msg)) if msg.contains("change commitment")
+        ));
+
+        let mut dup_outputs = ConfidentialWithdrawProof::revealed_withdraw(10u64);
+        dup_outputs.output_proof.output = Some(unspent(2));
+        dup_outputs.output_proof.change_statement = Some(unspent(2));
+        assert!(matches!(
+            validate_confidential_withdraw_commitments(&dup_outputs),
+            Err(ResourceError::InvalidConfidentialProof { details })
+                if details.contains("cannot be identical")
+        ));
     }
 }

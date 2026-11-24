@@ -1997,9 +1997,13 @@ where
                     self.check_resource_auth_hook("CreateResourceArg", hook)?;
                 }
 
-                // Charge the initial mint's native verification cost against the payment-funded
-                // allowance before its proof crypto runs.
+                // Validate confidential mint statement invariants and charge the initial mint's
+                // native verification cost against the payment-funded allowance before its proof
+                // crypto runs.
                 if let Some(mint_arg) = arg.mint_arg.as_ref() {
+                    if let MintArg::Confidential { statement, .. } = mint_arg {
+                        tari_engine_types::confidential::validate_confidential_mint_statement(statement)?;
+                    }
                     self.charge_confidential_mint(
                         mint_arg,
                         arg.view_key.is_some(),
@@ -2128,6 +2132,7 @@ where
                         let tracks_supply = resource.is_supply_tracking_enabled();
                         let auth_hook = resource.auth_hook().cloned();
                         state_mut.unlock_substate(resource_lock)?;
+                        state_mut.admit_confidential_mint(resource_address, &mint_resource.mint_arg, tracks_supply)?;
                         Ok::<_, RuntimeError>((auth_hook, auth_caller, has_view_key, tracks_supply))
                     })?;
 
@@ -2911,6 +2916,7 @@ where
                 let maybe_view_key =
                     if let VaultWithdrawArg::Confidential { proof } = &arg {
                         let view_key_bytes = self.tracker.write_with(|state_mut| {
+                            state_mut.check_confidential_outputs_unused(resource_address, &proof.output_proof)?;
                             let resource_lock = state_mut.read_lock_substate(SubstateId::Resource(resource_address))?;
                             let view_key_bytes = state_mut.get_resource(&resource_lock)?.view_key().copied();
                             state_mut.unlock_substate(resource_lock)?;
@@ -3365,7 +3371,9 @@ where
                 let has_view_key = self.tracker.write_with(|state| {
                     state.admit_confidential_withdraw(&proof)?;
                     let bucket = state.get_bucket(bucket_id)?;
-                    let resource_lock = state.read_lock_substate((*bucket.resource_address()).into())?;
+                    let resource_address = *bucket.resource_address();
+                    state.check_confidential_outputs_unused(resource_address, &proof.output_proof)?;
+                    let resource_lock = state.read_lock_substate(resource_address.into())?;
                     let has_view_key = state.get_resource(&resource_lock)?.view_key().is_some();
                     state.unlock_substate(resource_lock)?;
                     Ok::<_, RuntimeError>(has_view_key)
@@ -5315,6 +5323,237 @@ mod tests {
                 ArgumentValidationError::MaxConfidentialWithdrawsPerTransactionExceeded { .. }
             ))
         ));
+    }
+
+    #[test]
+    fn confidential_withdraw_and_take_reject_duplicate_commitments_without_advancing_totals() {
+        use tari_template_lib::types::{EncryptedData, stealth::UnspentOutput};
+
+        let unspent = |byte: u8| UnspentOutput {
+            commitment: PedersenCommitmentBytes::from_bytes(&[byte; 32]).unwrap(),
+            sender_public_nonce: RistrettoPublicKeyBytes::zero(),
+            encrypted_data: EncryptedData::empty(),
+            minimum_value_promise: 1,
+            viewable_balance_proof: None,
+        };
+
+        let commit_a = PedersenCommitmentBytes::from_bytes(&[1u8; 32]).unwrap();
+        let valid_proof = ConfidentialWithdrawProof::revealed_withdraw(Amount::new(1));
+
+        let mut dup_inputs = valid_proof.clone();
+        dup_inputs.inputs = vec![commit_a, commit_a];
+
+        let mut input_output_collision = valid_proof.clone();
+        input_output_collision.inputs = vec![commit_a];
+        input_output_collision.output_proof.output = Some(unspent(1));
+
+        let mut output_change_collision = valid_proof.clone();
+        output_change_collision.output_proof.output = Some(unspent(2));
+        output_change_collision.output_proof.change_statement = Some(unspent(2));
+
+        let runtime = runtime_with_blobs(Blobs::default());
+        let vault_id = tari_template_lib::types::VaultId::new([1u8; 32].into());
+        let bucket_id = BucketId::from(1u32);
+        runtime.tracker.write_with(|state| {
+            state
+                .current_call_scope_mut()
+                .unwrap()
+                .add_substate_to_scope(vault_id.into())
+                .unwrap();
+        });
+
+        for bad_proof in [&dup_inputs, &input_output_collision, &output_change_collision] {
+            let withdraw_args = EngineArgs::from(vec![
+                tari_bor::encode(&VaultWithdrawArg::Confidential {
+                    proof: Box::new(bad_proof.clone()),
+                })
+                .unwrap()
+                .into(),
+            ]);
+            assert!(matches!(
+                runtime.vault_invoke(VaultRef::Ref(vault_id), VaultAction::Withdraw, withdraw_args),
+                Err(RuntimeError::ResourceError(
+                    ResourceError::InvalidConfidentialProof { .. } | ResourceError::InvariantError(_)
+                ))
+            ));
+
+            let take_args = EngineArgs::from(vec![tari_bor::encode(bad_proof).unwrap().into()]);
+            assert!(matches!(
+                runtime.bucket_invoke(BucketRef::Ref(bucket_id), BucketAction::TakeConfidential, take_args),
+                Err(RuntimeError::ResourceError(
+                    ResourceError::InvalidConfidentialProof { .. } | ResourceError::InvariantError(_)
+                ))
+            ));
+        }
+
+        // Rejected proofs must not consume the per-transaction withdraw counter.
+        runtime.tracker.write_with(|state| {
+            for _ in 0..limits::CONFIDENTIAL_LIMITS.max_withdraws_per_transaction {
+                state.admit_confidential_withdraw(&valid_proof).unwrap();
+            }
+        });
+    }
+
+    #[test]
+    fn confidential_withdraw_and_take_reject_existing_commitment_before_native_charging() {
+        use tari_engine_types::{
+            confidential::withdraw_native_points,
+            confidential_output::ConfidentialOutput,
+            crypto::OutputBody,
+            limits::FREE_COMPUTE_GRACE_POINTS,
+        };
+        use tari_template_lib::types::{EncryptedData, stealth::UnspentOutput};
+
+        let (runtime, vault_id, bucket_id) = runtime_with_malformed_view_key_resource();
+        let resource_address = ResourceAddress::new([2u8; 32].into());
+        let occupied_commitment = PedersenCommitmentBytes::from_bytes(&[9u8; 32]).unwrap();
+        let occupied_addr = ConfidentialOutputAddress::new(resource_address, occupied_commitment);
+        let occupied_id = SubstateId::ConfidentialOutput(occupied_addr);
+
+        runtime.tracker.write_with(|state| {
+            state
+                .new_substate(
+                    occupied_id.clone(),
+                    ConfidentialOutput::new(OutputBody {
+                        public_nonce: RistrettoPublicKeyBytes::zero(),
+                        encrypted_data: EncryptedData::empty(),
+                        minimum_value_promise: 1,
+                        viewable_balance: None,
+                    }),
+                )
+                .unwrap();
+        });
+
+        let occupied_unspent = UnspentOutput {
+            commitment: occupied_commitment,
+            sender_public_nonce: RistrettoPublicKeyBytes::zero(),
+            encrypted_data: EncryptedData::empty(),
+            minimum_value_promise: 1,
+            viewable_balance_proof: None,
+        };
+
+        let mut proof = ConfidentialWithdrawProof::revealed_withdraw(Amount::new(1));
+        proof.output_proof.output = Some(occupied_unspent);
+        let withdraw_cost = withdraw_native_points(&proof, true);
+        // Leave the tracker 1 point short so reaching `charge_native_execution` would return
+        // `FeeIntentComputeExceeded` instead of `SubstateAlreadyExists`.
+        runtime
+            .tracker
+            .charge_native_execution(FREE_COMPUTE_GRACE_POINTS - withdraw_cost + 1)
+            .unwrap();
+
+        let withdraw_args = EngineArgs::from(vec![
+            tari_bor::encode(&VaultWithdrawArg::Confidential {
+                proof: Box::new(proof.clone()),
+            })
+            .unwrap()
+            .into(),
+        ]);
+        let err = runtime
+            .vault_invoke(VaultRef::Ref(vault_id), VaultAction::Withdraw, withdraw_args)
+            .unwrap_err();
+        assert!(
+            matches!(err, RuntimeError::SubstateAlreadyExists { ref address } if *address == occupied_id),
+            "expected SubstateAlreadyExists before native charging, got {err:?}"
+        );
+
+        let take_args = EngineArgs::from(vec![tari_bor::encode(&proof).unwrap().into()]);
+        let err = runtime
+            .bucket_invoke(BucketRef::Ref(bucket_id), BucketAction::TakeConfidential, take_args)
+            .unwrap_err();
+        assert!(
+            matches!(err, RuntimeError::SubstateAlreadyExists { ref address } if *address == occupied_id),
+            "expected SubstateAlreadyExists before native charging, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn confidential_mint_rejects_existing_commitment_before_native_charging() {
+        use tari_engine_types::{
+            confidential::statement_native_points,
+            confidential_output::ConfidentialOutput,
+            crypto::OutputBody,
+            limits::FREE_COMPUTE_GRACE_POINTS,
+        };
+        use tari_template_lib::types::{
+            EncryptedData,
+            confidential::ConfidentialOutputStatement,
+            stealth::UnspentOutput,
+        };
+
+        let (runtime, _, _) = runtime_with_malformed_view_key_resource();
+        let occupied_commitment = PedersenCommitmentBytes::from_bytes(&[9u8; 32]).unwrap();
+        let mintable_resource_address = ResourceAddress::new([4u8; 32].into());
+        let mint_occupied_id = SubstateId::ConfidentialOutput(ConfidentialOutputAddress::new(
+            mintable_resource_address,
+            occupied_commitment,
+        ));
+        runtime.tracker.write_with(|state| {
+            state
+                .new_substate(
+                    mintable_resource_address,
+                    tari_engine_types::resource::Resource::new(
+                        ResourceType::Confidential,
+                        SubstateOwnerRule::None,
+                        ResourceAccessRules::new().mintable(AccessRule::AllowAll, AccessRule::DenyAll),
+                        Metadata::new(),
+                        Some(RistrettoPublicKeyBytes::from_bytes(&[0xff; 32]).unwrap()),
+                        None,
+                        0,
+                        false,
+                    ),
+                )
+                .unwrap();
+            state
+                .new_substate(
+                    mint_occupied_id.clone(),
+                    ConfidentialOutput::new(OutputBody {
+                        public_nonce: RistrettoPublicKeyBytes::zero(),
+                        encrypted_data: EncryptedData::empty(),
+                        minimum_value_promise: 1,
+                        viewable_balance: None,
+                    }),
+                )
+                .unwrap();
+        });
+
+        let statement = ConfidentialOutputStatement {
+            output: Some(UnspentOutput {
+                commitment: occupied_commitment,
+                sender_public_nonce: RistrettoPublicKeyBytes::zero(),
+                encrypted_data: EncryptedData::empty(),
+                minimum_value_promise: 1,
+                viewable_balance_proof: None,
+            }),
+            change_statement: None,
+            range_proof: tari_template_lib::types::crypto::RangeProofBytes::empty(),
+            output_revealed_amount: Amount::ZERO,
+            change_revealed_amount: Amount::ZERO,
+        };
+        let mint_cost = statement_native_points(&statement, true);
+        let mint_arg = MintArg::Confidential {
+            statement: Box::new(statement),
+            value_proofs: Default::default(),
+        };
+        // Leave the tracker 1 point short of `mint_cost` so reaching `charge_confidential_mint`
+        // would return `FeeIntentComputeExceeded` instead of `SubstateAlreadyExists`.
+        runtime
+            .tracker
+            .charge_native_execution(FREE_COMPUTE_GRACE_POINTS - mint_cost + 1)
+            .unwrap();
+
+        let mint_args = EngineArgs::from(vec![tari_bor::encode(&MintResourceArg { mint_arg }).unwrap().into()]);
+        let err = runtime
+            .resource_invoke(
+                tari_template_lib::args::ResourceRef::Ref(mintable_resource_address),
+                ResourceAction::Mint,
+                mint_args,
+            )
+            .unwrap_err();
+        assert!(
+            matches!(err, RuntimeError::SubstateAlreadyExists { ref address } if *address == mint_occupied_id),
+            "expected SubstateAlreadyExists on Mint before native charging, got {err:?}"
+        );
     }
 
     /// A runtime holding a confidential resource whose view key is a non-canonical Ristretto point (`[0xff; 32]`),

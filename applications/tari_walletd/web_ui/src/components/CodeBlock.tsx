@@ -29,7 +29,7 @@ import Typography from "@mui/material/Typography";
 import { styled, useTheme } from "@mui/material/styles";
 import useMediaQuery from "@mui/material/useMediaQuery";
 import { renderJson } from "@utils/helpers";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   IoCheckmarkOutline,
   IoContractOutline,
@@ -40,7 +40,30 @@ import {
 
 interface ICodeBlockExpand {
   title: string;
-  content: any;
+  content: unknown;
+}
+
+function stringifyContent(content: unknown): string {
+  try {
+    return (
+      JSON.stringify(content, (_key, value) => {
+        if (typeof value === "bigint") {
+          return value.toString();
+        }
+        if (value instanceof Uint8Array) {
+          return Array.from(value, (b) => b.toString(16).padStart(2, "0")).join("");
+        }
+        if (value instanceof Map) {
+          return Object.fromEntries(
+            Array.from(value.entries(), ([k, v]) => [typeof k === "string" ? k : String(k), v]),
+          );
+        }
+        return value;
+      }) ?? "null"
+    );
+  } catch {
+    return String(content);
+  }
 }
 
 const CodeBlock = styled(Box)(({ theme }) => ({
@@ -64,123 +87,102 @@ const StyledToolbar = styled(Box)(({ theme }) => ({
   borderTop: "none",
 }));
 
-export default function CodeBlockExpand({ title, content }: ICodeBlockExpand) {
-  const [open, setOpen] = useState(false);
+interface ToolBarProps {
+  title: string;
+  content: unknown;
+  open: boolean;
+  onOpen: () => void;
+  onClose: () => void;
+}
 
-  const media = useTheme();
-  const matches = useMediaQuery(media.breakpoints.down("md"));
-  const theme = useTheme();
+function ToolBar({ title, content, open, onOpen, onClose }: ToolBarProps) {
+  const [copied, setCopied] = useState(false);
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isMountedRef = useRef(true);
 
-  const handleClickOpen = () => {
-    setOpen(true);
-  };
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      if (copyTimerRef.current !== null) {
+        clearTimeout(copyTimerRef.current);
+      }
+    };
+  }, []);
 
-  const handleClose = () => {
-    setOpen(false);
-  };
-
-  function CodeDialog() {
-    return (
-      <Dialog fullScreen={matches} open={open} onClose={handleClose} maxWidth="xl" fullWidth>
-        <Box
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            background: theme.palette.background.paper,
-            padding: "1rem 1.5rem",
-            position: "sticky",
-            top: 0,
-            borderBottom: `1px solid ${theme.palette.divider}`,
-          }}
-        >
-          <Typography variant="h5" component="div">
-            {title}
-          </Typography>
-          <IconButton edge="end" color="inherit" onClick={handleClose} aria-label="close">
-            <CloseIcon />
-          </IconButton>
-        </Box>
-        <Box
-          sx={{
-            padding: "2rem",
-            background: theme.palette.background.paper,
-          }}
-        >
-          {renderJson(content)}
-        </Box>
-        <Box
-          style={{
-            position: "sticky",
-            bottom: 0,
-            left: 0,
-            width: "100%",
-          }}
-        >
-          <ToolBar content={content} />
-        </Box>
-      </Dialog>
-    );
-  }
-
-  function ToolBar({ content }: { content: string }) {
-    const [copied, setCopied] = useState(false);
-    const formattedContent = JSON.stringify(content);
-
-    const handleCopy = () => {
-      navigator.clipboard.writeText(formattedContent);
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(stringifyContent(content));
+      if (!isMountedRef.current) {
+        return;
+      }
       setCopied(true);
-      setTimeout(() => {
+      if (copyTimerRef.current !== null) {
+        clearTimeout(copyTimerRef.current);
+      }
+      copyTimerRef.current = setTimeout(() => {
         setCopied(false);
+        copyTimerRef.current = null;
       }, 3000);
-    };
+    } catch (err) {
+      console.error("Failed to copy to clipboard:", err);
+    }
+  };
 
-    const handleDownload = () => {
-      const element = document.createElement("a");
-      const file = new Blob([formattedContent], { type: "application/json" });
-      element.href = URL.createObjectURL(file);
-      element.download = `${title}.json`;
-      document.body.appendChild(element);
-      element.click();
-    };
+  const handleDownload = () => {
+    const element = document.createElement("a");
+    const file = new Blob([stringifyContent(content)], { type: "application/json" });
+    const url = URL.createObjectURL(file);
+    element.href = url;
+    element.download = `${title}.json`;
+    document.body.appendChild(element);
+    element.click();
+    element.remove();
+    URL.revokeObjectURL(url);
+  };
 
-    const menuItems = [
-      {
-        tooltip: copied ? "Copied!" : "Copy to clipboard",
-        icon: copied ? (
-          <IoCheckmarkOutline style={{ height: 16, width: 16 }} />
-        ) : (
-          <IoCopyOutline style={{ height: 16, width: 16 }} />
-        ),
-        onClick: () => handleCopy(),
-      },
-      {
-        tooltip: "Download",
-        icon: <IoDownloadOutline style={{ height: 16, width: 16 }} />,
-        onClick: () => handleDownload(),
-      },
-      open
-        ? {
-            tooltip: "Close",
-            icon: <IoContractOutline style={{ height: 16, width: 16 }} />,
-            onClick: () => setOpen(false),
-          }
-        : {
-            tooltip: "Expand",
-            icon: <IoExpandOutline style={{ height: 16, width: 16 }} />,
-            onClick: () => handleClickOpen(),
-          },
-    ];
+  const menuItems = [
+    {
+      id: "copy",
+      tooltip: copied ? "Copied!" : "Copy to clipboard",
+      icon: copied ? (
+        <IoCheckmarkOutline style={{ height: 16, width: 16 }} />
+      ) : (
+        <IoCopyOutline style={{ height: 16, width: 16 }} />
+      ),
+      onClick: () => void handleCopy(),
+    },
+    {
+      id: "download",
+      tooltip: "Download",
+      icon: <IoDownloadOutline style={{ height: 16, width: 16 }} />,
+      onClick: handleDownload,
+    },
+    open
+      ? {
+          id: "toggle",
+          tooltip: "Close",
+          icon: <IoContractOutline style={{ height: 16, width: 16 }} />,
+          onClick: onClose,
+        }
+      : {
+          id: "toggle",
+          tooltip: "Expand",
+          icon: <IoExpandOutline style={{ height: 16, width: 16 }} />,
+          onClick: onOpen,
+        },
+  ];
 
-    const renderMenu = menuItems.map((item, index) => {
-      return (
+  return (
+    <StyledToolbar>
+      {menuItems.map((item) => (
         <Tooltip
           TransitionComponent={Fade}
           TransitionProps={{ timeout: 300 }}
           title={item.tooltip}
           placement="top"
           arrow
-          key={index}
+          key={item.id}
         >
           <IconButton
             onClick={item.onClick}
@@ -191,19 +193,93 @@ export default function CodeBlockExpand({ title, content }: ICodeBlockExpand) {
             {item.icon}
           </IconButton>
         </Tooltip>
-      );
-    });
+      ))}
+    </StyledToolbar>
+  );
+}
 
-    return <StyledToolbar>{renderMenu}</StyledToolbar>;
-  }
+interface CodeDialogProps {
+  title: string;
+  content: unknown;
+  open: boolean;
+  fullScreen: boolean;
+  onOpen: () => void;
+  onClose: () => void;
+}
+
+function CodeDialog({ title, content, open, fullScreen, onOpen, onClose }: CodeDialogProps) {
+  const theme = useTheme();
+  return (
+    <Dialog fullScreen={fullScreen} open={open} onClose={onClose} maxWidth="xl" fullWidth>
+      <Box
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          background: theme.palette.background.paper,
+          padding: "1rem 1.5rem",
+          position: "sticky",
+          top: 0,
+          borderBottom: `1px solid ${theme.palette.divider}`,
+        }}
+      >
+        <Typography variant="h5" component="div">
+          {title}
+        </Typography>
+        <IconButton edge="end" color="inherit" onClick={onClose} aria-label="close">
+          <CloseIcon />
+        </IconButton>
+      </Box>
+      <Box
+        sx={{
+          padding: "2rem",
+          background: theme.palette.background.paper,
+        }}
+      >
+        {renderJson(content)}
+      </Box>
+      <Box
+        style={{
+          position: "sticky",
+          bottom: 0,
+          left: 0,
+          width: "100%",
+        }}
+      >
+        <ToolBar title={title} content={content} open={open} onOpen={onOpen} onClose={onClose} />
+      </Box>
+    </Dialog>
+  );
+}
+
+export default function CodeBlockExpand({ title, content }: ICodeBlockExpand) {
+  const [open, setOpen] = useState(false);
+
+  const theme = useTheme();
+  const matches = useMediaQuery(theme.breakpoints.down("md"));
+
+  const handleClickOpen = () => {
+    setOpen(true);
+  };
+
+  const handleClose = () => {
+    setOpen(false);
+  };
 
   return (
     <>
       <Box>
         <CodeBlock>{renderJson(content)}</CodeBlock>
-        <ToolBar content={content} />
+        <ToolBar title={title} content={content} open={open} onOpen={handleClickOpen} onClose={handleClose} />
       </Box>
-      <CodeDialog />
+      <CodeDialog
+        title={title}
+        content={content}
+        open={open}
+        fullScreen={matches}
+        onOpen={handleClickOpen}
+        onClose={handleClose}
+      />
     </>
   );
 }

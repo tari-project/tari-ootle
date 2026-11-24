@@ -3,7 +3,7 @@
 import CopyToClipboard from "@components/CopyToClipboard";
 import StatusChip, { StatusChipColors } from "@components/StatusChip";
 import { Memo as TyMemo } from "@tari-project/ootle-ts-bindings";
-import { decodeDestinationTagAndBytes, formatMemoBytes } from "./memoHelpers";
+import { decodeDestinationTagAndBytes } from "./memoHelpers";
 
 export type MemoProps = {
   memo?: TyMemo | null;
@@ -18,7 +18,7 @@ export function Memo({ memo }: MemoProps) {
     return <span>{memo.Message}</span>;
   }
   if ("Bytes" in memo) {
-    return <span>{formatMemoBytes(memo.Bytes)}</span>;
+    return <span>{memo.Bytes}</span>;
   }
   if ("U256" in memo) {
     return <span>{memo.U256}</span>;

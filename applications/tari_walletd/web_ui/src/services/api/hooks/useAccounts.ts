@@ -63,6 +63,7 @@ import {
   validatorsGetFees,
 } from "@utils/json_rpc";
 import { useEffect, useRef } from "react";
+import { accountBalancesQueryKey, isAccountBalancesQueryKey, validatorFeesQueryKey } from "./accountQueryKeys";
 
 const ACCOUNT_BALANCE_CHANGES_QUERY_KEY = "account_balance_changes";
 
@@ -90,7 +91,7 @@ export const useAccountsCreate = () => {
     mutationFn: async (req: AccountsCreateMutate) => {
       return await accountsCreate({
         account_name: req.accountName || "",
-        is_default: req.isDefault || null,
+        is_default: req.isDefault ?? null,
         key_index: req.keyId ?? null,
       });
     },
@@ -273,7 +274,7 @@ export const useAccountsCreateFreeTestCoins = () => {
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ["transactions"] });
-      queryClient.invalidateQueries({ queryKey: ["accounts_balances"] });
+      queryClient.invalidateQueries({ predicate: (query) => isAccountBalancesQueryKey(query.queryKey) });
       queryClient.invalidateQueries({ queryKey: ["faucet_balance"] });
     },
   });
@@ -313,7 +314,7 @@ export const useMintTestnetFaucetNfts = () => {
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ["transactions"] });
-      queryClient.invalidateQueries({ queryKey: ["accounts_balances"] });
+      queryClient.invalidateQueries({ predicate: (query) => isAccountBalancesQueryKey(query.queryKey) });
 
       // Delayed invalidation for NFTs to handle wallet processing time
       setTimeout(() => {
@@ -339,7 +340,7 @@ export const useAccountsList = (offset: number, limit: number, enabled: boolean 
 export const useAccountsGetBalances = (account?: ComponentAddress, refresh: boolean = false) => {
   const query = useQuery({
     enabled: !!account,
-    queryKey: [`accounts_balances_${account}`],
+    queryKey: accountBalancesQueryKey(account),
     queryFn: () => accountsGetBalances({ account: { ComponentAddress: account! }, refresh }),
     refetchInterval: 5000,
     structuralSharing: (oldData, newData) => {
@@ -395,7 +396,7 @@ export const refreshAccountsBalances = () => {
     },
     onSettled: (resp) => {
       if (resp) {
-        return queryClient.invalidateQueries({ queryKey: ["accounts_balances_" + resp.address] });
+        return queryClient.invalidateQueries({ queryKey: accountBalancesQueryKey(resp.address) });
       }
     },
   });
@@ -409,7 +410,6 @@ export const useAccountsGetDefault = (enabled: boolean = true) => {
     staleTime: 0,
     refetchInterval: false,
     refetchOnMount: "always",
-    notifyOnChangeProps: ["data", "error"],
     retryOnMount: false,
     retry: false,
   });
@@ -430,7 +430,7 @@ export const useAccountsGet = (account: ComponentAddress) => {
 
 export const useValidatorFees = (accountOrKeyId: AccountOrKeyId, shardGroup = null) => {
   return useQuery({
-    queryKey: ["validator_fees"],
+    queryKey: validatorFeesQueryKey(accountOrKeyId, shardGroup),
     queryFn: () => validatorsGetFees({ account_or_key: accountOrKeyId, shard_group: shardGroup }),
   });
 };

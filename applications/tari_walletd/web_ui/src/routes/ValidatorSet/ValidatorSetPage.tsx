@@ -19,26 +19,9 @@ import { useQuery } from "@tanstack/react-query";
 import { TrustedValidatorSetInfo, ValidatorSetReanchorInfo } from "@tari-project/ootle-ts-bindings";
 import { settingsGet, validatorSetGetStatus } from "@utils/json_rpc";
 import { ReactNode } from "react";
+import { formatNetworkEpoch, formatUnixTime } from "./validatorSetHelpers";
 
 const REFRESH_INTERVAL_MS = 30_000;
-
-function formatUnixTime(seconds: number | null): string {
-  if (seconds == null) {
-    return "Never";
-  }
-  const date = new Date(seconds * 1000);
-  return `${date.toLocaleString()} (${timeAgo(date)})`;
-}
-
-function timeAgo(date: Date): string {
-  const seconds = Math.max(0, Math.floor((Date.now() - date.getTime()) / 1000));
-  if (seconds < 60) return `${seconds}s ago`;
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  return `${Math.floor(hours / 24)}d ago`;
-}
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -58,7 +41,15 @@ function Hash({ hash }: { hash: string }) {
   );
 }
 
-function TrustedSet({ trusted, networkEpoch }: { trusted: TrustedValidatorSetInfo; networkEpoch: number | null }) {
+function TrustedSet({
+  trusted,
+  networkEpoch,
+  settingsLoading,
+}: {
+  trusted: TrustedValidatorSetInfo;
+  networkEpoch: number | null;
+  settingsLoading: boolean;
+}) {
   return (
     <>
       {trusted.walk_failing_since != null && (
@@ -72,7 +63,7 @@ function TrustedSet({ trusted, networkEpoch }: { trusted: TrustedValidatorSetInf
         <Table>
           <TableBody>
             <Row label="Latest trusted epoch">{trusted.epoch}</Row>
-            <Row label="Network epoch">{networkEpoch ?? "Unknown (indexer unreachable)"}</Row>
+            <Row label="Network epoch">{formatNetworkEpoch(networkEpoch, settingsLoading)}</Row>
             <Row label="Latest validator set hash">
               <Hash hash={trusted.validator_set_hash} />
             </Row>
@@ -117,7 +108,7 @@ function Reanchors({ reanchors }: { reanchors: ValidatorSetReanchorInfo[] }) {
           </TableHead>
           <TableBody>
             {reanchors.map((reanchor) => (
-              <TableRow key={`${reanchor.reanchored_at}-${reanchor.validator_set_hash}`}>
+              <TableRow key={`${reanchor.reanchored_at}-${reanchor.epoch}-${reanchor.validator_set_hash}`}>
                 <DataTableCell>{formatUnixTime(reanchor.reanchored_at)}</DataTableCell>
                 <DataTableCell>{reanchor.previous_epoch ?? "—"}</DataTableCell>
                 <DataTableCell>{reanchor.epoch}</DataTableCell>
@@ -150,7 +141,7 @@ function ValidatorSetPage() {
       return <Loading />;
     }
     if (status.isError) {
-      return <Error message={status.error.message} />;
+      return <Error message={status.error?.message || "Failed to load validator set status"} />;
     }
     if (!status.data) {
       return null;
@@ -170,7 +161,11 @@ function ValidatorSetPage() {
           </Typography>
         )}
         {trusted ? (
-          <TrustedSet trusted={trusted} networkEpoch={settings.data?.current_epoch ?? null} />
+          <TrustedSet
+            trusted={trusted}
+            networkEpoch={settings.data?.current_epoch ?? null}
+            settingsLoading={settings.isLoading && settings.data == null}
+          />
         ) : (
           indexer_trust === "verify" && (
             <Alert severity="info">

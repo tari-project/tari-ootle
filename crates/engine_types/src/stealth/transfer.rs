@@ -185,20 +185,15 @@ fn validate_checked_statement(
 
     // We assume that the input amount is available and only check that the maths is correct. The engine is responsible
     // for checking that the input amount is actually available.
+    // Revealed amounts are public and carry no range proof, so they are committed at full `Amount` width.
     let revealed_input_commit = commit_amount(
         &RistrettoSecretKey::default(),
         transfer.inputs_statement.revealed_amount,
-    )
-    .ok_or_else(|| ResourceError::InvalidBalanceProof {
-        details: "Revealed input amount must be non-negative".to_string(),
-    })?;
+    );
     let revealed_output_commit = commit_amount(
         &RistrettoSecretKey::default(),
         transfer.outputs_statement.revealed_output_amount(),
-    )
-    .ok_or_else(|| ResourceError::InvalidBalanceProof {
-        details: "Revealed output amount must be non-negative".to_string(),
-    })?;
+    );
 
     let public_excess =
         agg_inputs + revealed_input_commit.as_public_key() - &agg_outputs - revealed_output_commit.as_public_key();

@@ -438,6 +438,67 @@ fn transfer_revealed_between_accounts() {
     assert_eq!(vault.balance(), 25);
 }
 
+/// Revealed amounts are public and carry no range proof, so a stealth transfer carries them at full `Amount` width:
+/// a revealed input above `u64::MAX` funds range-proved UTXOs, and spending those UTXOs reveals their sum, also above
+/// `u64::MAX`, into an account vault.
+#[test]
+fn revealed_amounts_above_u64_max_round_trip_through_utxos() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let (account, _proof, _sk) = test.create_empty_account();
+
+    let utxo_values = [u64::MAX, u64::MAX, 5];
+    let retained_revealed = Amount::from(u64::MAX) + Amount::from(100u64);
+    let mint = stealth::generate_mint_statement(utxo_values, retained_revealed, None);
+    let minted_supply = mint.statement.inputs_statement.revealed_amount;
+    let utxo_total = utxo_values.iter().map(|v| Amount::from(*v)).sum::<Amount>();
+    assert_eq!(minted_supply, utxo_total + retained_revealed);
+    assert!(utxo_total > u64::MAX);
+
+    let (faucet, faucet_resx) = setup(&mut test, &mint, None);
+
+    let store = test.read_only_state_store();
+    assert_eq!(
+        store.get_resource(&faucet_resx).unwrap().total_supply(),
+        Some(minted_supply)
+    );
+    let faucet_vaults = store.get_vaults_for_component(faucet).unwrap();
+    assert_eq!(faucet_vaults.len(), 1);
+    let supply_vault = faucet_vaults.values().next().unwrap();
+    assert_eq!(supply_vault.balance(), retained_revealed);
+    drop(store);
+
+    let inputs = utxo_values
+        .iter()
+        .zip(&mint.output_masks)
+        .map(|(value, mask)| MaskAndValue {
+            mask: mask.clone(),
+            value: *value,
+        })
+        .collect::<Vec<_>>();
+    let spend_back = stealth::generate_transfer_data(inputs, Amount::zero(), Vec::<u64>::new(), utxo_total);
+    let result = test.execute_expect_success(
+        Transaction::builder_localnet(Epoch(1))
+            .stealth_transfer(faucet_resx, spend_back.statement)
+            .put_last_instruction_output_on_workspace("bucket")
+            .call_method(account, "deposit", args![Workspace("bucket")])
+            .finish()
+            .authorize(&test.to_public_key_bytes(), &mint.output_masks)
+            .seal(test.secret_key()),
+        vec![],
+    );
+
+    let diff = result.finalize.any_accept().unwrap();
+    assert_eq!(
+        diff.up_iter()
+            .filter(|(_, substate)| substate.substate_value().as_utxo().is_some())
+            .count(),
+        0
+    );
+    let store = test.read_only_state_store();
+    let vaults = store.get_vaults_for_account(account).unwrap();
+    assert_eq!(vaults.get(&faucet_resx).unwrap().balance(), utxo_total);
+}
+
 /// A stealth transfer consumes its revealed-funds bucket whole, so funds a proof has locked in that bucket would
 /// be destroyed while the proof still names it. A bucket proof locks the whole bucket, so the shape that reaches
 /// the drop is a statement with no revealed input: the unlocked amount matches its zero and the locked funds go

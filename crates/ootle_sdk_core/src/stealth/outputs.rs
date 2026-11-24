@@ -56,7 +56,6 @@ use tari_ootle_wallet_crypto::{
     viewable_balance_proof::generate_elgamal_viewable_balance_proof_seeded,
 };
 use tari_template_lib_types::{
-    Amount,
     EncryptedData,
     ResourceAddress,
     access_rules::AccessRule,
@@ -287,8 +286,8 @@ pub(crate) fn build_stealth_outputs_statement_from_entropy(
         .map_err(|e| OotleSdkError::Stealth(format!("range proof failed: {e}")))?;
 
     let revealed_output = match (intent.revealed_output_amount, revealed_receiver) {
-        (0, _) => None,
-        (amount, Some(receiver)) => Some(RevealedOutput::new(Amount::from_u64(amount), receiver)),
+        (amount, _) if amount.is_zero() => None,
+        (amount, Some(receiver)) => Some(RevealedOutput::new(amount.to_amount(), receiver)),
         (_, None) => {
             return Err(OotleSdkError::Validation(
                 "a revealed output must name the receiver authorised to take it".to_string(),
@@ -376,7 +375,7 @@ mod tests {
             destination_account_pk: pk_bytes(3),
             destination_view_pk: pk_bytes(4),
             amount,
-            revealed_amount: 0,
+            revealed_amount: crate::types::U128::ZERO,
             resource_address: tari_resource(),
             resource_view_key: with_view_key.then(|| pk_bytes(5)),
             memo: None,
@@ -415,8 +414,8 @@ mod tests {
             fee: BoundaryAmount::new(2000),
             inputs: Vec::<StealthInputSpec>::new(),
             outputs,
-            revealed_input_amount: 0,
-            revealed_output_amount: revealed_output,
+            revealed_input_amount: crate::types::U128::ZERO,
+            revealed_output_amount: crate::types::U128::from_u64(revealed_output),
             min_epoch: None,
             max_epoch: 1,
             dry_run: false,

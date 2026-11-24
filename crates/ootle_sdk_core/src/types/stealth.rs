@@ -5,7 +5,8 @@
 //!
 //! These are the typed records the stealth surface builds on. They follow the exact
 //! conventions established in [`crate::types::bytes`]: crypto material crosses as **lowercase-hex
-//! byte newtypes** (no `0x` prefix), amounts are plain `u64`/[`BoundaryAmount`], addresses are
+//! byte newtypes** (no `0x` prefix), blinded amounts are plain `u64`/[`BoundaryAmount`], revealed amounts are
+//! [`U128`], addresses are
 //! `…Str`, and **no `tari_*` type leaks** into a boundary record. Every record derives
 //! `Debug + Clone + PartialEq + Serialize + Deserialize`.
 //!
@@ -25,7 +26,7 @@ use crate::{
         address::{ComponentAddressStr, ResourceAddressStr},
         bytes::{BuildSeed, PublicKeyBytes, SecretKeyBytes},
         error::OotleSdkError,
-        numeric::BoundaryAmount,
+        numeric::{BoundaryAmount, U128},
     },
 };
 
@@ -264,13 +265,12 @@ pub struct StealthOutputSpec {
     /// Blinded (confidential) output value in µTari — the value committed by the stealth UTXO.
     pub amount: u64,
     /// Revealed (plaintext) value in µTari deposited into [`destination_account_pk`]'s account,
-    /// like a normal public transfer. Defaults to `0` (no revealed deposit) so existing JSON stays
-    /// valid. The per-output revealed amounts must sum to
-    /// [`StealthTransferIntent::revealed_output_amount`].
+    /// like a normal public transfer. Defaults to zero (no revealed deposit) when omitted. The per-output revealed
+    /// amounts must sum to [`StealthTransferIntent::revealed_output_amount`].
     ///
     /// [`destination_account_pk`]: StealthOutputSpec::destination_account_pk
     #[serde(default)]
-    pub revealed_amount: u64,
+    pub revealed_amount: U128,
     /// The resource being transferred.
     pub resource_address: ResourceAddressStr,
     /// Resource view key (drives the ElGamal viewable-balance proof). `None` if the resource has no
@@ -317,9 +317,9 @@ pub struct StealthTransferIntent {
     /// Stealth outputs to create.
     pub outputs: Vec<StealthOutputSpec>,
     /// Revealed amount entering as a bucket (µTari). Zero if no revealed input.
-    pub revealed_input_amount: u64,
+    pub revealed_input_amount: U128,
     /// Revealed amount leaving as a bucket (µTari). Zero if no revealed output.
-    pub revealed_output_amount: u64,
+    pub revealed_output_amount: U128,
     /// Optional earliest epoch.
     pub min_epoch: Option<u64>,
     /// The last epoch this transaction is valid in. Mandatory: every transaction has a bounded
@@ -360,16 +360,16 @@ impl StealthTransferIntent {
         if self.outputs.is_empty() {
             return Ok(());
         }
-        let mut sum: u64 = 0;
+        let mut sum: u128 = 0;
         for output in &self.outputs {
-            sum = sum.checked_add(output.revealed_amount).ok_or_else(|| {
-                OotleSdkError::Validation("sum of per-output revealed_amount overflows u64".to_string())
+            sum = sum.checked_add(output.revealed_amount.to_u128()).ok_or_else(|| {
+                OotleSdkError::Validation("sum of per-output revealed_amount overflows u128".to_string())
             })?;
         }
-        if sum != self.revealed_output_amount {
+        let total = self.revealed_output_amount.to_u128();
+        if sum != total {
             return Err(OotleSdkError::Validation(format!(
-                "sum of per-output revealed_amount ({sum}) must equal revealed_output_amount ({})",
-                self.revealed_output_amount
+                "sum of per-output revealed_amount ({sum}) must equal revealed_output_amount ({total})"
             )));
         }
         Ok(())
@@ -648,7 +648,7 @@ mod tests {
                 destination_account_pk: PublicKeyBytes::from_array([0x55; 32]),
                 destination_view_pk: PublicKeyBytes::from_array([0x66; 32]),
                 amount: 5_000_000,
-                revealed_amount: 0,
+                revealed_amount: crate::types::U128::ZERO,
                 resource_address: ResourceAddressStr::parse(resource_str()).unwrap(),
                 resource_view_key: None,
                 memo: None,
@@ -656,8 +656,8 @@ mod tests {
                 utxo_tag: None,
                 minimum_value_promise: 0,
             }],
-            revealed_input_amount: 0,
-            revealed_output_amount: 0,
+            revealed_input_amount: crate::types::U128::ZERO,
+            revealed_output_amount: crate::types::U128::ZERO,
             min_epoch: None,
             max_epoch: 99,
             dry_run: false,
@@ -675,7 +675,7 @@ mod tests {
             destination_account_pk: PublicKeyBytes::from_array([0x11; 32]),
             destination_view_pk: PublicKeyBytes::from_array([0x22; 32]),
             amount: 1_000_000,
-            revealed_amount: 0,
+            revealed_amount: crate::types::U128::ZERO,
             resource_address: ResourceAddressStr::parse(resource_str()).unwrap(),
             resource_view_key: None,
             memo: None,
@@ -710,7 +710,7 @@ mod tests {
 
         // (iv) with a non-zero revealed_amount (the revealed-output deposit slice).
         let with_revealed = StealthOutputSpec {
-            revealed_amount: 250_000,
+            revealed_amount: crate::types::U128::from_u64(250_000),
             ..base
         };
         let json = serde_json::to_string(&with_revealed).unwrap();
@@ -732,8 +732,8 @@ mod tests {
             serde_json::from_value::<StealthOutputSpec>(without_field)
                 .unwrap()
                 .revealed_amount,
-            0,
-            "omitted revealed_amount must default to 0"
+            crate::types::U128::ZERO,
+            "omitted revealed_amount must default to zero"
         );
     }
 
@@ -745,7 +745,7 @@ mod tests {
                 destination_account_pk: PublicKeyBytes::from_array([0x11; 32]),
                 destination_view_pk: PublicKeyBytes::from_array([0x22; 32]),
                 amount,
-                revealed_amount: revealed,
+                revealed_amount: crate::types::U128::from_u64(revealed),
                 resource_address: ResourceAddressStr::parse(resource_str()).unwrap(),
                 resource_view_key: None,
                 memo: None,
@@ -761,8 +761,8 @@ mod tests {
                 fee: BoundaryAmount::new(2000),
                 inputs: vec![],
                 outputs,
-                revealed_input_amount: 0,
-                revealed_output_amount,
+                revealed_input_amount: crate::types::U128::ZERO,
+                revealed_output_amount: crate::types::U128::from_u64(revealed_output_amount),
                 min_epoch: None,
                 max_epoch: 1,
                 dry_run: false,

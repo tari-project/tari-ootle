@@ -20,7 +20,10 @@
           "destination_account_pk": "94741f5d5d52755ece4f23f044ee27d5d1ea1e2bd196b462166b16152a9d0259",
           "destination_view_pk": "da80862773358b466ffadfe0b3293ab3d9fd53c5ea6c955358f568322daf6a57",
           "amount": 500000,
-          "revealed_amount": 1000000,
+          "revealed_amount": {
+            "hi": 0,
+            "lo": 1000000
+          },
           "resource_address": "resource_0101010101010101010101010101010101010101010101010101010101010101",
           "resource_view_key": null,
           "memo": null,
@@ -32,7 +35,10 @@
           "destination_account_pk": "e882b131016b52c1d3337080187cf768423efccbb517bb495ab812c4160ff44e",
           "destination_view_pk": "f64746d3c92b13050ed8d80236a7f0007c3b3f962f5ba793d19a601ebb1df403",
           "amount": 500000,
-          "revealed_amount": 500000,
+          "revealed_amount": {
+            "hi": 0,
+            "lo": 500000
+          },
           "resource_address": "resource_0101010101010101010101010101010101010101010101010101010101010101",
           "resource_view_key": null,
           "memo": null,
@@ -41,8 +47,14 @@
           "minimum_value_promise": 0
         }
       ],
-      "revealed_input_amount": 2500000,
-      "revealed_output_amount": 1500000,
+      "revealed_input_amount": {
+        "hi": 0,
+        "lo": 2500000
+      },
+      "revealed_output_amount": {
+        "hi": 0,
+        "lo": 1500000
+      },
       "min_epoch": null,
       "max_epoch": 1,
       "dry_run": false,

@@ -8,13 +8,27 @@ import { useSwarm } from "../state/context";
 import { TxHolding, ValidatorNode } from "../types";
 import { Copyable, Empty } from "../ui";
 
+function formatAbortReason(reason: unknown): string {
+  if (typeof reason === "string" || typeof reason === "number" || typeof reason === "boolean") {
+    return String(reason);
+  }
+  if (reason && typeof reason === "object") {
+    try {
+      return JSON.stringify(reason);
+    } catch {
+      return String(reason);
+    }
+  }
+  return "unknown";
+}
+
 function decisionOf(record: { local_decision?: unknown; original_decision?: unknown }): string {
   const decision = record.local_decision ?? record.original_decision;
   if (typeof decision === "string") {
     return decision;
   }
   if (decision && typeof decision === "object" && "Abort" in decision) {
-    return `Abort(${(decision as { Abort: unknown }).Abort})`;
+    return `Abort(${formatAbortReason((decision as { Abort: unknown }).Abort)})`;
   }
   if (decision && typeof decision === "object") {
     return "Commit";
@@ -54,17 +68,26 @@ export default function PoolMatrix({ validators }: { validators: ValidatorNode[]
   const [resolved, setResolved] = useState<Record<string, TxHolding>>({});
   // Absences are stable, so a lookup is made once per validator/transaction pair.
   const asked = useRef(new Set<string>());
+  const mounted = useRef(true);
 
-  const running = validators.filter((vn) => vn.is_running);
-  const shortName = distinguish(validators.map((vn) => vn.name));
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
+  const shortName = useMemo(() => distinguish(validators.map((vn) => vn.name)), [validators]);
 
   const pools = useMemo(
     () =>
-      running.map((vn) => ({
-        vn,
-        byId: new Map((swarm.details[vn.instance_id]?.pool ?? []).map((record) => [record.transaction_id, record])),
-      })),
-    [running, swarm.details],
+      validators
+        .filter((vn) => vn.is_running)
+        .map((vn) => ({
+          vn,
+          byId: new Map((swarm.details[vn.instance_id]?.pool ?? []).map((record) => [record.transaction_id, record])),
+        })),
+    [validators, swarm.details],
   );
 
   const txIds = useMemo(() => {
@@ -89,6 +112,10 @@ export default function PoolMatrix({ validators }: { validators: ValidatorNode[]
         lookups.push(
           nodeRpc(vn.jrpc, "get_transaction", [txId])
             .then((resp) => {
+              if (!mounted.current) {
+                asked.current.delete(key);
+                return;
+              }
               const decision = resp?.transaction?.final_decision;
               setResolved((current) => ({
                 ...current,
@@ -98,6 +125,10 @@ export default function PoolMatrix({ validators }: { validators: ValidatorNode[]
               }));
             })
             .catch(() => {
+              if (!mounted.current) {
+                asked.current.delete(key);
+                return;
+              }
               setResolved((current) => ({ ...current, [key]: { kind: "absent" } }));
             }),
         );

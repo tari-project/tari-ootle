@@ -280,7 +280,7 @@ function RowData({ title, data, blobs }: RowDataProps) {
   );
 }
 
-function toJsonFriendly(value: unknown): unknown {
+export function toJsonFriendly(value: unknown): unknown {
   if (value === null || value === undefined) {
     return value;
   }
@@ -307,7 +307,7 @@ function toJsonFriendly(value: unknown): unknown {
   return value;
 }
 
-function inspectify(instruction: Instruction, blobs: Blobs | undefined) {
+export function inspectify(instruction: Instruction, blobs: Blobs | undefined) {
   if (typeof instruction !== "object" || instruction === null) {
     return instruction;
   }
@@ -326,19 +326,17 @@ function inspectify(instruction: Instruction, blobs: Blobs | undefined) {
 
   const tags = literalDecodeTags();
   const args = contents.args.map((arg: InstructionArg) => {
-    if (arg && typeof arg === "object") {
-      if ("Literal" in arg) {
-        try {
-          return { Literal: toJsonFriendly(decode(arg.Literal, { encoding: "hex", tags })) };
-        } catch {
-          return { Literal: `0x${arg.Literal}` };
-        }
+    if ("Literal" in arg) {
+      try {
+        return { Literal: toJsonFriendly(decode(arg.Literal, { encoding: "hex", tags })) };
+      } catch {
+        return { Literal: `0x${arg.Literal}` };
       }
-      if ("Blob" in arg) {
-        const bytes = blobBytes(blobs, arg.Blob);
-        if (bytes != null) {
-          return { Blob: { index: arg.Blob, value: toJsonFriendly(decodeBlob(bytes)) } };
-        }
+    }
+    if ("Blob" in arg) {
+      const bytes = blobBytes(blobs, arg.Blob);
+      if (bytes != null) {
+        return { Blob: { index: arg.Blob, value: toJsonFriendly(decodeBlob(bytes)) } };
       }
     }
     return arg;

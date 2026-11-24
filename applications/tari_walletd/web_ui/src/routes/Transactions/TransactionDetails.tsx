@@ -92,7 +92,7 @@ export default function TransactionDetails() {
   const handleChange = (panel: string) => (_event: React.SyntheticEvent, isExpanded: boolean) => {
     setExpandedPanels((prevExpandedPanels) => {
       if (isExpanded) {
-        return prevExpandedPanels.includes(panel) ? prevExpandedPanels : [...prevExpandedPanels, panel];
+        return [...prevExpandedPanels, panel];
       } else {
         return prevExpandedPanels.filter((p) => p !== panel);
       }

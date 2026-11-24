@@ -12,7 +12,11 @@ export function resolveFallbackAccount(accounts: readonly AccountInfo[] | undefi
   if (!accounts || accounts.length === 0) {
     return undefined;
   }
-  return accounts.find((entry) => entry.account.is_default) ?? accounts[0];
+  return (
+    accounts.find((entry) => entry.account.is_default) ??
+    accounts.find((entry) => entry.account.owner_key_id !== null) ??
+    accounts[0]
+  );
 }
 
 export function buildAccountPickerOptions(

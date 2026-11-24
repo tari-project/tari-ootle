@@ -1840,6 +1840,48 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         Ok(())
     }
 
+    fn confidential_outputs_set_status_by_commitments(
+        &mut self,
+        vault_id: &VaultId,
+        commitments: &[PedersenCommitmentBytes],
+        from_status: OutputStatus,
+        to_status: OutputStatus,
+    ) -> Result<usize, WalletStorageError> {
+        const OPERATION: &str = "confidential_outputs_set_status_by_commitments";
+        use crate::schema::{confidential_outputs, vaults};
+
+        if commitments.is_empty() {
+            return Ok(0);
+        }
+
+        let vault_db_id = vaults::table
+            .select(vaults::id)
+            .filter(vaults::address.eq(vault_id.to_string()))
+            .first::<i32>(self.connection())
+            .optional()
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?
+            .ok_or_else(|| WalletStorageError::NotFound {
+                operation: OPERATION,
+                entity: "vault".to_string(),
+                key: vault_id.to_string(),
+            })?;
+
+        // Chunk to stay well below SQLite's SQLITE_MAX_VARIABLE_NUMBER limit.
+        let mut updated = 0usize;
+        for chunk in commitments.chunks(500) {
+            let commitment_hexes = chunk.iter().map(|c| c.to_hex()).collect::<Vec<_>>();
+            updated += diesel::update(confidential_outputs::table)
+                .filter(confidential_outputs::vault_id.eq(vault_db_id))
+                .filter(confidential_outputs::status.eq(from_status.as_key_str()))
+                .filter(confidential_outputs::commitment.eq_any(&commitment_hexes))
+                .set(confidential_outputs::status.eq(to_status.as_key_str()))
+                .execute(self.connection())
+                .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+        }
+
+        Ok(updated)
+    }
+
     fn confidential_outputs_release_by_lock_id(&mut self, lock_id: WalletLockId) -> Result<(), WalletStorageError> {
         use crate::schema::confidential_outputs;
 

@@ -23,10 +23,11 @@
 import { Box, IconButton, TextField } from "@mui/material";
 import { useTheme } from "@mui/material/styles";
 import { ComponentAddress } from "@tari-project/ootle-ts-bindings";
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { IoCheckmark, IoClose } from "react-icons/io5";
 import { LuPencilLine } from "react-icons/lu";
 import { useAccountsRename } from "../services/api/hooks/useAccounts";
+import { applyRenameSuccessIfActive, getValidatedRename } from "./accountNameHelpers";
 
 export interface AccountNameProps {
   accountAddress: ComponentAddress;
@@ -45,10 +46,17 @@ const AccountName: React.FC<AccountNameProps> = ({
 }) => {
   const [isEditingName, setIsEditingName] = useState(false);
   const [newName, setNewName] = useState("");
+  const activeAccountRef = useRef<ComponentAddress>(accountAddress);
+  activeAccountRef.current = accountAddress;
 
   const renameAccountMutation = useAccountsRename();
 
   const theme = useTheme();
+
+  useEffect(() => {
+    setIsEditingName(false);
+    setNewName("");
+  }, [accountAddress]);
 
   const handleStartEdit = () => {
     setIsEditingName(true);
@@ -61,22 +69,29 @@ const AccountName: React.FC<AccountNameProps> = ({
   };
 
   const handleSaveRename = () => {
-    if (newName.trim() && newName !== currentName) {
+    if (renameAccountMutation.isPending) {
+      return;
+    }
+    const trimmedName = getValidatedRename(newName, currentName);
+    if (trimmedName) {
+      const targetAccount = accountAddress;
       renameAccountMutation.mutate(
         {
-          account: accountAddress,
-          newName: newName.trim(),
+          account: targetAccount,
+          newName: trimmedName,
         },
         {
           onSuccess: () => {
-            const trimmedName = newName.trim();
-            setIsEditingName(false);
-            setNewName("");
-            onRenameSuccess?.(trimmedName);
+            applyRenameSuccessIfActive(targetAccount, activeAccountRef.current, trimmedName, {
+              closeEdit: handleCancelEdit,
+              onRenameSuccess,
+            });
           },
           onError: (error: any) => {
             console.error("Error renaming account:", error);
-            onRenameError?.(error);
+            if (activeAccountRef.current === targetAccount) {
+              onRenameError?.(error);
+            }
           },
         },
       );

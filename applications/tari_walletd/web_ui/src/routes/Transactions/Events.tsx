@@ -41,10 +41,7 @@ import { useTheme } from "@mui/material/styles";
 import { convertCborValue, Event, substateIdToString } from "@tari-project/ootle-ts-bindings";
 import { useState } from "react";
 
-function stringifyValue(value: unknown): string {
-  if (value === undefined) {
-    return "undefined";
-  }
+function stringifyValue(value: object): string {
   return JSON.stringify(value, (_key, v) => (typeof v === "bigint" ? v.toString() : v));
 }
 

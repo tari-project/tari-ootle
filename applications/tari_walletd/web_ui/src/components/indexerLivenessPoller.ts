@@ -23,8 +23,7 @@
 /// How often the configured indexer is re-probed after the previous probe settles.
 export const POLL_INTERVAL_MS = 15_000;
 
-/// Maximum time a single network info probe is allowed to stay in flight before timing out,
-/// kept below POLL_INTERVAL_MS so a hung connection counts as a failure and polling continues.
+/// How long each request in a probe may stay in flight before it counts as a failure.
 export const PROBE_TIMEOUT_MS = 10_000;
 
 /// Consecutive failures tolerated before the pill goes red. One failed probe leaves the pill

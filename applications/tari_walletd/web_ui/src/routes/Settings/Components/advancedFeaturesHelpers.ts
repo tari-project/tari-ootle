@@ -8,16 +8,6 @@ export function formatSettingsError(error: unknown, fallback: string): string {
     const message = error.message.trim();
     return message || fallback;
   }
-  if (typeof error === "string") {
-    const message = error.trim();
-    return message || fallback;
-  }
-  if (error && typeof error === "object" && "message" in error) {
-    const message = (error as { message?: unknown }).message;
-    if (typeof message === "string" && message.trim()) {
-      return message.trim();
-    }
-  }
   return fallback;
 }
 

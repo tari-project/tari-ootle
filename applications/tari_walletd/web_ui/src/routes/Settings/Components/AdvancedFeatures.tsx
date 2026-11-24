@@ -16,11 +16,9 @@ function AdvancedFeatures() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const userToggledRef = useRef(false);
-  const mountedRef = useRef(true);
 
   useEffect(() => {
     let cancelled = false;
-    mountedRef.current = true;
     settingsGet()
       .then((res) => {
         if (!cancelled && !userToggledRef.current) {
@@ -35,14 +33,10 @@ function AdvancedFeatures() {
       });
     return () => {
       cancelled = true;
-      mountedRef.current = false;
     };
   }, [setAdvancedUiFeatures]);
 
   const setFeature = (feature: keyof AdvancedUiFeatures) => async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (saving) {
-      return;
-    }
     userToggledRef.current = true;
     setSaving(true);
     setError(null);
@@ -54,12 +48,10 @@ function AdvancedFeatures() {
       persist: (updated) =>
         settingsSet({ indexer_url: null, indexer_urls: null, advanced_ui_features: updated, claimed_accounts: null }),
     });
-    if (mountedRef.current) {
-      if (!result.ok) {
-        setError(result.error);
-      }
-      setSaving(false);
+    if (!result.ok) {
+      setError(result.error);
     }
+    setSaving(false);
   };
 
   return (

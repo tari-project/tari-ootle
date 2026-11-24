@@ -6,11 +6,9 @@ import { describe, expect, it, vi } from "vitest";
 import { formatSettingsError, persistAdvancedFeatureToggle } from "./advancedFeaturesHelpers";
 
 describe("advancedFeaturesHelpers", () => {
-  it("formats Error, RPC error objects, strings, and empty values", () => {
+  it("formats Error messages and falls back on empty or non-Error values", () => {
     expect(formatSettingsError(new Error("daemon offline"), "fallback")).toBe("daemon offline");
-    expect(formatSettingsError({ code: -32000, message: "permission denied" }, "fallback")).toBe("permission denied");
-    expect(formatSettingsError("network error", "fallback")).toBe("network error");
-    expect(formatSettingsError("   ", "fallback")).toBe("fallback");
+    expect(formatSettingsError(new Error("   "), "fallback")).toBe("fallback");
     expect(formatSettingsError(null, "fallback")).toBe("fallback");
   });
 
@@ -39,7 +37,7 @@ describe("advancedFeaturesHelpers", () => {
   it("rolls back to previous features and returns formatted error when persist rejects", async () => {
     const current: AdvancedUiFeatures = { enable_manifest: true, enable_validator_set: false };
     const apply = vi.fn();
-    const persist = vi.fn().mockRejectedValue({ message: "write failed" });
+    const persist = vi.fn().mockRejectedValue(new Error("write failed"));
 
     const result = await persistAdvancedFeatureToggle({
       current,

@@ -21,30 +21,21 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { DataTableCell } from "@components/StyledComponents";
-import { Chip, Table, TableBody, TableCell, TableContainer, TableHead, TableRow } from "@mui/material";
+import { Box, Chip, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Typography } from "@mui/material";
 import type { LogEntry } from "@tari-project/ootle-ts-bindings";
+import { getLogLevelColor, normalizeLogLevelLabel } from "./logsHelpers";
 
-function getLogLevelColor(
-  level: string,
-): "default" | "primary" | "secondary" | "error" | "info" | "success" | "warning" {
-  switch (level.toLowerCase()) {
-    case "error":
-      return "error";
-    case "warn":
-    case "warning":
-      return "warning";
-    case "info":
-      return "info";
-    case "debug":
-      return "secondary";
-    case "trace":
-      return "default";
-    default:
-      return "primary";
+export default function Logs({ data }: { data?: Array<LogEntry> }) {
+  if (!data || data.length === 0) {
+    return (
+      <Box sx={{ p: 3, textAlign: "center" }}>
+        <Typography variant="body2" color="text.secondary">
+          No logs recorded for this transaction
+        </Typography>
+      </Box>
+    );
   }
-}
 
-export default function Logs({ data }: { data: Array<LogEntry> }) {
   return (
     <TableContainer>
       <Table>
@@ -56,12 +47,13 @@ export default function Logs({ data }: { data: Array<LogEntry> }) {
         </TableHead>
         <TableBody>
           {data.map(({ level, message }: LogEntry, index: number) => {
+            const label = normalizeLogLevelLabel(level);
             return (
-              <TableRow key={index}>
+              <TableRow key={`${index}-${label}`}>
                 <DataTableCell>
-                  <Chip label={level} size="small" color={getLogLevelColor(level)} variant="outlined" />
+                  <Chip label={label} size="small" color={getLogLevelColor(level)} variant="outlined" />
                 </DataTableCell>
-                <DataTableCell>{message}</DataTableCell>
+                <DataTableCell sx={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{message}</DataTableCell>
               </TableRow>
             );
           })}

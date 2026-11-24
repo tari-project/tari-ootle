@@ -76,18 +76,25 @@ let outerAddress: URL | null = null;
 
 export async function client() {
   if (clientInstance) {
-    return Promise.resolve(clientInstance);
+    return clientInstance;
+  }
+
+  if (pendingClientInstance) {
+    return pendingClientInstance;
   }
 
   const getAddress = outerAddress ? Promise.resolve(outerAddress) : getClientAddress();
 
-  pendingClientInstance = getAddress.then(async (addr) => {
-    const client = IndexerClient.usingFetchTransport(addr.toString());
-    outerAddress = addr;
-    clientInstance = client;
-    pendingClientInstance = null;
-    return client;
-  });
+  pendingClientInstance = getAddress
+    .then((addr) => {
+      const instance = IndexerClient.usingFetchTransport(addr.toString());
+      outerAddress = addr;
+      clientInstance = instance;
+      return instance;
+    })
+    .finally(() => {
+      pendingClientInstance = null;
+    });
 
   return pendingClientInstance;
 }

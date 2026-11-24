@@ -249,7 +249,7 @@ function RequestCard({ request }: { request: SigningRequestInfo }) {
           )}
         </Field>
         <Field label="Valid epochs">
-          {v1 ? (v1.min_epoch != null ? `${v1.min_epoch} to ${v1.max_epoch}` : `until ${v1.max_epoch}`) : "unknown"}
+          {v1?.min_epoch != null ? `${v1.min_epoch} to ${v1.max_epoch}` : `until ${v1?.max_epoch}`}
         </Field>
         <Field label="Max fee">
           {fees.length > 0 ? (

@@ -9,19 +9,10 @@ export function getValidatedRename(draftName: string, currentName?: string | nul
   return trimmed;
 }
 
-export function applyRenameSuccessIfActive(
-  targetAccount: string,
-  activeAccount: string | null,
-  trimmedName: string,
-  callbacks: {
-    closeEdit: () => void;
-    onRenameSuccess?: (newName: string) => void;
-  },
-): boolean {
+export function runIfAccountActive(targetAccount: string, activeAccount: string | null, callback: () => void): boolean {
   if (activeAccount !== targetAccount) {
     return false;
   }
-  callbacks.closeEdit();
-  callbacks.onRenameSuccess?.(trimmedName);
+  callback();
   return true;
 }

@@ -27,7 +27,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { IoCheckmark, IoClose } from "react-icons/io5";
 import { LuPencilLine } from "react-icons/lu";
 import { useAccountsRename } from "../services/api/hooks/useAccounts";
-import { applyRenameSuccessIfActive, getValidatedRename } from "./accountNameHelpers";
+import { getValidatedRename, runIfAccountActive } from "./accountNameHelpers";
 
 export interface AccountNameProps {
   accountAddress: ComponentAddress;
@@ -47,13 +47,13 @@ const AccountName: React.FC<AccountNameProps> = ({
   const [isEditingName, setIsEditingName] = useState(false);
   const [newName, setNewName] = useState("");
   const activeAccountRef = useRef<ComponentAddress>(accountAddress);
-  activeAccountRef.current = accountAddress;
 
   const renameAccountMutation = useAccountsRename();
 
   const theme = useTheme();
 
   useEffect(() => {
+    activeAccountRef.current = accountAddress;
     setIsEditingName(false);
     setNewName("");
   }, [accountAddress]);
@@ -69,9 +69,6 @@ const AccountName: React.FC<AccountNameProps> = ({
   };
 
   const handleSaveRename = () => {
-    if (renameAccountMutation.isPending) {
-      return;
-    }
     const trimmedName = getValidatedRename(newName, currentName);
     if (trimmedName) {
       const targetAccount = accountAddress;
@@ -82,16 +79,16 @@ const AccountName: React.FC<AccountNameProps> = ({
         },
         {
           onSuccess: () => {
-            applyRenameSuccessIfActive(targetAccount, activeAccountRef.current, trimmedName, {
-              closeEdit: handleCancelEdit,
-              onRenameSuccess,
+            runIfAccountActive(targetAccount, activeAccountRef.current, () => {
+              handleCancelEdit();
+              onRenameSuccess?.(trimmedName);
             });
           },
           onError: (error: any) => {
             console.error("Error renaming account:", error);
-            if (activeAccountRef.current === targetAccount) {
+            runIfAccountActive(targetAccount, activeAccountRef.current, () => {
               onRenameError?.(error);
-            }
+            });
           },
         },
       );

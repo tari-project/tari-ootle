@@ -24,8 +24,14 @@ import { useTimeAgo } from "@hooks/useTimeAgo";
 import { Chip, Tooltip } from "@mui/material";
 import Typography from "@mui/material/Typography";
 import { formatTimestamp } from "@utils/helpers";
+import { DEFAULT_TIME_CHIP_TOOLTIP_PREFIX, formatTimeChipTooltip } from "./timeChipHelpers";
 
-function TimeChip({ timestamp }: { timestamp: string | null | undefined }) {
+interface TimeChipProps {
+  timestamp: string | null | undefined;
+  tooltipPrefix?: string;
+}
+
+function TimeChip({ timestamp, tooltipPrefix = DEFAULT_TIME_CHIP_TOOLTIP_PREFIX }: TimeChipProps) {
   const timeAgo = useTimeAgo(timestamp);
   const formattedTime = formatTimestamp(timestamp);
 
@@ -33,7 +39,7 @@ function TimeChip({ timestamp }: { timestamp: string | null | undefined }) {
 
   const label = <Typography variant="label">{timeAgo}</Typography>;
   return (
-    <Tooltip title={`Created at: ${formattedTime}`} placement="top" arrow>
+    <Tooltip title={formatTimeChipTooltip(formattedTime, tooltipPrefix)} placement="top" arrow>
       <Chip label={label} color="default" size="small" variant="filled" style={{ paddingLeft: 2, paddingRight: 2 }} />
     </Tooltip>
   );

@@ -44,13 +44,12 @@ import TableRow from "@mui/material/TableRow";
 import Typography from "@mui/material/Typography";
 import useAccountStore, { setAccount } from "@store/accountStore";
 import {
-  decodeOotleAddress,
   decodeOotleAddressOrNull,
   encodeOotleAddress,
   OotleAddress,
   substateIdToString,
 } from "@tari-project/ootle-ts-bindings";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { IoPaperPlaneOutline } from "react-icons/io5";
 // @ts-expect-error CJS interop: Vite 8 dev pre-bundler doesn't unwrap exports.default for this package
 import { QRCode } from "react-qr-code";
@@ -108,9 +107,7 @@ function AccountDetails() {
                 </Tooltip>
               </Stack>
             </DataTableCell>
-            <DataTableCell>
-              {accountPublicKey && <CopyAddress address={decodeOotleAddressOrNull(address)!.accountPublicKey} />}
-            </DataTableCell>
+            <DataTableCell>{accountPublicKey && <CopyAddress address={accountPublicKey} />}</DataTableCell>
           </TableRow>
         </TableBody>
       </Table>
@@ -127,13 +124,30 @@ type DestinationTagDialogProps = {
 function DestinationTagDialog(props: DestinationTagDialogProps) {
   const { address, open, onClose } = props;
 
-  const [currentAddress, setCurrentAddress] = useState(address);
+  const [tag, setTag] = useState("");
+
+  useEffect(() => {
+    setTag("");
+  }, [open, address]);
+
+  let currentAddress: OotleAddress = address;
+  let tagError: string | null = null;
+
+  if (tag) {
+    const decoded = address ? decodeOotleAddressOrNull(address) : null;
+    if (!decoded) {
+      tagError = "Unable to decode account address";
+    } else {
+      try {
+        currentAddress = encodeOotleAddress({ ...decoded, destinationTag: tag });
+      } catch (err) {
+        tagError = err instanceof Error ? err.message : "Invalid destination tag";
+      }
+    }
+  }
 
   const handleOnChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const decoded = decodeOotleAddress(address);
-    decoded.destinationTag = event.target.value;
-    const addr = encodeOotleAddress(decoded);
-    setCurrentAddress(addr);
+    setTag(event.target.value);
   };
 
   return (
@@ -143,7 +157,7 @@ function DestinationTagDialog(props: DestinationTagDialogProps) {
       aria-labelledby="alert-dialog-title"
       aria-describedby="alert-dialog-description"
     >
-      <form onSubmit={() => {}}>
+      <form onSubmit={(event) => event.preventDefault()}>
         <DialogTitle id="alert-dialog-title">Destination Tag Address</DialogTitle>
         <DialogContent>
           <DialogContentText id="alert-dialog-description">
@@ -161,19 +175,26 @@ function DestinationTagDialog(props: DestinationTagDialogProps) {
               name="link"
               placeholder="Inv12345...."
               label="Destination tag"
+              value={tag}
+              error={Boolean(tagError)}
+              helperText={tagError ?? undefined}
               fullWidth
               onChange={handleOnChange}
             />
-            <QRCode
-              size={256}
-              style={{ height: "auto", maxWidth: "100%", width: "100%" }}
-              value={currentAddress}
-              viewBox={`0 0 256 256`}
-            />
+            {!tagError && currentAddress && (
+              <>
+                <QRCode
+                  size={256}
+                  style={{ height: "auto", maxWidth: "100%", width: "100%" }}
+                  value={currentAddress}
+                  viewBox={`0 0 256 256`}
+                />
 
-            <Typography variant="subtitle1">
-              <CopyAddress address={currentAddress} />
-            </Typography>
+                <Typography variant="subtitle1">
+                  <CopyAddress address={currentAddress} />
+                </Typography>
+              </>
+            )}
           </div>
         </DialogContent>
         <DialogActions>

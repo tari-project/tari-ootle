@@ -38,7 +38,30 @@ impl ValidatedStealthOutput {
     }
 }
 
+/// Validates a raw outputs statement: its output commitments are unique, then the range-proof aggregation cap, the
+/// empty-outputs edge case, decoding of each output, spend-key validity and the aggregated range proof.
 pub fn validate_stealth_outputs_statement(
+    stmt: &StealthOutputsStatement,
+    view_key: Option<&RistrettoPublicKey>,
+) -> Result<Vec<ValidatedStealthOutput>, ResourceError> {
+    let mut seen_commitments = BTreeSet::new();
+    for statement in &stmt.outputs {
+        let commitment = statement.output.commitment;
+        if !seen_commitments.insert(commitment) {
+            return Err(ResourceError::InvalidConfidentialProof {
+                details: format!("Duplicate output commitment {commitment} in stealth outputs statement"),
+            });
+        }
+    }
+    validate_outputs(stmt, view_key)
+}
+
+/// Validates the outputs of `stmt`: the range-proof aggregation cap, the empty-outputs edge case, decoding of each
+/// output, spend-key validity and the aggregated range proof.
+///
+/// Precondition: the output commitments of `stmt` are unique. [`validate_stealth_outputs_statement`] establishes
+/// this for a raw statement, and a [`CheckedStealthTransfer`](super::CheckedStealthTransfer) holds it for its outputs.
+pub(super) fn validate_outputs(
     stmt: &StealthOutputsStatement,
     view_key: Option<&RistrettoPublicKey>,
 ) -> Result<Vec<ValidatedStealthOutput>, ResourceError> {
@@ -64,20 +87,9 @@ pub fn validate_stealth_outputs_statement(
         });
     }
 
-    let mut seen_commitments = BTreeSet::new();
     let mut decoded = Vec::with_capacity(stmt.outputs.len());
     for statement in &stmt.outputs {
-        let output = &statement.output;
-        if !seen_commitments.insert(output.commitment) {
-            return Err(ResourceError::InvalidConfidentialProof {
-                details: format!(
-                    "Duplicate output commitment {} in stealth outputs statement",
-                    output.commitment
-                ),
-            });
-        }
-
-        let decoded_output = DecodedOutput::decode(output, view_key)?;
+        let decoded_output = DecodedOutput::decode(&statement.output, view_key)?;
 
         // Unspendable `{no key, no conditions}` outputs are unrepresentable because `SpendAuthorization` has no such
         // variant, so every output has at least one spend path. When a `spend_key` is present, it reaches the auth
@@ -303,6 +315,26 @@ mod tests {
             agg_range_proof: RangeProofBytes::try_from(vec![0xabu8; 64]).unwrap(),
         };
 
+        let err = validate_stealth_outputs_statement(&stmt, None).unwrap_err();
+        assert!(
+            matches!(
+                &err,
+                ResourceError::InvalidConfidentialProof { details }
+                    if details.contains("Duplicate output commitment")
+            ),
+            "unexpected error: {err:?}"
+        );
+
+        // Uniqueness is established across the whole statement before any output is decoded, so a later duplicate is
+        // reported ahead of an earlier malformed output.
+        let mut bad_nonce = sample_stealth_output(10, 50);
+        bad_nonce.output.sender_public_nonce = RistrettoPublicKeyBytes::from_bytes(&[0xff; 32]).unwrap();
+        let dup = sample_stealth_output(9, 50);
+        let stmt = StealthOutputsStatement {
+            outputs: vec![bad_nonce, dup.clone(), dup],
+            revealed_output: None,
+            agg_range_proof: RangeProofBytes::try_from(vec![0xabu8; 64]).unwrap(),
+        };
         let err = validate_stealth_outputs_statement(&stmt, None).unwrap_err();
         assert!(
             matches!(

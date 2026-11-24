@@ -165,7 +165,7 @@ use super::{
     Runtime,
     RuntimeEvent,
     spend_script_execution::{SpendScriptExecution, StatementSpendView},
-    working_state::{WorkingState, reject_transient_values_in},
+    working_state::{AdmittedStealthTransfer, WorkingState, reject_transient_values_in},
 };
 use crate::{
     intrinsics,
@@ -1101,16 +1101,18 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
     /// - **script path** — the revealed leaf must be included under the output's committed `condition_root` (the
     ///   inclusion proof is verified exactly once, here), then the leaf is evaluated: an `AccessRule` leaf natively, a
     ///   `TemplateFunction` leaf as a read-only WASM predicate.
+    ///
+    /// Taking an [`AdmittedStealthTransfer`] means admission has run first: covenant predicates look claims up by
+    /// partition, and admission has already checked that each claim names a distinct input.
     fn verify_input_authorizations(
         &self,
         resource_address: ResourceAddressRef,
-        statement: &StealthTransferStatement,
+        transfer: &AdmittedStealthTransfer,
     ) -> Result<(), RuntimeError> {
+        let statement = transfer.statement();
         if statement.inputs_statement.inputs.is_empty() {
             return Ok(());
         }
-        // Covenant predicates look claims up by partition, so the claim list is bounded before any predicate runs.
-        stealth::validate_covenant_claims(statement)?;
         let resolved = self
             .tracker
             .read_with(|state| state.resolve_resource_address_ref(resource_address))?;
@@ -3085,7 +3087,7 @@ where
                         // TARI has no view key, so the viewable-balance surcharge never applies to a fee payment.
                         self.tracker
                             .charge_native_execution(stealth::transfer_native_points(admitted.statement(), false))?;
-                        self.verify_input_authorizations(TARI_TOKEN.into(), admitted.statement())?;
+                        self.verify_input_authorizations(TARI_TOKEN.into(), &admitted)?;
                         Some(admitted)
                     },
                     None => None,
@@ -4513,7 +4515,7 @@ where
         // their values to be in range; `execute_stealth_transfer` below range-proofs those same `statement` outputs.
         // Both run pre-commit in this one atomic call, so the two MUST stay coupled — decoupling them would reopen a
         // wraparound forgery in the covenant check.
-        self.verify_input_authorizations(resource_address.clone(), admitted.statement())?;
+        self.verify_input_authorizations(resource_address.clone(), &admitted)?;
 
         self.tracker.write_with_authorization(|state_mut| {
             let Some(container) =

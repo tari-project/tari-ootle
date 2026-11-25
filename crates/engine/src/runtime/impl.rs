@@ -698,8 +698,9 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
         .into_iter()
         .collect();
 
-        // The acting component's vaults are indexed once here, in the pass over its state that
-        // `charge_component_load` pays for, so each vault read the hook makes is a lookup.
+        // The acting component's vaults are indexed once here, so each vault read the hook makes is a
+        // lookup. `charge_component_load` prices every reference in the state at the indexing rate,
+        // which covers this pass.
         let mut acting_component_vaults = IndexSet::new();
         if let Some(component) = auth_caller.component().copied() {
             self.invoke_modules_on_runtime_call("load_component")?;

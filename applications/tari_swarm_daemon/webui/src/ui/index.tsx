@@ -29,7 +29,7 @@ export function Panel({
 }) {
   return (
     <section className="panel">
-      {(title || actions) && (
+      {(title || note || actions) && (
         <header className="panel-head">
           <div className="row">
             {title && <h2>{title}</h2>}
@@ -50,6 +50,14 @@ export function Empty({ children }: { children: ReactNode }) {
 /** Click-to-copy identifier. Shows the middle elided; copies the whole value. */
 export function Copyable({ value, chars = 6 }: { value: string | null | undefined; chars?: number }) {
   const [said, setSaid] = useState(false);
+  const mounted = useRef(true);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (!said) {
@@ -64,16 +72,22 @@ export function Copyable({ value, chars = 6 }: { value: string | null | undefine
   }
   const short = value.length > chars * 2 + 3 ? `${value.slice(0, chars)}…${value.slice(-chars)}` : value;
 
-  return (
-    <button
-      type="button"
-      className="copy"
-      title={value}
-      onClick={() => {
-        void navigator.clipboard.writeText(value);
+  const copy = async () => {
+    if (!navigator.clipboard?.writeText) {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(value);
+      if (mounted.current) {
         setSaid(true);
-      }}
-    >
+      }
+    } catch {
+      // Clipboard API may be denied or unavailable over non-HTTPS origins.
+    }
+  };
+
+  return (
+    <button type="button" className="copy" title={value} onClick={() => void copy()}>
       <span className="truncate">{short}</span>
       <span className={`hint${said ? " said" : ""}`}>{said ? "copied" : "copy"}</span>
     </button>
@@ -152,20 +166,26 @@ export function ActionButton({
   children: ReactNode;
 }) {
   const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
   const mounted = useRef(true);
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
       mounted.current = false;
-    },
-    [],
-  );
+    };
+  }, []);
 
   const run = async () => {
+    if (disabled || busyRef.current) {
+      return;
+    }
+    busyRef.current = true;
     setBusy(true);
     try {
       await onAct();
     } finally {
+      busyRef.current = false;
       // The action may have removed this instance, taking the button with it.
       if (mounted.current) {
         setBusy(false);

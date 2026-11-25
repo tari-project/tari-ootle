@@ -21,6 +21,7 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { ApiError } from "@api/helpers/types";
+import { accountBalancesQueryKey } from "@api/hooks/accountQueryKeys";
 import { useNFTsList } from "@api/hooks/useNfts";
 import queryClient from "@api/queryClient";
 import AccountName from "@components/AccountName";
@@ -143,7 +144,7 @@ function AccountDetailsContent({ accountAddr }: { accountAddr: string }) {
       setStealthResource({ newResourceAddress: "" });
       setShowAddStealth(false);
       showSuccess("Stealth resource associated with account");
-      void queryClient.invalidateQueries({ queryKey: [`accounts_balances_${accountAddress}`] });
+      void queryClient.invalidateQueries({ queryKey: accountBalancesQueryKey(accountAddress) });
     } catch (error: unknown) {
       showError(error instanceof Error && error.message ? error.message : "Failed to associate stealth resource");
     } finally {

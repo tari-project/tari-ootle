@@ -44,22 +44,16 @@ fn convert_json_to_cbor_inner(value: json::Value, depth: usize) -> Result<tari_b
     }
 }
 
+// Overflowing floats and integers outside [i64::MIN, u64::MAX] only reach `json::Number`
+// when `serde_json/arbitrary_precision` is enabled (as in `tari_walletd`). Without that
+// feature, `serde_json` rejects overflowing floats at parse time and widens integers above
+// `u64::MAX` to `f64`.
 fn convert_json_number(n: &json::Number) -> Result<tari_bor::Value, JsonCborError> {
-    if let Some(v) = n.as_i64() {
-        return Ok(tari_bor::Value::Integer(v.into()));
-    }
-    if let Some(v) = n.as_u64() {
-        return Ok(tari_bor::Value::Integer(v.into()));
-    }
-    convert_non_integer_number(&n.to_string(), n.as_f64())
-}
-
-fn convert_non_integer_number(raw: &str, as_f64: Option<f64>) -> Result<tari_bor::Value, JsonCborError> {
-    let is_float = raw.bytes().any(|b| matches!(b, b'.' | b'e' | b'E'));
-    if let Some(v) = as_f64.filter(|f| is_float && f.is_finite()) {
-        return Ok(tari_bor::Value::Float(v));
-    }
-    Err(JsonCborError::NumberOutOfRange)
+    n.as_i64()
+        .map(|v| tari_bor::Value::Integer(v.into()))
+        .or_else(|| n.as_u64().map(|v| tari_bor::Value::Integer(v.into())))
+        .or_else(|| n.as_f64().filter(|_| n.is_f64()).map(tari_bor::Value::Float))
+        .ok_or(JsonCborError::NumberOutOfRange)
 }
 
 #[cfg(test)]
@@ -89,26 +83,13 @@ mod tests {
 
     #[test]
     fn rejects_numbers_outside_cbor_integer_and_finite_f64_range() {
-        for (raw, approx_f64) in [
-            ("18446744073709551616", Some(18446744073709551616.0)),
-            ("-9223372036854775809", Some(-9223372036854775809.0)),
-            ("1e400", None),
-            ("-1e400", None),
-            ("1e400", Some(f64::INFINITY)),
-            ("-1e400", Some(f64::NEG_INFINITY)),
-        ] {
+        for raw in ["18446744073709551616", "-9223372036854775809", "1e400", "-1e400"] {
+            let value: json::Value = json::from_str(raw).unwrap();
             assert_eq!(
-                convert_non_integer_number(raw, approx_f64),
+                convert_json_to_cbor(value),
                 Err(JsonCborError::NumberOutOfRange),
                 "expected error for {raw}"
             );
-            if let Some(value) = json::from_str::<json::Value>(raw).ok().filter(|v| v.to_string() == raw) {
-                assert_eq!(
-                    convert_json_to_cbor(value),
-                    Err(JsonCborError::NumberOutOfRange),
-                    "expected error for parsed {raw}"
-                );
-            }
         }
     }
 

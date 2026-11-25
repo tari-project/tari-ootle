@@ -24,6 +24,7 @@ use tari_template_lib_types::{
 };
 
 use crate::{
+    Assertion,
     Blobs,
     Instruction,
     MainSigner,
@@ -466,7 +467,7 @@ fn calc_instruction_weight(instruction: &Instruction) -> u64 {
         Instruction::ClaimBurn { .. } => CLAIM_FIXED_COST,
         Instruction::ClaimValidatorFees { .. } => 1,
         Instruction::DropAllProofsInWorkspace => 1,
-        Instruction::Assert { .. } => 1,
+        Instruction::Assert { assertion, .. } => calc_assertion_weight(assertion),
         Instruction::TakeFromBucket { .. } => 1,
         Instruction::PutIntoBucket { .. } => 1,
         Instruction::AuthorizeProof { .. } => 1,
@@ -485,6 +486,18 @@ fn calc_instruction_weight(instruction: &Instruction) -> u64 {
             OwnerRule::ByAccessRule(rule) => 1 + rule.num_nodes() as u64,
             _ => 1,
         },
+    }
+}
+
+/// An assertion is a fixed cost, plus the bytes of any non-fungible ids it carries. Those ids are a variable payload
+/// (up to `NftAssertVec`'s 32 ids of up to 64 bytes), so they are priced like literal argument bytes.
+fn calc_assertion_weight(assertion: &Assertion) -> u64 {
+    match assertion {
+        Assertion::BucketContainsNonFungibles { nfts, .. } => {
+            let id_bytes = nfts.iter().map(|id| tari_bor::encoded_len(id) as u64).sum::<u64>();
+            1 + id_bytes / LITERAL_BYTE_DIVISOR
+        },
+        Assertion::BucketAmount { .. } | Assertion::IsNotNull => 1,
     }
 }
 
@@ -1163,6 +1176,40 @@ mod weight_tests {
             owner_rule: OwnerRule::None,
         };
         assert_eq!(calc_instruction_weight(&set_owner_none), 1);
+    }
+
+    fn nft_assertion(nfts: Vec<tari_template_lib_types::NonFungibleId>) -> Instruction {
+        Instruction::Assert {
+            key: crate::args::WorkspaceOffsetId::new(0),
+            assertion: Assertion::BucketContainsNonFungibles {
+                resource_address: tari_template_lib_types::ResourceAddress::new(ObjectKey::default()),
+                check: crate::NftCheck::AllOf,
+                nfts: nfts.try_into().expect("within the NftAssertVec limit"),
+            },
+        }
+    }
+
+    #[test]
+    fn nft_assertion_weight_counts_its_ids() {
+        use tari_template_lib_types::NonFungibleId;
+
+        let long_id = |i: usize| NonFungibleId::try_from_string(format!("{i:0>64}")).expect("64 characters fit");
+        assert_eq!(calc_instruction_weight(&nft_assertion(vec![])), 1);
+
+        // 32 ids of 64 bytes are about 2 KiB, priced like the same bytes as literal arguments.
+        let full = nft_assertion((0..32).map(long_id).collect());
+        let full_bytes = (0..32).map(|i| tari_bor::encoded_len(&long_id(i)) as u64).sum::<u64>();
+        assert_eq!(calc_instruction_weight(&full), 1 + full_bytes / LITERAL_BYTE_DIVISOR);
+        assert!(
+            calc_instruction_weight(&full) > 600,
+            "{}",
+            calc_instruction_weight(&full)
+        );
+
+        // More ids never weigh less, and splitting them across assertions does not reduce the total.
+        let half = nft_assertion((0..16).map(long_id).collect());
+        assert!(calc_instruction_weight(&half) < calc_instruction_weight(&full));
+        assert!(2 * calc_instruction_weight(&half) >= calc_instruction_weight(&full));
     }
 
     #[test]

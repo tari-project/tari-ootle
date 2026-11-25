@@ -61,15 +61,18 @@ pub fn read_chunk(path: &Path, end: Option<u64>, max_bytes: Option<u64>) -> io::
     // boundary, and returning nothing there would leave `start` at `end`, so the caller would ask for the same
     // empty window forever. One rendered partial line is the cheaper end of that trade.
     if start > 0 {
-        if let Some(nl) = bytes.iter().position(|b| *b == b'\n').filter(|nl| nl + 1 < bytes.len()) {
-            bytes = &bytes[nl + 1..];
-            start += nl as u64 + 1;
-        } else if let Some(char_start) = bytes.iter().position(|b| !is_utf8_continuation(*b)) {
-            bytes = &bytes[char_start..];
-            start += char_start as u64;
-        } else if let Some(back) = window[..lookback].iter().rposition(|b| !is_utf8_continuation(*b)) {
-            bytes = &window[back..];
-            start = map_start + back as u64;
+        match leading_fragment_len(bytes) {
+            Some(skip) => {
+                bytes = &bytes[skip..];
+                start += skip as u64;
+            },
+            // The whole window sits inside one multibyte codepoint: step back to its leading byte.
+            None => {
+                if let Some(back) = window[..lookback].iter().rposition(|b| !is_utf8_continuation(*b)) {
+                    bytes = &window[back..];
+                    start = map_start + back as u64;
+                }
+            },
         }
     }
 
@@ -99,12 +102,10 @@ fn tail_lines_within(path: &Path, n: usize, scan_bytes: u64) -> io::Result<Vec<S
     // A window that began mid-file opens on a fragment. It must go before the last `n` lines are taken, or the
     // fragment survives whenever the window holds more than `n` lines and a whole line is dropped in its place.
     // A window with no boundary at all is one long line, and the fragment is all there is to show.
-    if start > 0 {
-        if let Some(nl) = bytes.iter().position(|b| *b == b'\n').filter(|nl| nl + 1 < bytes.len()) {
-            bytes = &bytes[nl + 1..];
-        } else if let Some(char_start) = bytes.iter().position(|b| !is_utf8_continuation(*b)) {
-            bytes = &bytes[char_start..];
-        }
+    if start > 0 &&
+        let Some(skip) = leading_fragment_len(bytes)
+    {
+        bytes = &bytes[skip..];
     }
     let body = String::from_utf8_lossy(bytes);
 
@@ -117,6 +118,17 @@ fn tail_lines_within(path: &Path, n: usize, scan_bytes: u64) -> io::Result<Vec<S
     lines.reverse();
 
     Ok(lines)
+}
+
+/// Length of the fragment opening a window that began mid-file: through the first newline that leaves a line behind,
+/// or else up to the first codepoint boundary. `None` when every byte is a UTF-8 continuation byte.
+fn leading_fragment_len(bytes: &[u8]) -> Option<usize> {
+    bytes
+        .iter()
+        .position(|b| *b == b'\n')
+        .filter(|nl| nl + 1 < bytes.len())
+        .map(|nl| nl + 1)
+        .or_else(|| bytes.iter().position(|b| !is_utf8_continuation(*b)))
 }
 
 fn is_utf8_continuation(byte: u8) -> bool {

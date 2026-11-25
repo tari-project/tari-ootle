@@ -16,7 +16,6 @@ use tari_template_lib_types::{
         AccessRule,
         ComponentAccessRules,
         InvalidAccessRule,
-        MAX_ACCESS_RULE_NODES,
         RequireRule,
         RestrictedAccessRule,
         RuleRequirement,
@@ -333,10 +332,8 @@ impl AccessRulesExpr {
         let (default, methods) = match self {
             Self::Var(ident) => {
                 let rules: ComponentAccessRules = decode_var(vars, ident)?;
-                check_decoded_rule(
-                    rules.contains_scoped_to_component_or_template(),
-                    rules.find_invalid_rule(),
-                )?;
+                reject_scoped_rule(rules.contains_scoped_to_component_or_template())?;
+                check_valid_rule(rules.find_invalid_rule())?;
                 return Ok(rules);
             },
             Self::Inline { default, methods } => (default, methods),
@@ -348,7 +345,6 @@ impl AccessRulesExpr {
         for (method, rule) in methods {
             rules = rules.add_method_rule(method.as_str(), rule.build(vars)?);
         }
-        check_rule_nodes(rules.num_nodes())?;
         Ok(rules)
     }
 }
@@ -359,10 +355,8 @@ impl OwnerRuleExpr {
             Self::Var(ident) => {
                 let rule: OwnerRule = decode_var(vars, ident)?;
                 if let OwnerRule::ByAccessRule(access_rule) = &rule {
-                    check_decoded_rule(
-                        access_rule.contains_scoped_to_component_or_template(),
-                        access_rule.find_invalid_rule(),
-                    )?;
+                    reject_scoped_rule(access_rule.contains_scoped_to_component_or_template())?;
+                    check_valid_rule(access_rule.find_invalid_rule())?;
                 }
                 rule
             },
@@ -381,30 +375,24 @@ impl AccessRuleExpr {
             Self::DenyAll => AccessRule::DenyAll,
             Self::Restricted(rule) => AccessRule::Restricted(rule.build(vars)?),
         };
-        check_decoded_rule(false, rule.find_invalid_rule())?;
-        check_rule_nodes(rule.num_nodes())?;
+        check_valid_rule(rule.find_invalid_rule())?;
         Ok(rule)
     }
 }
 
-fn check_decoded_rule(has_scoped: bool, invalid: Option<InvalidAccessRule>) -> Result<(), ManifestError> {
+fn reject_scoped_rule(has_scoped: bool) -> Result<(), ManifestError> {
     if has_scoped {
         return Err(ManifestError::InvalidInstruction {
             reason: "component access and owner rules do not accept component(..) or template(..)".to_string(),
         });
     }
-    if let Some(invalid) = invalid {
-        return Err(ManifestError::InvalidInstruction {
-            reason: format!("invalid access rule: {invalid:?}"),
-        });
-    }
     Ok(())
 }
 
-fn check_rule_nodes(num_nodes: usize) -> Result<(), ManifestError> {
-    if num_nodes > MAX_ACCESS_RULE_NODES {
+fn check_valid_rule(invalid: Option<InvalidAccessRule>) -> Result<(), ManifestError> {
+    if let Some(invalid) = invalid {
         return Err(ManifestError::InvalidInstruction {
-            reason: format!("access rules hold {num_nodes} nodes, but the maximum allowed is {MAX_ACCESS_RULE_NODES}"),
+            reason: format!("invalid access rule: {invalid:?}"),
         });
     }
     Ok(())
@@ -574,29 +562,11 @@ mod tests {
     }
 
     #[test]
-    fn rules_enforce_nesting_depth_and_node_limits() {
+    fn rules_enforce_nesting_depth() {
         let nest = |levels: usize| format!("{}resource(TARI){}", "any_of(".repeat(levels), ")".repeat(levels));
         assert!(access_rule(&nest(MAX_RULE_DEPTH - 1)).is_ok());
         let err = access_rule(&nest(MAX_RULE_DEPTH)).unwrap_err();
         assert!(err.contains("nests deeper than"), "{err}");
-
-        let per_method = "any_of(resource(TARI), resource(TARI), resource(TARI))";
-        let num_methods = MAX_ACCESS_RULE_NODES / 8;
-        let methods = (0..num_methods)
-            .map(|i| format!("m{i} = {per_method}"))
-            .collect::<Vec<_>>()
-            .join(", ");
-        let at_limit = parse_access_rules.parse_str(&methods).unwrap().build(&NoVars).unwrap();
-        assert_eq!(at_limit.num_nodes(), MAX_ACCESS_RULE_NODES);
-
-        let over_limit = format!("{methods}, extra = resource(TARI)");
-        let err = parse_access_rules
-            .parse_str(&over_limit)
-            .unwrap()
-            .build(&NoVars)
-            .unwrap_err()
-            .to_string();
-        assert!(err.contains("maximum allowed"), "{err}");
     }
 
     #[test]

@@ -24,7 +24,7 @@ use std::{collections::HashMap, str::FromStr};
 
 use proc_macro2::{TokenStream, TokenTree};
 use syn::parse2;
-use tari_ootle_transaction::{Blob, Blobs, Instruction};
+use tari_ootle_transaction::{Blob, Blobs, Instruction, InstructionLimitTracker};
 use tari_template_lib_types::TemplateAddress;
 
 use self::ast::ManifestAst;
@@ -65,7 +65,20 @@ pub fn parse_manifest(
     let tokens = TokenStream::from_str(input).map_err(|e| ManifestError::LexError(e.to_string()))?;
     check_group_depth(&tokens)?;
     let ast = parse2::<ManifestAst>(tokens)?;
-    ManifestInstructionGenerator::new(globals, templates, blob_inputs).generate_instructions(ast)
+    let instructions = ManifestInstructionGenerator::new(globals, templates, blob_inputs).generate_instructions(ast)?;
+    check_instruction_limits(&instructions.instructions)?;
+    check_instruction_limits(&instructions.fee_instructions)?;
+    Ok(instructions)
+}
+
+fn check_instruction_limits(instructions: &[Instruction]) -> Result<(), ManifestError> {
+    let mut limits = InstructionLimitTracker::new();
+    for instruction in instructions {
+        limits
+            .add(instruction)
+            .map_err(|e| ManifestError::InvalidInstruction { reason: e.to_string() })?;
+    }
+    Ok(())
 }
 
 /// Sanity bound on manifest source size. Generous — real manifests are a few KiB at most.
@@ -122,5 +135,24 @@ mod size_cap_tests {
         let src = "fn main() { let a = foo(bar([1, 2, 3])); }";
         let res = parse_manifest(src, HashMap::new(), Default::default(), Default::default());
         assert!(!matches!(res, Err(ManifestError::ManifestTooLarge { .. })));
+    }
+
+    #[test]
+    fn rejects_access_rule_nodes_over_transaction_limit() {
+        let per_method = "any_of(resource(TARI), resource(TARI), resource(TARI))";
+        let methods = (0..64)
+            .map(|i| format!("m{i} = {per_method}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let one = format!("fn main() {{ let c = new_component_addr!(); set_access_rules!(c, {methods}); }}");
+        assert!(parse_manifest(&one, HashMap::new(), Default::default(), Default::default()).is_ok());
+
+        let two = format!(
+            "fn main() {{ let c = new_component_addr!(); set_access_rules!(c, {methods}); set_access_rules!(c, \
+             {methods}); }}"
+        );
+        let res = parse_manifest(&two, HashMap::new(), Default::default(), Default::default());
+        assert!(matches!(res, Err(ManifestError::InvalidInstruction { reason })
+            if reason.contains("nodes in total")));
     }
 }

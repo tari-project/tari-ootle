@@ -63,8 +63,6 @@ use crate::{
 pub trait WalletStoreWriter: CommittableStore {
     // Key manager
     fn key_manager_insert_or_ignore(&mut self, branch: &str, index: u64) -> Result<(), WalletStorageError>;
-    fn key_manager_set_active_index(&mut self, branch: &str, index: u64) -> Result<(), WalletStorageError>;
-    fn key_manager_reset_index(&mut self, branch: &str, index: u64) -> Result<(), WalletStorageError>;
     fn key_manager_insert_imported_key(
         &mut self,
         label: &str,
@@ -175,6 +173,15 @@ pub trait WalletStoreWriter: CommittableStore {
         lock_id: WalletLockId,
     ) -> Result<ConfidentialOutputModel, WalletStorageError>;
     fn confidential_outputs_insert(&mut self, output: ConfidentialOutputModel) -> Result<(), WalletStorageError>;
+    /// Transitions confidential outputs in `vault_id` matching `commitments` from `from_status` to `to_status`,
+    /// returning the number of rows updated.
+    fn confidential_outputs_set_status_by_commitments(
+        &mut self,
+        vault_id: &VaultId,
+        commitments: &[PedersenCommitmentBytes],
+        from_status: OutputStatus,
+        to_status: OutputStatus,
+    ) -> Result<usize, WalletStorageError>;
     /// Release outputs that were locked and remove pending unconfirmed outputs for this proof
     fn confidential_outputs_release_by_lock_id(&mut self, lock_id: WalletLockId) -> Result<(), WalletStorageError>;
 
@@ -411,12 +418,16 @@ pub trait WalletStoreWriter: CommittableStore {
     /// Removes each of `entries` that is still queued at its generation. An entry queued again since it was read
     /// stays queued. Returns the number removed.
     fn utxo_process_queue_ack(&mut self, entries: &[QueuedEntry]) -> Result<usize, WalletStorageError>;
-    /// Advances the generation of every entry queued for the resource, so that no lookup made before is
-    /// acknowledged. Returns the number of entries advanced.
-    fn utxo_process_queue_invalidate(
+    /// Records spends of outputs of the resource that the wallet does not hold, after every one recorded before, while
+    /// any UTXO of the resource is queued for recovery. With none queued, no lookup can need them, so they and every
+    /// spend recorded for the resource before are removed instead.
+    fn utxo_unheld_spends_record(
         &mut self,
         resource_address: &ResourceAddress,
-    ) -> Result<usize, WalletStorageError>;
+        commitments: &[PedersenCommitmentBytes],
+    ) -> Result<(), WalletStorageError>;
+    /// Removes the recorded unheld spends at or below `watermark`. Returns the number removed.
+    fn utxo_unheld_spends_prune(&mut self, watermark: u64) -> Result<usize, WalletStorageError>;
 
     // Address book
     fn address_book_insert(

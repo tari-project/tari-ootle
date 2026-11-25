@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use tari_template_lib_types::TemplateAddress;
 use url::Url;
 
-use crate::{MetadataHash, MetadataHashWriter};
+use crate::{CommitHash, MetadataHash, MetadataHashWriter};
 
 /// Current schema version for template metadata.
 pub const SCHEMA_VERSION: u32 = 1;
@@ -43,10 +43,10 @@ pub struct TemplateMetadata {
     pub repository: Option<Url>,
     /// The commit hash of the source code used to build this template, for reproducible build verification.
     #[n(7)]
-    #[cbor(with = "option_oid")]
+    #[cbor(with = "option_commit_hash")]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(feature = "ts", ts(type = "{ Sha1: Array<number> } | null"))]
-    pub commit_hash: Option<gix_hash::ObjectId>,
+    pub commit_hash: Option<CommitHash>,
     #[n(8)]
     #[cbor(with = "option_url")]
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -130,13 +130,12 @@ mod option_url {
     }
 }
 
-/// minicbor adapter for `Option<gix_hash::ObjectId>`. Encodes as CBOR bytes (or null).
-mod option_oid {
-    use gix_hash::ObjectId;
+/// minicbor adapter for `Option<CommitHash>`. Encodes as CBOR bytes (or null).
+mod option_commit_hash {
     use minicbor::{CborLen, Decoder, Encoder};
 
     pub fn encode<C, W: minicbor::encode::Write>(
-        v: &Option<ObjectId>,
+        v: &Option<super::CommitHash>,
         e: &mut Encoder<W>,
         _ctx: &mut C,
     ) -> Result<(), minicbor::encode::Error<W::Error>> {
@@ -144,28 +143,31 @@ mod option_oid {
             None => {
                 e.null()?;
             },
-            Some(oid) => {
-                e.bytes(oid.as_bytes())?;
+            Some(hash) => {
+                e.bytes(hash.as_bytes())?;
             },
         }
         Ok(())
     }
 
-    pub fn decode<'b, C>(d: &mut Decoder<'b>, _ctx: &mut C) -> Result<Option<ObjectId>, minicbor::decode::Error> {
+    pub fn decode<'b, C>(
+        d: &mut Decoder<'b>,
+        _ctx: &mut C,
+    ) -> Result<Option<super::CommitHash>, minicbor::decode::Error> {
         if matches!(d.datatype()?, minicbor::data::Type::Null) {
             d.skip()?;
             return Ok(None);
         }
         let bytes = d.bytes()?;
-        ObjectId::try_from(bytes)
+        super::CommitHash::try_from(bytes)
             .map(Some)
-            .map_err(|e| minicbor::decode::Error::message(format!("invalid ObjectId: {e}")))
+            .map_err(|e| minicbor::decode::Error::message(format!("invalid commit hash: {e}")))
     }
 
-    pub fn cbor_len<C>(v: &Option<ObjectId>, ctx: &mut C) -> usize {
+    pub fn cbor_len<C>(v: &Option<super::CommitHash>, ctx: &mut C) -> usize {
         match v {
             None => <() as CborLen<C>>::cbor_len(&(), ctx),
-            Some(oid) => <minicbor::bytes::ByteSlice as CborLen<C>>::cbor_len(oid.as_bytes().into(), ctx),
+            Some(hash) => <minicbor::bytes::ByteSlice as CborLen<C>>::cbor_len(hash.as_bytes().into(), ctx),
         }
     }
 }
@@ -257,7 +259,7 @@ mod tests {
             tags: vec!["test".to_string(), "example".to_string()],
             category: Some("utility".to_string()),
             repository: Some(Url::parse("https://github.com/example/test").unwrap()),
-            commit_hash: Some(gix_hash::ObjectId::from_hex(b"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").unwrap()),
+            commit_hash: Some(CommitHash::from_hex("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").unwrap()),
             documentation: None,
             homepage: None,
             license: Some("BSD-3-Clause".to_string()),
@@ -291,7 +293,7 @@ mod tests {
     #[test]
     fn commit_hash_encoding_is_stable() {
         let mut metadata = TemplateMetadata::new("pinned".to_string(), "1.0.0".to_string());
-        metadata.commit_hash = Some(gix_hash::ObjectId::from_hex(b"0123456789abcdefFEDCBA9876543210deadBEEF").unwrap());
+        metadata.commit_hash = Some(CommitHash::from_hex("0123456789abcdefFEDCBA9876543210deadBEEF").unwrap());
 
         assert_eq!(
             metadata.hash().unwrap().to_hex(),
@@ -309,7 +311,7 @@ mod tests {
     #[cfg(feature = "json")]
     fn commit_hash_json_shape_is_stable() {
         let mut metadata = TemplateMetadata::new("pinned".to_string(), "1.0.0".to_string());
-        metadata.commit_hash = Some(gix_hash::ObjectId::from_hex(b"0123456789abcdefFEDCBA9876543210deadBEEF").unwrap());
+        metadata.commit_hash = Some(CommitHash::from_hex("0123456789abcdefFEDCBA9876543210deadBEEF").unwrap());
 
         let value = serde_json::to_value(&metadata).unwrap();
         assert_eq!(

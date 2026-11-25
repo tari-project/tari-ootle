@@ -1,0 +1,13 @@
+[workspace]
+[package]
+name = "rules_updater"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+tari_template_lib = { path = "../../../../template_lib" }
+# Used to call the engine with a creation argument the template library does not build.
+tari_template_abi = { path = "../../../../template_abi", default-features = false }
+
+[lib]
+crate-type = ["cdylib"]

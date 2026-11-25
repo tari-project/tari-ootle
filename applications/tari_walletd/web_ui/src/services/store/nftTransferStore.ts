@@ -132,7 +132,11 @@ export const useNftTransferStore = create<NftTransferState>((set, get) => ({
     const { transferFormState, validity } = get();
 
     set({
-      transferFormState: { ...transferFormState, [name]: value },
+      transferFormState: {
+        ...transferFormState,
+        [name]: value,
+        ...(name !== "maxFee" ? { maxFee: "" } : {}),
+      },
       validity: isValid !== undefined ? { ...validity, [name]: isValid } : validity,
     });
   },

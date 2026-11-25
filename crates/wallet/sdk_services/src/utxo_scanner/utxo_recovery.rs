@@ -142,6 +142,9 @@ where
         let mut cursor = None;
         // A pair queued for several accounts has entries in several batches, and is looked up once a round
         let mut looked_up = HashSet::new();
+        // Every lookup of this round is made after the spends recorded up to here, so none of them is needed once the
+        // round ends. Only one recovery task runs, so no other lookup needs them either.
+        let round_watermark = self.sdk.store().with_read_tx(|tx| tx.utxo_unheld_spends_watermark())?;
         loop {
             let batch = self
                 .sdk
@@ -150,6 +153,9 @@ where
 
             let Some(last) = batch.last else {
                 debug!(target: LOG_TARGET, "✅ No more UTXOs to process ({} unresolved)", num_unresolved);
+                self.sdk
+                    .store()
+                    .with_write_tx(|tx| tx.utxo_unheld_spends_prune(round_watermark))?;
                 if start_event_published {
                     self.notify(UtxoRecoveryCompletedEvent {
                         round_id: self.round_id,
@@ -193,6 +199,8 @@ where
                 // created/spent them locally, and skip querying those. This would also avoid having to deal with this
                 // downstream (previous bug caused spent to be marked as unspent).
 
+                // A spend the scanner records from here on may be of an output this lookup returns unspent
+                let lookup_watermark = self.sdk.store().with_read_tx(|tx| tx.utxo_unheld_spends_watermark())?;
                 // max 3.3kB per request (excl underlying protocol overhead *cough* json + hex)
                 let FetchedUtxos { unspent: utxos, spent } = self
                     .sdk
@@ -303,7 +311,8 @@ where
                 } else {
                     (utxos, HashSet::new())
                 };
-                let stored = self.process_recovered_utxos(*resource_addr, &to_look_up, utxos, &deferred)?;
+                let stored =
+                    self.process_recovered_utxos(*resource_addr, &to_look_up, utxos, &deferred, lookup_watermark)?;
                 num_recovered += stored.num_recovered;
                 num_unresolved += stored.num_stale;
             }
@@ -654,15 +663,16 @@ where
     /// pair, unless the pair is in `keep_queued`: another output with the pair is left for a later round.
     ///
     /// The outputs of a pair are stored and its entries acknowledged in one write, and only while every entry is as
-    /// it was when looked up. An entry queued again since may stand for another output with the pair, and the scanner
-    /// advances every entry when it sees the spend of an output the wallet does not hold, which may be one the lookup
-    /// returned unspent. A pair whose lookup is no longer current is left queued, to be looked up again.
+    /// it was when looked up and the scanner has recorded no spend of the outputs after `lookup_watermark`. An entry
+    /// queued again since may stand for another output with the pair, and a spend recorded since may be of an output
+    /// the lookup returned unspent. A pair whose lookup is no longer current is left queued, to be looked up again.
     fn process_recovered_utxos(
         &self,
         resource_address: ResourceAddress,
         queued: &HashMap<TagAndPublicNoncePair, &QueuedPair>,
         utxos_to_recover: Vec<FoundUtxo>,
         keep_queued: &HashSet<TagAndPublicNoncePair>,
+        lookup_watermark: u64,
     ) -> Result<StoredUtxos, StealthScannerApiError> {
         let num_attempted = utxos_to_recover.len();
         let mut stored = StoredUtxos::default();
@@ -704,9 +714,15 @@ where
                 validated.push((found, output));
             }
 
+            let commitments = validated
+                .iter()
+                .map(|(found, _)| found.id.into_commitment_bytes())
+                .collect::<Vec<_>>();
             let mut events = Vec::new();
             let num_recovered = self.sdk.store().with_write_tx(|tx| {
-                if !tx.utxo_process_queue_is_current(&queued_pair.entries)? {
+                if !tx.utxo_process_queue_is_current(&queued_pair.entries)? ||
+                    tx.utxo_unheld_spends_any_after(&resource_address, lookup_watermark, &commitments)?
+                {
                     return Ok::<_, StealthScannerApiError>(None);
                 }
                 let mut num_recovered = 0;

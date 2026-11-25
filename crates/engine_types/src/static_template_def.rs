@@ -14,7 +14,7 @@
 //! (today: only the wallet daemon's template monitor) and want neither a
 //! compiler nor the cranelift compile cost. It does **not** validate the WASM
 //! module — anyone using a template for execution should go through
-//! `tari_engine::wasm::WasmModule::load_template_from_code`.
+//! `tari_engine::wasm::WasmModule::load`.
 
 use tari_template_abi::{TEMPLATE_DEF_CUSTOM_SECTION, TemplateDef, WASM_PTR_SIZE};
 use wasmparser::{BinaryReaderError, Parser, Payload};

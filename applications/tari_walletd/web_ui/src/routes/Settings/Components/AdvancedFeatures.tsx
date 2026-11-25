@@ -8,21 +8,50 @@ import FormControlLabel from "@mui/material/FormControlLabel";
 import useSettingsStore from "@store/settingsStore";
 import { AdvancedUiFeatures } from "@tari-project/ootle-ts-bindings";
 import { settingsGet, settingsSet } from "@utils/json_rpc";
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
+import { formatSettingsError, persistAdvancedFeatureToggle } from "./advancedFeaturesHelpers";
 
 function AdvancedFeatures() {
   const { advancedUiFeatures, setAdvancedUiFeatures } = useSettingsStore();
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const userToggledRef = useRef(false);
 
   useEffect(() => {
-    settingsGet().then((res) => {
-      setAdvancedUiFeatures(res.advanced_ui_features);
-    });
+    let cancelled = false;
+    settingsGet()
+      .then((res) => {
+        if (!cancelled && !userToggledRef.current) {
+          setAdvancedUiFeatures(res.advanced_ui_features);
+          setError(null);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setError(formatSettingsError(err, "Failed to load advanced feature settings."));
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [setAdvancedUiFeatures]);
 
-  const setFeature = (feature: keyof AdvancedUiFeatures) => (e: React.ChangeEvent<HTMLInputElement>) => {
-    const updated = { ...advancedUiFeatures, [feature]: e.target.checked };
-    setAdvancedUiFeatures(updated);
-    settingsSet({ indexer_url: null, indexer_urls: null, advanced_ui_features: updated, claimed_accounts: null });
+  const setFeature = (feature: keyof AdvancedUiFeatures) => async (e: React.ChangeEvent<HTMLInputElement>) => {
+    userToggledRef.current = true;
+    setSaving(true);
+    setError(null);
+    const result = await persistAdvancedFeatureToggle({
+      current: advancedUiFeatures,
+      feature,
+      enabled: e.target.checked,
+      apply: setAdvancedUiFeatures,
+      persist: (updated) =>
+        settingsSet({ indexer_url: null, indexer_urls: null, advanced_ui_features: updated, claimed_accounts: null }),
+    });
+    if (!result.ok) {
+      setError(result.error);
+    }
+    setSaving(false);
   };
 
   return (
@@ -30,13 +59,28 @@ function AdvancedFeatures() {
       <Alert severity="warning" style={{ marginBottom: 16 }}>
         These features are experimental. No support or documentation is provided. Use at your own risk.
       </Alert>
+      {error && (
+        <Alert severity="error" style={{ marginBottom: 16 }}>
+          {error}
+        </Alert>
+      )}
       <FormControlLabel
-        control={<Checkbox checked={advancedUiFeatures.enable_manifest} onChange={setFeature("enable_manifest")} />}
+        control={
+          <Checkbox
+            checked={advancedUiFeatures.enable_manifest}
+            onChange={setFeature("enable_manifest")}
+            disabled={saving}
+          />
+        }
         label="Enable manifest transaction builder"
       />
       <FormControlLabel
         control={
-          <Checkbox checked={advancedUiFeatures.enable_validator_set} onChange={setFeature("enable_validator_set")} />
+          <Checkbox
+            checked={advancedUiFeatures.enable_validator_set}
+            onChange={setFeature("enable_validator_set")}
+            disabled={saving}
+          />
         }
         label="Show the validator set page"
       />

@@ -23,6 +23,7 @@
 import { useAccountsList } from "@api/hooks/useAccounts";
 import { useListTemplatesAuthored } from "@api/hooks/useTemplatesAuthored";
 import { useSubmitManifest } from "@api/hooks/useTransactions";
+import ComponentRulesChangeWarning from "@components/ComponentRulesChangeWarning";
 import ComponentUpgradeWarning from "@components/ComponentUpgradeWarning";
 import PageHeading from "@components/PageHeading";
 import { DataTableCell, StyledPaper } from "@components/StyledComponents";
@@ -62,42 +63,20 @@ import Grid from "@mui/material/Grid";
 import TextField from "@mui/material/TextField";
 import type { ManifestTab } from "@store/manifestStore";
 import useManifestCodeStore from "@store/manifestStore";
-import type { ComponentUpgrade, KeyId, UpgradableComponent } from "@tari-project/ootle-ts-bindings";
+import type {
+  ComponentRulesChange,
+  ComponentUpgrade,
+  KeyId,
+  UpgradableComponent,
+} from "@tari-project/ootle-ts-bindings";
 import { rejectReasonToString, substateIdToString } from "@tari-project/ootle-ts-bindings";
 import { Highlight, themes } from "prism-react-renderer";
 import { useCallback, useEffect, useRef, useState } from "react";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 import EditorImport from "react-simple-code-editor";
+import { formatManifestCode, parseManifestFee } from "./manifestHelpers";
 // Vite 8 dev pre-bundler doesn't unwrap exports.default for CJS packages
 const Editor = (EditorImport as any).default ?? EditorImport;
-
-function formatManifestCode(code: string): string {
-  const lines = code.split("\n");
-  const formatted: string[] = [];
-  let indent = 0;
-
-  for (const rawLine of lines) {
-    const trimmed = rawLine.trim();
-    if (!trimmed) {
-      formatted.push("");
-      continue;
-    }
-
-    // Decrease indent for closing braces
-    if (trimmed.startsWith("}")) {
-      indent = Math.max(0, indent - 1);
-    }
-
-    formatted.push("    ".repeat(indent) + trimmed);
-
-    // Increase indent after opening braces (that aren't closed on the same line)
-    const opens = (trimmed.match(/{/g) || []).length;
-    const closes = (trimmed.match(/}/g) || []).length;
-    indent = Math.max(0, indent + opens - closes);
-  }
-
-  return formatted.join("\n");
-}
 
 function upgradableBy(rule: UpgradableComponent["upgrade_rule"]): string {
   if (rule === "Owner") {
@@ -126,10 +105,11 @@ function Manifest() {
 
 function ManifestEditor() {
   const manifest = useManifestCodeStore();
-  const [fee, setFee] = useState<bigint>(0n);
+  const [feeInput, setFeeInput] = useState<string>("");
   const [finalizeError, setFinalizeError] = useState<string | null>(null);
   const [upgradableComponents, setUpgradableComponents] = useState<UpgradableComponent[]>([]);
   const [componentUpgrades, setComponentUpgrades] = useState<ComponentUpgrade[]>([]);
+  const [componentRulesChanges, setComponentRulesChanges] = useState<ComponentRulesChange[]>([]);
   const theme = useTheme();
 
   const { mutateAsync: submitManifest, isPending: isSubmittingManifest, error } = useSubmitManifest();
@@ -137,12 +117,15 @@ function ManifestEditor() {
   // A dry run that is still in flight must not restore a warning after the manifest changes or a later submit starts.
   const dryRunGeneration = useRef(0);
 
-  const isDryRun = !fee;
+  const parsedFee = parseManifestFee(feeInput);
+  const isDryRun = parsedFee.kind === "estimate";
+  const feeError = parsedFee.kind === "invalid";
 
   useEffect(() => {
     dryRunGeneration.current += 1;
     setUpgradableComponents([]);
     setComponentUpgrades([]);
+    setComponentRulesChanges([]);
   }, [manifest.code, manifest.activeTabId]);
 
   const handleSave = useCallback(() => {
@@ -198,15 +181,20 @@ function ManifestEditor() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (parsedFee.kind === "invalid") {
+      return;
+    }
     const generation = ++dryRunGeneration.current;
     setUpgradableComponents([]);
     setComponentUpgrades([]);
+    setComponentRulesChanges([]);
+    const maxFee = parsedFee.kind === "submit" ? parsedFee.value : 1n;
     console.log("Manifest code submitted:", manifest.code);
-    console.log("Fee submitted:", fee);
+    console.log("Fee submitted:", maxFee);
     submitManifest({
       manifest: manifest.code,
       variables: manifest.variables,
-      max_fee: isDryRun ? 1n : fee ? BigInt(fee) : 0n,
+      max_fee: maxFee,
       seal_signer_key_id: null,
       signing_key_ids: manifest.signingKeys,
       dry_run: isDryRun,
@@ -222,12 +210,13 @@ function ManifestEditor() {
         }
         setUpgradableComponents(response.upgradable_components ?? []);
         setComponentUpgrades(response.component_upgrades ?? []);
+        setComponentRulesChanges(response.component_rules_changes ?? []);
         const finalize = response.result?.finalize;
         if (!finalize && isDryRun) {
           throw new Error("No result returned for dry run");
         }
         if ("Accept" in finalize!.result) {
-          setFee(BigInt(response.required_fees!));
+          setFeeInput(String(response.required_fees!));
           setFinalizeError(null);
           console.log("Dry run successful:", finalize);
         } else if ("Reject" in finalize!.result) {
@@ -324,13 +313,17 @@ function ManifestEditor() {
           <Box className="flex-container" style={{ justifyContent: "flex-end" }}>
             <TextField
               name="max-fee"
-              placeholder="Max fee"
-              value={fee}
-              onChange={(e) => setFee(BigInt(e.target.value))}
-              type="number"
+              placeholder="Max fee (0 or empty to estimate)"
+              value={feeInput}
+              onChange={(e) => setFeeInput(e.target.value)}
+              error={feeError}
+              helperText={
+                feeError ? "Enter a non-negative integer fee up to 18446744073709551615 micro-TARI" : undefined
+              }
+              slotProps={{ htmlInput: { inputMode: "numeric" } }}
             />
-            <Button type="submit" variant="contained" color="primary">
-              {isSubmittingManifest ? "Submitting..." : fee ? "Submit" : "Estimate fee"}
+            <Button type="submit" variant="contained" color="primary" disabled={isSubmittingManifest || feeError}>
+              {isSubmittingManifest ? "Submitting..." : parsedFee.kind === "submit" ? "Submit" : "Estimate fee"}
             </Button>
           </Box>
           {error && (
@@ -344,6 +337,7 @@ function ManifestEditor() {
             </Box>
           )}
           <ComponentUpgradeWarning upgrades={componentUpgrades} />
+          <ComponentRulesChangeWarning changes={componentRulesChanges} />
           {upgradableComponents.length > 0 && (
             <Alert severity="warning" sx={{ mt: 2 }}>
               This transaction calls components whose code can be changed after this estimate, so what runs on
@@ -618,18 +612,31 @@ function nextAccountVarName(variables: Record<string, string>): string {
   return `account_${i}`;
 }
 
-function EditableKeyCell({ varKey, onRename }: { varKey: string; onRename: (oldKey: string, newKey: string) => void }) {
+function EditableKeyCell({
+  varKey,
+  onRename,
+}: {
+  varKey: string;
+  onRename: (oldKey: string, newKey: string) => boolean;
+}) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(varKey);
+  const [renameError, setRenameError] = useState<string | null>(null);
 
   const commit = () => {
-    setEditing(false);
     const trimmed = draft.trim();
     if (trimmed && trimmed !== varKey) {
-      onRename(varKey, trimmed);
+      if (!onRename(varKey, trimmed)) {
+        setDraft(varKey);
+        setRenameError(`Variable "${trimmed}" already exists`);
+        setEditing(false);
+        return;
+      }
     } else {
       setDraft(varKey);
     }
+    setRenameError(null);
+    setEditing(false);
   };
 
   if (editing) {
@@ -654,8 +661,18 @@ function EditableKeyCell({ varKey, onRename }: { varKey: string; onRename: (oldK
   }
 
   return (
-    <Box onClick={() => setEditing(true)} sx={{ "cursor": "pointer", "&:hover": { textDecoration: "underline" } }}>
-      {varKey}
+    <Box>
+      <Box
+        onClick={() => {
+          setRenameError(null);
+          setDraft(varKey);
+          setEditing(true);
+        }}
+        sx={{ "cursor": "pointer", "&:hover": { textDecoration: "underline" } }}
+      >
+        {varKey}
+      </Box>
+      {renameError && <Box sx={{ color: "error.main", fontSize: "0.75rem", mt: 0.25 }}>{renameError}</Box>}
     </Box>
   );
 }
@@ -724,7 +741,7 @@ function VariableEditor({
   variables: Record<string, string>;
   onAdd: (key: string, value: string) => void;
   onRemove: (key: string) => void;
-  onRename: (oldKey: string, newKey: string) => void;
+  onRename: (oldKey: string, newKey: string) => boolean;
   onAddSigningKey: (key: KeyId) => void;
 }) {
   const [showInputs, setShowInputs] = useState(false);

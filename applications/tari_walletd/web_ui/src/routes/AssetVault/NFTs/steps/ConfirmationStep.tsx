@@ -30,7 +30,8 @@ import {
   type NonFungibleToken,
 } from "@tari-project/ootle-ts-bindings";
 import { XTR_CURRENCY } from "@utils/currency";
-import { displayNftId, formatCurrency, substateIdToString } from "@utils/helpers";
+import { displayNftId, formatCurrency, nftIdToString, substateIdToString } from "@utils/helpers";
+import { findSelectedNft, parseMaxFeeAmount } from "./confirmationStepHelpers";
 
 interface ConfirmationStepProps {
   accounts: Array<{ account: Account }> | undefined;
@@ -38,30 +39,6 @@ interface ConfirmationStepProps {
   availableNfts?: NonFungibleToken[];
   onBack: () => void;
   onConfirm: () => void;
-}
-
-function nftIdToString(nftId: NonFungibleId): string {
-  const key = Object.keys(nftId)[0];
-  // @ts-ignore
-  const id = nftId[key].toString();
-  const typeName = getNftIdTypeAsName(nftId);
-  return typeName + "_" + id;
-}
-
-function getNftIdTypeAsName(nftId: NonFungibleId): string {
-  const key = Object.keys(nftId)[0];
-  switch (key) {
-    case "U256":
-      return "uuid";
-    case "String":
-      return "str";
-    case "Uint32":
-      return "u32";
-    case "Uint64":
-      return "u64";
-    default:
-      return "";
-  }
 }
 
 export default function ConfirmationStep({
@@ -74,12 +51,10 @@ export default function ConfirmationStep({
   const { transferFormState, disabled } = useNftTransferStore();
 
   // Find the NFT being transferred to show its image
-  const selectedNft = availableNfts?.find(
-    (nft) => preSelectedNftId && nftIdToString(nft.nft_id) === nftIdToString(preSelectedNftId),
-  );
+  const selectedNft = findSelectedNft(availableNfts, preSelectedNftId);
 
   const nftMutableData = selectedNft ? convertCborValue(selectedNft.mutable_data) : null;
-  const nftImageUrl = nftMutableData?.image_url;
+  const parsedMaxFee = parseMaxFeeAmount(transferFormState.maxFee);
 
   return (
     <Stack spacing={3} sx={{ py: 2 }}>
@@ -89,7 +64,7 @@ export default function ConfirmationStep({
             {preSelectedNftId && selectedNft ? (
               <Stack direction="row" spacing={2} alignItems="center">
                 <Avatar
-                  src={nftImageUrl}
+                  src={nftMutableData?.image_url}
                   sx={{
                     width: 215,
                     height: 215,
@@ -97,10 +72,6 @@ export default function ConfirmationStep({
                     backgroundColor: "grey.200",
                   }}
                   variant="rounded"
-                  onError={(e: any) => {
-                    e.target.src =
-                      "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iODAiIGhlaWdodD0iODAiIHZpZXdCb3g9IjAgMCA4MCA4MCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHJlY3Qgd2lkdGg9IjgwIiBoZWlnaHQ9IjgwIiBmaWxsPSIjRjVGNUY1Ii8+CjxwYXRoIGQ9Ik0zMCAyNUg1MFY1NUgzMFYyNVoiIGZpbGw9IiNERERERUREIi8+CjxwYXRoIGQ9Ik0zNiAzMUg0NFY0M0gzNlYzMVoiIGZpbGw9IiNCQkJCQkIiLz4KPHR1eHQgeD0iNDAiIHk9IjUyIiBmb250LWZhbWlseT0iQXJpYWwiIGZvbnQtc2l6ZT0iOCIgZmlsbD0iIzk5OTk5OSIgdGV4dC1hbmNob3I9Im1pZGRsZSI+TkZUPC90ZXh0Pgo8L3N2Zz4K";
-                  }}
                 >
                   NFT
                 </Avatar>
@@ -131,7 +102,7 @@ export default function ConfirmationStep({
               <Typography variant="subtitle2" color="text.secondary">
                 To Account:
               </Typography>
-              <Typography variant="subtitle1">
+              <Typography variant="subtitle1" component="div">
                 <CopyAddress address={transferFormState.targetAccountAddress} />
               </Typography>
             </Box>
@@ -140,7 +111,9 @@ export default function ConfirmationStep({
               <Typography variant="subtitle2" color="text.secondary">
                 Transaction Fee:
               </Typography>
-              <Typography>{formatCurrency(parseInt(transferFormState.maxFee), XTR_CURRENCY)}</Typography>
+              <Typography>
+                {parsedMaxFee !== null ? formatCurrency(parsedMaxFee, XTR_CURRENCY) : `-- ${XTR_CURRENCY.symbol}`}
+              </Typography>
             </Box>
 
             <Box>
@@ -158,7 +131,7 @@ export default function ConfirmationStep({
       </Stack>
       <Divider />
       <Stack direction="row" justifyContent="space-between" sx={{ mt: 3 }}>
-        <Button variant="outlined" onClick={onBack}>
+        <Button variant="outlined" onClick={onBack} disabled={disabled}>
           Back
         </Button>
         <Button variant="contained" onClick={onConfirm} disabled={disabled}>

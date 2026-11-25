@@ -91,6 +91,7 @@ mod spend_scripts {
                 AccessRules::allow_all(),
                 None,
                 UpdateRule::Locked,
+                RulesUpdater::Locked,
             );
         }
 

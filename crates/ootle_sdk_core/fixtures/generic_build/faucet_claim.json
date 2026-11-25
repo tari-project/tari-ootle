@@ -2,8 +2,8 @@
   "name": "generic_build/faucet_claim",
   "schema_version": 1,
   "provenance": {
-    "core_version": "0.48.0",
-    "git_rev": "3460b2ff19640c5a3b758de9ec407eac8e372044",
+    "core_version": "0.53.5",
+    "git_rev": "f987c537728b97c86b80eaef15a7d13a1dc094b6",
     "generated_by": "ootle_sdk_core golden-vector generator"
   },
   "operation": "build_and_encode_faucet_claim",
@@ -35,7 +35,7 @@
   },
   "expected": {
     "sealed_transaction_semantic": {
-      "V1": {
+      "V2": {
         "body": {
           "signatures": [
             {

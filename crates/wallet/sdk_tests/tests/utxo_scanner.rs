@@ -64,6 +64,13 @@ impl WalletNetworkInterface for ScriptedUtxoNetwork {
         panic!("ScriptedUtxoNetwork::get_substates called")
     }
 
+    async fn get_substate_versions(
+        &self,
+        _: &[SubstateId],
+    ) -> Result<HashMap<SubstateId, SubstateVersion>, Self::Error> {
+        panic!("ScriptedUtxoNetwork::get_substate_versions called")
+    }
+
     async fn submit_transaction(&self, _: Transaction) -> Result<TransactionId, Self::Error> {
         panic!("ScriptedUtxoNetwork::submit_transaction called")
     }

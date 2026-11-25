@@ -1852,3 +1852,310 @@ fn non_fungible_id_macro_enforces_u8_and_u16_bounds() {
         );
     }
 }
+
+mod component_rules {
+    use tari_template_lib_types::{
+        NonFungibleAddress,
+        NonFungibleId,
+        OwnerRule,
+        access_rules::{AccessRule, ComponentAccessRules},
+        rule,
+    };
+
+    use super::*;
+
+    const NFT: &str = "nft_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff_str_SpecialNft";
+
+    fn component() -> ComponentAddress {
+        ComponentAddress::new([7u8; ObjectKey::LENGTH].into())
+    }
+
+    fn badge() -> ResourceAddress {
+        ResourceAddress::new([9u8; ObjectKey::LENGTH].into())
+    }
+
+    fn globals() -> HashMap<String, ManifestValue> {
+        HashMap::from([
+            ("component".to_string(), SubstateId::Component(component()).into()),
+            ("badge".to_string(), SubstateId::Resource(badge()).into()),
+            (
+                "pk".to_string(),
+                ManifestValue::Value(tari_bor::Value::Bytes([42u8; 32].to_vec())),
+            ),
+        ])
+    }
+
+    fn generate(manifest: &str, globals: HashMap<String, ManifestValue>) -> Result<Vec<Instruction>, String> {
+        parse_manifest(manifest, globals, Default::default(), Default::default())
+            .map(|m| m.instructions)
+            .map_err(|e| e.to_string())
+    }
+
+    #[test]
+    fn rules_are_written_in_rule_syntax() {
+        let manifest = r#"
+            fn main() {
+                let c = var!["component"];
+                let badge = var!["badge"];
+                let pk = var!["pk"];
+                set_access_rules!(
+                    c,
+                    default = deny_all,
+                    balance = allow_all,
+                    mint = any_of(resource(badge), public_key(pk)),
+                    burn = m_of_n(1, public_key(pk), resource(TARI)),
+                );
+                set_owner_rule!(c, public_key(pk));
+            }
+        "#;
+
+        let pk = RistrettoPublicKeyBytes::from([42u8; 32]);
+        let badge = badge();
+        let expected = vec![
+            Instruction::SetComponentAccessRules {
+                component: component().into(),
+                access_rules: ComponentAccessRules::new()
+                    .default(AccessRule::DenyAll)
+                    .add_method_rule("balance", AccessRule::AllowAll)
+                    .add_method_rule("mint", rule!(any_of(resource(badge), public_key(pk))))
+                    .add_method_rule("burn", rule!(m_of_n(1, public_key(pk), resource(TARI_TOKEN)))),
+            },
+            Instruction::SetComponentOwnerRule {
+                component: component().into(),
+                owner_rule: OwnerRule::ByPublicKey(pk),
+            },
+        ];
+        assert_eq!(generate(manifest, globals()).unwrap(), expected);
+    }
+
+    #[test]
+    fn rules_may_name_a_workspace_component_and_literal_addresses() {
+        let manifest = format!(
+            r#"
+            use template_c2b621869ec2929d3b9503ea41054f01b468ce99e50254b58e460f608ae377f7 as Counter;
+            fn main() {{
+                let c = Counter::new();
+                set_owner_rule!(c, access_rule(non_fungible("{NFT}")));
+                set_access_rules!(c, mint = resource("{badge}"));
+                set_owner_rule!(c, no_owner);
+                set_owner_rule!(c, owned_by_signer);
+            }}
+        "#,
+            badge = SubstateId::Resource(badge())
+        );
+
+        let nft = NonFungibleAddress::new(
+            ResourceAddress::from_hex("7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff").unwrap(),
+            NonFungibleId::from_string("SpecialNft"),
+        );
+        let instructions = generate(&manifest, HashMap::new()).unwrap();
+        assert_eq!(instructions[2..], [
+            Instruction::SetComponentOwnerRule {
+                component: ComponentReference::Workspace(0),
+                owner_rule: OwnerRule::ByAccessRule(rule!(non_fungible(nft))),
+            },
+            Instruction::SetComponentAccessRules {
+                component: ComponentReference::Workspace(0),
+                access_rules: ComponentAccessRules::new().add_method_rule("mint", rule!(resource(badge()))),
+            },
+            Instruction::SetComponentOwnerRule {
+                component: ComponentReference::Workspace(0),
+                owner_rule: OwnerRule::None,
+            },
+            Instruction::SetComponentOwnerRule {
+                component: ComponentReference::Workspace(0),
+                owner_rule: OwnerRule::OwnedBySigner,
+            },
+        ]);
+    }
+
+    #[test]
+    fn rules_may_come_from_encoded_variables() {
+        let access_rules = ComponentAccessRules::new().add_method_rule("mint", AccessRule::AllowAll);
+        let mut globals = globals();
+        globals.insert("rules".to_string(), ManifestValue::new_value(&access_rules).unwrap());
+        globals.insert("owner".to_string(), ManifestValue::new_value(&OwnerRule::None).unwrap());
+        let manifest = r#"
+            fn main() {
+                let c = var!["component"];
+                set_access_rules!(c, rules);
+                set_owner_rule!(c, owner);
+            }
+        "#;
+
+        assert_eq!(generate(manifest, globals).unwrap(), vec![
+            Instruction::SetComponentAccessRules {
+                component: component().into(),
+                access_rules,
+            },
+            Instruction::SetComponentOwnerRule {
+                component: component().into(),
+                owner_rule: OwnerRule::None,
+            },
+        ]);
+    }
+
+    #[test]
+    fn a_rule_of_the_wrong_kind_is_rejected() {
+        for (body, expected) in [
+            ("set_access_rules!(component, mint = resource(pk));", "not an address"),
+            (
+                "set_access_rules!(component, mint = caller_component(badge));",
+                "needs a component address",
+            ),
+            (
+                "set_access_rules!(component, mint = component(component));",
+                "scopes a rule to running code",
+            ),
+            (
+                "set_owner_rule!(component, access_rule(template(badge)));",
+                "scopes a rule to running code",
+            ),
+            ("set_access_rules!(component, mint = public_key(badge));", "not bytes"),
+            (
+                "set_access_rules!(component, mint = admin(badge));",
+                "unknown rule `admin`",
+            ),
+            (
+                "set_access_rules!(component, mint = any_of());",
+                "needs at least one rule",
+            ),
+            ("set_access_rules!(component,);", "expected access rules"),
+            ("set_owner_rule!(component, owner(pk));", "unknown owner rule `owner`"),
+            ("set_owner_rule!(badge, no_owner);", "Expected component variable"),
+        ] {
+            let manifest = format!("fn main() {{ {body} }}");
+            let err = generate(&manifest, globals()).unwrap_err();
+            assert!(err.contains(expected), "{body}: {err}");
+        }
+    }
+
+    #[test]
+    fn a_tuple_element_cannot_name_the_component() {
+        let manifest = r#"
+            use template_c2b621869ec2929d3b9503ea41054f01b468ce99e50254b58e460f608ae377f7 as Counter;
+            fn main() {
+                let (c, d) = Counter::new();
+                set_owner_rule!(c, no_owner);
+            }
+        "#;
+        let err = generate(manifest, HashMap::new()).unwrap_err();
+        assert!(err.contains("Tuple-destructured"), "{err}");
+    }
+}
+
+#[test]
+fn substate_id_and_address_variable_forms_match_literal_encoding() {
+    const COMP_STR: &str = "component_0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    const TMPL_STR: &str = "template_1111111111111111111111111111111111111111111111111111111111111111";
+
+    let manifest = format!(
+        r#"
+        use template_{LIST_TEMPLATE} as MyTemplate;
+
+        fn main() {{
+            let comp = var!["comp"];
+            let alloc = new_component_addr!();
+            MyTemplate::create(
+                substate_id!("{COMP_STR}"),
+                substate_id!(comp),
+                substate_id!(tmpl),
+                [substate_id!("{COMP_STR}")],
+                [substate_id!(comp)],
+                address!("{COMP_STR}"),
+                address!(comp),
+                address!("{TMPL_STR}"),
+                address!(tmpl),
+                substate_id!(alloc),
+                address!(alloc),
+            );
+        }}
+    "#
+    );
+
+    let comp_id: SubstateId = COMP_STR.parse().unwrap();
+    let tmpl_id: SubstateId = TMPL_STR.parse().unwrap();
+    let globals = HashMap::from([
+        ("comp".to_string(), comp_id.clone().into()),
+        ("tmpl".to_string(), tmpl_id.clone().into()),
+    ]);
+
+    let ManifestInstructions { instructions, .. } =
+        parse_manifest(&manifest, globals, Default::default(), Default::default()).unwrap();
+
+    let Instruction::CallFunction { args, .. } = &instructions[1] else {
+        panic!("expected a function call");
+    };
+
+    // substate_id!(var) must encode SubstateId just like substate_id!("...")
+    assert_eq!(args[1], args[0], "substate_id!(comp) must match literal");
+    assert_eq!(args[1], call_arg!(comp_id));
+    assert_eq!(args[2], call_arg!(tmpl_id));
+    // List elements containing substate_id!(var) must also encode SubstateId
+    assert_eq!(args[4], args[3], "[substate_id!(comp)] must match literal");
+    // address!(var) must keep encoding the inner typed address
+    assert_eq!(args[6], args[5], "address!(comp) must match literal");
+    assert_eq!(args[8], args[7], "address!(tmpl) must match literal");
+    // Workspace variables remain workspace references
+    assert_eq!(args[9], InstructionArg::Workspace(WorkspaceOffsetId::new(0)));
+    assert_eq!(args[10], InstructionArg::Workspace(WorkspaceOffsetId::new(0)));
+}
+
+#[test]
+fn substate_id_and_address_macros_reject_non_substate_variables() {
+    let globals = HashMap::from([("num".to_string(), "42u64".parse().unwrap())]);
+    let blobs = HashMap::from([("wasm".to_string(), tari_ootle_transaction::Blob::from(vec![1u8]))]);
+
+    for expr in [
+        "substate_id!(num)",
+        "address!(num)",
+        "[substate_id!(num)]",
+        "[address!(num)]",
+    ] {
+        let manifest = format!(
+            r#"
+            use template_{LIST_TEMPLATE} as MyTemplate;
+            fn main() {{
+                let num = var!["num"];
+                MyTemplate::create({expr});
+            }}
+        "#
+        );
+        let err = parse_manifest(&manifest, globals.clone(), Default::default(), Default::default())
+            .err()
+            .unwrap_or_else(|| panic!("expected {expr} with integer variable to fail"));
+        assert!(err.to_string().contains("Invalid variable type"), "{expr}: {err}");
+    }
+
+    for expr in ["substate_id!(b)", "address!(b)"] {
+        let manifest = format!(
+            r#"
+            use template_{LIST_TEMPLATE} as MyTemplate;
+            fn main() {{
+                let b = blob!("wasm");
+                MyTemplate::create({expr});
+            }}
+        "#
+        );
+        let err = parse_manifest(&manifest, HashMap::new(), Default::default(), blobs.clone())
+            .err()
+            .unwrap_or_else(|| panic!("expected {expr} with blob binding to fail"));
+        assert!(err.to_string().contains("Invalid variable type"), "{expr}: {err}");
+    }
+}
+
+#[test]
+fn publish_template_in_fee_main_is_rejected() {
+    use tari_ootle_transaction::Blob;
+
+    let blobs = HashMap::from([("wasm".to_string(), Blob::from(vec![0u8, 0x61, 0x73, 0x6d]))]);
+    let err = parse_manifest(
+        "fn fee_main() { publish_template!(wasm); } fn main() {}",
+        HashMap::new(),
+        Default::default(),
+        blobs,
+    )
+    .err()
+    .expect("publish_template! in fee_main() must be rejected");
+    assert!(err.to_string().contains("not permitted in fee_main()"), "{err}");
+}

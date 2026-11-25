@@ -69,6 +69,7 @@ export default defineConfig({
             { label: "Transaction Overview", link: "/guides/transaction-overview/" },
             { label: "Tari Cli", link: "/guides/cli/" },
             { label: "Resources", link: "/guides/resources/" },
+            { label: "Fungible Tokens (ERC-20)", link: "/guides/fungible-tokens/" },
             { label: "Authorization and Access", link: "/guides/authorization-and-access/" },
             { label: "API Keys for AI Agents", link: "/guides/agent-api-keys/" },
             { label: "Stealth Transfers", link: "/guides/stealth-resources/" },
@@ -77,6 +78,15 @@ export default defineConfig({
             { label: "How Burn Claims Work", link: "/guides/claim-burn/" },
             { label: "Exchange Integration", link: "/guides/exchange-integration/" },
             { label: "Randomness in Templates", link: "/guides/randomness/" },
+          ],
+        },
+        {
+          label: "Validator Nodes",
+          items: [
+            { label: "Run a Validator Node", link: "/validators/run-a-validator-node/" },
+            { label: "Networking and Ports", link: "/validators/networking-and-ports/" },
+            { label: "Operating a Validator", link: "/validators/operating-a-validator/" },
+            { label: "Hardware Requirements", link: "/reference/validator-node-requirements/" },
           ],
         },
         {

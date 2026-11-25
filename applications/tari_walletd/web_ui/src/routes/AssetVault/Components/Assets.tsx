@@ -31,6 +31,7 @@ import Tokens from "@routes/AssetVault/Tokens/Tokens";
 import { Account } from "@tari-project/ootle-ts-bindings";
 import { handleChangePage, handleChangeRowsPerPage, substateIdToString } from "@utils/helpers";
 import React, { useEffect, useState } from "react";
+import { clampNftPage } from "./assetsHelpers";
 
 interface TabPanelProps {
   children?: React.ReactNode;
@@ -45,8 +46,8 @@ function TabPanel(props: TabPanelProps) {
     <div
       role="tabpanel"
       hidden={value !== index}
-      id={`simple-tabpanel-${index}`}
-      aria-labelledby={`simple-tab-${index}`}
+      id={`asset-tabpanel-${index}`}
+      aria-labelledby={`asset-tab-${index}`}
       {...other}
     >
       {value === index && (
@@ -69,12 +70,13 @@ function Assets({ account }: { account: Account }) {
   const [assetTab, setAssetTab] = useState(0);
   const [nftPage, setNftPage] = useState(0);
   const [nftRowsPerPage, setNftRowsPerPage] = useState(12);
+  const accountAddress = substateIdToString(account.component_address);
 
-  // Reset pagination and tab when account changes
-  React.useEffect(() => {
+  // Reset pagination and tab when switching to a different account
+  useEffect(() => {
     setNftPage(0);
     setAssetTab(0);
-  }, [account]);
+  }, [accountAddress]);
 
   const {
     data: allNfts,
@@ -82,19 +84,17 @@ function Assets({ account }: { account: Account }) {
     error: nftsListError,
     isLoading: nftsListIsFetching,
     refetch: refetchNfts,
-  } = useNFTsList(substateIdToString(account.component_address), 0, 1000);
+  } = useNFTsList(accountAddress, 0, 1000);
 
   const totalCount = allNfts?.nfts?.length || 0;
 
-  // Auto-adjust page if current page is empty due to NFT transfers
+  // Auto-adjust page if current page is out of bounds due to NFT transfers
   useEffect(() => {
-    if (totalCount > 0 && nftPage > 0) {
-      const maxPage = Math.ceil(totalCount / nftRowsPerPage) - 1;
-      if (nftPage > maxPage) {
-        setNftPage(maxPage);
-      }
+    const clampedPage = clampNftPage(nftPage, totalCount, nftRowsPerPage);
+    if (clampedPage !== nftPage) {
+      setNftPage(clampedPage);
     }
-  }, [totalCount, nftPage, nftRowsPerPage, setNftPage]);
+  }, [totalCount, nftPage, nftRowsPerPage]);
 
   const startIndex = nftPage * nftRowsPerPage;
   const endIndex = startIndex + nftRowsPerPage;

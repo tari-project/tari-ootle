@@ -138,7 +138,7 @@ mod tests {
     fn message(max_epoch: u64) -> TransactionMessage {
         let transaction =
             UnsignedTransactionV1::new(0u8, vec![], vec![], Default::default(), None, Epoch(max_epoch), false);
-        TransactionSealSignature::create_message_v1(&UnsealedTransactionV1::new(transaction, vec![]))
+        TransactionSealSignature::create_message(&UnsealedTransactionV1::new(transaction, vec![]))
     }
 
     #[test]

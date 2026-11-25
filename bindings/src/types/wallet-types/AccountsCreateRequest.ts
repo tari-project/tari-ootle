@@ -3,5 +3,10 @@
 export type AccountsCreateRequest = {
   account_name: string | null;
   is_default: boolean | null;
+  /**
+   * The account key index. When absent, the account takes the lowest index no account uses. Seed recovery
+   * stops after `recovery_abandon_count` consecutive indices with no on-chain activity, so an index further than
+   * that above every account with activity is recovered from the seed only with a larger `recovery_abandon_count`.
+   */
   key_index: number | null;
 };

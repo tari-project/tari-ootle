@@ -1,13 +1,13 @@
 # Tari Vulnerability Disclosure Policy
 
-_Last Updated: June 5, 2025_
+_Last Updated: November 25, 2026_
 
 ## Introduction
 
-[Tari Labs](https://tarilabs.com) guides the development of the [Tari open source project](https://tari.com). As the
-stewards of Tari, we welcome feedback from security researchers and the general public. If you believe you have
-discovered a vulnerability, privacy issue, exposed data, or other security issues in Tari software or Tari Labs
-infrastructure, we want to hear from you. This policy outlines steps for reporting vulnerabilities to us, what we
+[The Tari Council](https://rfc.tari.com/TIP-0002_tari_community_charter.html) guides the development of the
+[Tari open source project](https://tari.com). As the stewards of Tari, we welcome feedback from security researchers and
+the general public. If you believe you have discovered a vulnerability, privacy issue, exposed data, or other security
+issues in Tari software or Tari project infrastructure, we want to hear from you. This policy outlines steps for reporting vulnerabilities to us, what we
 expect, and what you can expect from us.
 
 ![hacking_tari](./meta/img/hacker1.webp)
@@ -20,7 +20,8 @@ This policy applies to:
   includes code in the `development` branches and any release branch.
 * Written research from Tari Labs which dictates the above-referenced Tari code implementation. This
   includes [Tari RFCs](https://github.com/tari-project/rfcs) and any published academic or journal articles.
-* Infrastructure owned, operated, or maintained by Tari Labs. This includes websites and public-facing applications.
+* Infrastructure owned, operated, or maintained by the Tari Council, the Tari Foundation, or Core Contributors to the
+  Tari project as part of their duties. This includes websites and public-facing applications.
 
 ### Out of Scope
 
@@ -33,14 +34,13 @@ This policy does not apply to:
 * Code clearly marked as "NOT READY FOR PRODUCTION", "HEAVILY UNDER DEVELOPMENT", or similar wording. An exception is code that is marked as such, 
   but is demonstrably used in production applications covered by the scope anyway.
 * Support, marketing, and social media channels (e.g., Telegram or Discord);
-* Social engineering of Tari users and Tari Labs staff or contractors;
-* Yat vulnerabilities (which should be disclosed via the [Yat Bug Bounty](https://bugcrowd.com/yat-og) program);
+* Social engineering of Tari users, Core Contributors, or their contractors;
 * Services, applications, and mix networks run by volunteers (e.g., Tor hidden services);
 * Attacks which require more than 50% of network hash rate (or equivalent luck for enough blocks to execute);
-* Assets, equipment, and systems not owned by Tari Labs; and
+* Assets, equipment, and systems not controlled by the Tari Council or the Tari Foundation; and
 * [Commonplace Reports](#commonplace-reports) as described in this policy.
 
-Vulnerabilities discovered or suspected in systems not owned by Tari Labs should be reported to the appropriate owner,
+Vulnerabilities discovered or suspected in systems not controlled by the Tari Council or the Tari Foundation should be reported to the appropriate owner,
 vendor, or applicable authority. We emphasize that researchers should not engage in Denial of Service, active exploits
 against networks, or any physical or electronic attempts against property and/or data centers.
 
@@ -48,10 +48,10 @@ against networks, or any physical or electronic attempts against property and/or
 
 Please report any **non-sensitive** issue **unrelated to security** as a Github issue in the relevant repository.
 
-Security issues can be disclosed using one of the following channels, in decreasing order of preference: 
-  * A [Private Security Disclosure](https://github.com/tari-project/tari-ootle/security/advisories/new) on Github
-  * [The Tari Labs Security mailing list](mailto:security@tari.com) 
-
+Security issues must be disclosed as a
+[Private Security Advisory](https://github.com/tari-project/tari-ootle/security/advisories/new) on GitHub. Reports
+sent through any other channel are not accepted, and priority between duplicate reports is decided by the advisory's
+creation time.
 
 Please follow the [requirements](#submission-requirements) below when making your submission.
 
@@ -63,7 +63,7 @@ When disclosing a security issue according to this policy, you can expect us to:
 * Let you know if your report qualifies for a bounty reward;
 * Strive to keep you informed about the progress of a vulnerability as it is processed;
 * Work to remediate discovered vulnerabilities in a timely manner, within our operational constraints;
-* Extend [Safe Harbor](#safe-harbor) for your vulnerability research that is related to this policy; and
+* Extend [Safe Harbor](#safe-harbor) for your vulnerability research that is related to this policy.
 
 If your report qualifies for a bounty reward, we will:
 
@@ -80,7 +80,7 @@ When disclosing a security issue, we ask that you:
   between this policy and any other applicable terms, the terms of this policy will prevail;
 * Report any vulnerability you’ve discovered promptly and in good faith;
 * Avoid violating the privacy of others, disrupting our systems, destroying data, and/or harming user experience;
-* Use only the [Official Channels](#official-channels) to discuss vulnerability information with us;
+* Use only the [Official Channels](#disclosure) to discuss vulnerability information with us;
 * Provide us a reasonable amount of time (**at least 60 days** from the initial report) to resolve the issue before you
   disclose it publicly;
 * Perform testing only on in-scope systems, and respect systems and activities which are [Out of Scope](#out-of-scope);
@@ -125,26 +125,27 @@ submit a report through one of our [Disclosure Channels](#disclosure) before goi
 
 ### Token-based bounties
 
-It is preferred, but it is not an absolute requirement to make use of the HackerOne bounty programme to claim 
-Minotari token rewards.
+Each severity maps to a bounty size. The XTM value of each size, with its history of changes, is published on the
+[Tari wiki](https://wiki.tari.com/processes:bounty_sizes).
 
-| Severity | Bounty Range\*            | 
-|----------|---------------------------|
-| Critical | 200,000 XTM - 250,000 XTM | 
-| High     | 150,000 XTM               | 
-| Medium   | 60,000  XTM               | 
-| Low      | 15,000 XTM                | 
+| Severity | Bounty size |
+|----------|-------------|
+| Critical | Extra Large |
+| High     | Large       |
+| Medium   | Medium      |
+| Low      | Small       |
 
 #### Notes and conditions for token bounty rewards:
 
-* Minotari earned through the bounty programme will unencumbered and can be spent or traded immediately after
+* Minotari earned through the bounty programme will be unencumbered and can be spent or traded immediately after
   conversion.
-* Researchers will have to provide a valid Tari wallet emoji id in order to receive their Minotari tokens. Tari Labs
-  will not custody any tokens on behalf of researchers.
-* Tari Labs reserves the right to adjust the bounty reward amounts from time to time. 
+* Researchers will have to provide a valid Tari wallet emoji id in order to receive their Minotari tokens. The Tari Council
+  and Tari Foundation will not custody any tokens on behalf of researchers.
+* The Tari Council reserves the right to adjust the bounty reward amounts from time to time.
 
-Our rewards are based on severity per CVSS (the Common Vulnerability Scoring Standard) as determined by Tari Labs. 
-Please note these are general guidelines, and reward decisions are up to the discretion of Tari Labs.
+Our rewards are based on severity per CVSS (the Common Vulnerability Scoring Standard) as determined by the Core Contributor
+responsible for the affected system. Please note these are general guidelines, and reward decisions are up to the
+discretion of that Core Contributor and the Tari Council.
 
 Please allow up to one week from the time the report was approved and validated to receive your bounty reward payment.
 
@@ -184,7 +185,7 @@ The more detail you provide, the easier it will be for us to triage and fix the 
   disclosure. 
 
 7. **No social engineering:** Bugs that require social engineering to exploit (e.g., tricking someone into clicking a
-  link) may qualify, but please do not actually attempt to socially engineer another user, Tari Labs staff, Tari open
+  link) may qualify, but please do not actually attempt to socially engineer another user, Core Contributors, Tari open
   source volunteers, etc. during your testing. Providing a clear explanation of how social engineering could be used in
   conjunction with an identified vulnerability is sufficient.
 
@@ -213,7 +214,8 @@ a [GitHub issue here](https://github.com/tari-project/tari-ootle/issues/new?assi
 * Reports resulting from automated scanning utilities without additional details or a PoC demonstrating a specific
   exploit
 * Attacks requiring physical access to a user’s device
-* Attacks dependent upon social engineering of Tari Labs staff, contractors, or vendors
+* Attacks dependent upon social engineering of Core Contributors, Tari Foundation Officers, Tari Council Members, or
+  their vendors
 * Attacks dependent upon social engineering of Tari open source volunteers
 * Attacks dependent upon social engineering of Tari users
 * Username enumeration based on login or "forgot password" pages

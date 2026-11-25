@@ -16,6 +16,8 @@ use tari_crypto::{
 };
 use tari_engine_types::{
     Utxo,
+    UtxoOutput,
+    crypto::OutputBody,
     resource::Resource,
     resource_container::ResourceContainer,
     substate::{Substate, SubstateDiff, SubstateId},
@@ -787,6 +789,23 @@ fn stealth_output(
     }
 }
 
+/// The version-zero `Utxo` substate a transaction ups for `output`, carrying its output body.
+fn live_utxo_substate(output: &StealthOutputModel) -> Substate {
+    Substate::new(SubstateVersion::ZERO, Utxo {
+        output: Some(UtxoOutput {
+            output: OutputBody {
+                public_nonce: output.sender_public_nonce,
+                encrypted_data: output.encrypted_data.clone(),
+                minimum_value_promise: output.minimum_value_promise,
+                viewable_balance: None,
+            },
+            auth: output.auth.clone(),
+            tag: output.tag_byte,
+        }),
+        is_frozen: false,
+    })
+}
+
 fn upsert_stealth_resource(tx: &mut impl WalletStoreWriter, resource_address: &ResourceAddress) {
     tx.resources_upsert(
         resource_address,
@@ -868,13 +887,7 @@ fn lock_finalize_records_confidential_spend_for_vaultless_account() {
 
     let mut diff = SubstateDiff::new();
     diff.down(SubstateId::Utxo(spent.to_utxo_address()), SubstateVersion::ZERO);
-    diff.up(
-        SubstateId::Utxo(change.to_utxo_address()),
-        Substate::new(SubstateVersion::ZERO, Utxo {
-            output: None,
-            is_frozen: false,
-        }),
-    );
+    diff.up(SubstateId::Utxo(change.to_utxo_address()), live_utxo_substate(&change));
     tx.locks_unlock_finalized(lock_id, &diff).unwrap();
     tx.commit().unwrap();
 
@@ -962,13 +975,7 @@ fn lock_finalize_records_confidential_spend_for_vault_backed_resource() {
 
     let mut diff = SubstateDiff::new();
     diff.down(SubstateId::Utxo(spent.to_utxo_address()), SubstateVersion::ZERO);
-    diff.up(
-        SubstateId::Utxo(change.to_utxo_address()),
-        Substate::new(SubstateVersion::ZERO, Utxo {
-            output: None,
-            is_frozen: false,
-        }),
-    );
+    diff.up(SubstateId::Utxo(change.to_utxo_address()), live_utxo_substate(&change));
     tx.locks_unlock_finalized(lock_id, &diff).unwrap();
     tx.commit().unwrap();
 
@@ -1058,13 +1065,7 @@ fn lock_finalize_records_on_vault_created_by_transaction() {
 
     let mut diff = SubstateDiff::new();
     diff.down(SubstateId::Utxo(spent.to_utxo_address()), SubstateVersion::ZERO);
-    diff.up(
-        SubstateId::Utxo(change.to_utxo_address()),
-        Substate::new(SubstateVersion::ZERO, Utxo {
-            output: None,
-            is_frozen: false,
-        }),
-    );
+    diff.up(SubstateId::Utxo(change.to_utxo_address()), live_utxo_substate(&change));
     diff.up(
         SubstateId::Vault(new_vault),
         Substate::new(
@@ -1761,10 +1762,7 @@ fn finalize_confirms_unconfirmed_output_relocked_for_spend_via_lock_many() {
     fee_diff.down(SubstateId::Utxo(fee_input.to_utxo_address()), SubstateVersion::ZERO);
     fee_diff.up(
         SubstateId::Utxo(fee_change.to_utxo_address()),
-        Substate::new(SubstateVersion::ZERO, Utxo {
-            output: None,
-            is_frozen: false,
-        }),
+        live_utxo_substate(&fee_change),
     );
 
     tx.locks_unlock_finalized(lock_id, &fee_diff).unwrap();
@@ -1832,10 +1830,7 @@ fn finalize_confirms_unconfirmed_output_relocked_via_lock_smallest_amount() {
     fee_diff.down(SubstateId::Utxo(fee_input.to_utxo_address()), SubstateVersion::ZERO);
     fee_diff.up(
         SubstateId::Utxo(fee_change.to_utxo_address()),
-        Substate::new(SubstateVersion::ZERO, Utxo {
-            output: None,
-            is_frozen: false,
-        }),
+        live_utxo_substate(&fee_change),
     );
 
     tx.locks_unlock_finalized(lock_id, &fee_diff).unwrap();

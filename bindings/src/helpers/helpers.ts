@@ -64,8 +64,8 @@ export function shortenSubstateId(
     return "";
   }
   const string = substateIdToString(substateId);
-  const parts = string.split("_", 2);
-  if (parts.length < 2) {
+  const parts = splitOnce(string, "_");
+  if (!parts) {
     return string;
   }
   return parts[0] + "_" + shortenString(parts[1], start, end);

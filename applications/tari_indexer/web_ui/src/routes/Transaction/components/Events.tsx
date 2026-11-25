@@ -44,10 +44,7 @@ interface EventsProps {
 
 function Events({ events, expandAllTrigger = 0, collapseAllTrigger = 0, onExpandedChange }: EventsProps) {
   const [expanded, setExpanded] = useState(false);
-
-  if (!events || events.length === 0) {
-    return null;
-  }
+  const hasEvents = Boolean(events && events.length > 0);
 
   useEffect(() => {
     if (expandAllTrigger > 0) {
@@ -62,8 +59,14 @@ function Events({ events, expandAllTrigger = 0, collapseAllTrigger = 0, onExpand
   }, [collapseAllTrigger]);
 
   useEffect(() => {
-    onExpandedChange?.(expanded);
-  }, [expanded, onExpandedChange]);
+    if (hasEvents) {
+      onExpandedChange?.(expanded);
+    }
+  }, [expanded, hasEvents, onExpandedChange]);
+
+  if (!hasEvents) {
+    return null;
+  }
 
   const handleChange = (event: React.SyntheticEvent, isExpanded: boolean) => {
     event.stopPropagation();

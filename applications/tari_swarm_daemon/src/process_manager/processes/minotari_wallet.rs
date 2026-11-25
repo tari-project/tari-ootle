@@ -260,8 +260,7 @@ mod tests {
         write_claim_burn_proof_file(&nested, &proof).await.unwrap();
         assert!(nested.exists());
         assert!(!nested.with_extension("json.tmp").exists());
-        let decoded: CompleteClaimBurnProof =
-            serde_json::from_slice(&tokio::fs::read(&nested).await.unwrap()).unwrap();
+        let decoded: CompleteClaimBurnProof = serde_json::from_slice(&tokio::fs::read(&nested).await.unwrap()).unwrap();
         assert_eq!(decoded.claim_proof.value, 1000);
         assert_eq!(decoded.mined_in_epoch, 7);
     }

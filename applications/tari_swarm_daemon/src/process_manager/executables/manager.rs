@@ -64,8 +64,7 @@ impl ExecutableManager {
             .prepared_from
             .iter()
             .filter(|(instance_type, prepared_from)| {
-                (always_compile && !prev_always_compile) ||
-                    self.find_config(**instance_type) != Some(*prepared_from)
+                (always_compile && !prev_always_compile) || self.find_config(**instance_type) != Some(*prepared_from)
             })
             .map(|(instance_type, _)| *instance_type)
             .collect::<Vec<_>>();

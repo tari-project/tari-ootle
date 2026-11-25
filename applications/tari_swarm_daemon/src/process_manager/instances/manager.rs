@@ -300,10 +300,10 @@ impl InstanceManager {
         let mut allocated_ports = ports.unwrap_or_else(|| self.port_allocator.create(instance_type));
 
         let processes_path = self.base_path.join("processes");
-        let base_path = match base_path_override {
+        let base_path = match &base_path_override {
             Some(base_path) => {
                 if base_path.is_absolute() {
-                    base_path
+                    base_path.clone()
                 } else {
                     processes_path.join(base_path)
                 }
@@ -369,6 +369,7 @@ impl InstanceManager {
             instance_type,
             child,
             allocated_ports,
+            base_path_override.clone(),
             // This saves us from having to join the network string to the path all over the place, since everything we
             // want is under {base_dir}/{network}
             base_path.join(self.network.to_string()),
@@ -489,6 +490,7 @@ impl InstanceManager {
 
         let instance_type = instance.instance_type();
         let instance_name = instance.name().to_string();
+        let base_path_override = instance.base_path_override().cloned();
         let settings = instance.settings().clone();
         let ports = instance.allocated_ports().clone();
         let envs = instance.envs().to_vec();
@@ -499,7 +501,7 @@ impl InstanceManager {
             executable,
             instance_type,
             instance_name,
-            None,
+            base_path_override,
             envs,
             settings,
             Some(ports),
@@ -934,5 +936,41 @@ mod tests {
             .unwrap();
         manager.apply_config_update(HashMap::new(), &[vn_config, without_explicit]);
         assert_eq!(claim_key(&manager, file_vn_id), (key("rotated-claim-key"), true));
+    }
+
+    #[tokio::test]
+    async fn restarting_an_instance_preserves_its_base_path_override() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let base_path = temp_dir.path().to_path_buf();
+        let executable = stub_executable(&base_path).await;
+        let custom_dir = PathBuf::from("custom-node-dir");
+
+        let mut manager = InstanceManager::new(base_path.clone(), Network::LocalNet, HashMap::new(), vec![], 47100);
+
+        let id = manager
+            .fork_new(
+                &executable,
+                InstanceType::MinoTariNode,
+                "node-0".to_string(),
+                Some(custom_dir.clone()),
+                vec![],
+                HashMap::new(),
+            )
+            .await
+            .unwrap();
+
+        let initial_path = manager.instances().find(|i| i.id() == id).unwrap().base_path().clone();
+        assert_eq!(
+            initial_path,
+            base_path.join("processes").join(&custom_dir).join("localnet")
+        );
+
+        manager.stop_instance(id).await.unwrap();
+        manager.start_instance(id, &executable).await.unwrap();
+
+        let restarted = manager.instances().find(|i| i.id() == id).unwrap();
+        assert_eq!(restarted.base_path(), &initial_path);
+        assert_eq!(restarted.base_path_override(), Some(&custom_dir));
+        manager.stop_instance(id).await.unwrap();
     }
 }

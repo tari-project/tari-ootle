@@ -15,6 +15,8 @@ pub struct Instance {
     instance_type: InstanceType,
     child: Child,
     allocated_ports: AllocatedPorts,
+    /// Caller-supplied base path (relative to `processes/` or absolute) passed back to `fork` on restart.
+    base_path_override: Option<PathBuf>,
     base_path: PathBuf,
     /// Directory holding the forwarded stdout/stderr of this process. The parent of `base_path`, which points at the
     /// network subdirectory the process itself writes to.
@@ -32,6 +34,7 @@ impl Instance {
         instance_type: InstanceType,
         child: Child,
         allocated_ports: AllocatedPorts,
+        base_path_override: Option<PathBuf>,
         base_path: PathBuf,
         process_dir: PathBuf,
         envs: Vec<(String, String)>,
@@ -43,6 +46,7 @@ impl Instance {
             instance_type,
             child,
             allocated_ports,
+            base_path_override,
             base_path,
             process_dir,
             envs,
@@ -74,6 +78,10 @@ impl Instance {
 
     pub fn allocated_ports(&self) -> &AllocatedPorts {
         &self.allocated_ports
+    }
+
+    pub fn base_path_override(&self) -> Option<&PathBuf> {
+        self.base_path_override.as_ref()
     }
 
     pub fn base_path(&self) -> &PathBuf {

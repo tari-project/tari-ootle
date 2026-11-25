@@ -181,7 +181,12 @@ where
         let public_key = RistrettoPublicKey::from_secret_key(&key.key).to_byte_type();
         let account_addr = derive_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, &public_key);
         let mut kept = false;
-        match self.wallet_sdk.accounts_api().delete_if_unused(&account_addr).optional() {
+        match self
+            .wallet_sdk
+            .accounts_api()
+            .delete_if_unused(&account_addr)
+            .optional()
+        {
             Ok(Some(true)) => info!(target: LOG_TARGET, "🗑️ Removed unused account {account_addr}"),
             Ok(Some(false)) => {
                 info!(target: LOG_TARGET, "Keeping account {account_addr} because it has activity");

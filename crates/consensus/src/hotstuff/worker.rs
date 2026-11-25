@@ -1103,8 +1103,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
     ) -> Result<(), HotStuffError> {
         let Some(catch_up) = self
             .worker_state
-            .catch_up
-            .as_mut()
+            .active_catch_up_mut()
             .filter(|catch_up| catch_up.epoch == page.epoch)
         else {
             debug!(target: LOG_TARGET, "Ignoring catch-up page {} from {from}: no catch-up in {}", page.request_id, page.epoch);
@@ -1114,12 +1113,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             debug!(target: LOG_TARGET, "Ignoring catch-up page {} from {from}, which this node is not awaiting", page.request_id);
             return Ok(());
         }
-        // A page that continues shows more blocks beyond it, so the catch-up runs at least as far as its continuation.
-        if let Some(next_height) = page.next_height {
-            catch_up.raise_target(next_height, None);
-        }
 
-        let end_height = page.end_height();
         let CatchUpPageMessage {
             epoch,
             blocks,
@@ -1138,15 +1132,35 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             next_height.display(),
         );
 
-        if !self
-            .import_page_transactions(epoch_state, &from, epoch, &blocks, leaf.as_ref(), transactions)
-            .await?
-        {
-            return Ok(());
+        let imported = self
+            .import_page(epoch_state, &from, epoch, blocks, leaf, transactions)
+            .await;
+        if let Some(catch_up) = self.worker_state.catch_up.as_mut() {
+            catch_up.importing_page = false;
         }
-        self.import_page_blocks(epoch_state, &from, blocks, leaf).await?;
+        let end_height = imported?;
         self.continue_catch_up(epoch_state, from, next_height, next_skip, end_height)
             .await
+    }
+
+    /// Imports a page's transactions, then its blocks, and returns the height of the highest block that passed
+    /// validation. A page whose transactions are not admitted imports no blocks.
+    async fn import_page(
+        &mut self,
+        epoch_state: &EpochState<TConsensusSpec::Addr>,
+        from: &TConsensusSpec::Addr,
+        epoch: Epoch,
+        blocks: Vec<ProposalMessage>,
+        leaf: Option<ProposalMessage>,
+        transactions: Vec<EncodedTransaction>,
+    ) -> Result<Option<NodeHeight>, HotStuffError> {
+        if !self
+            .import_page_transactions(epoch_state, from, epoch, &blocks, leaf.as_ref(), transactions)
+            .await?
+        {
+            return Ok(None);
+        }
+        self.import_page_blocks(epoch_state, from, blocks, leaf).await
     }
 
     /// Stores the transactions a page carries, and returns whether the page is admitted: each transaction must be one
@@ -1201,15 +1215,18 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
     }
 
     /// Imports a page's certified blocks in height order, then admits its leaf as a live proposal by the view rule an
-    /// inbound proposal follows.
+    /// inbound proposal follows. Returns the height of the highest block that passed validation, whether it is ready
+    /// or parked on missing transactions.
     async fn import_page_blocks(
         &mut self,
         epoch_state: &EpochState<TConsensusSpec::Addr>,
         from: &TConsensusSpec::Addr,
         blocks: Vec<ProposalMessage>,
         leaf: Option<ProposalMessage>,
-    ) -> Result<(), HotStuffError> {
+    ) -> Result<Option<NodeHeight>, HotStuffError> {
+        let mut end_height = None;
         for proposal in blocks {
+            let height = proposal.block.height();
             let result = self
                 .on_message_validate
                 .validate_catch_up_block(
@@ -1220,13 +1237,17 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                     &self.on_receive_new_transaction,
                 )
                 .await?;
+            if result.is_ready_or_parked() {
+                end_height = end_height.max(Some(height));
+            }
             self.on_validation_result(epoch_state, self.pacemaker.current_height(), from.clone(), result)
                 .await?;
         }
 
         let Some(leaf) = leaf else {
-            return Ok(());
+            return Ok(end_height);
         };
+        let leaf_height = leaf.block.height();
         let current_height = self.pacemaker.current_height();
         let Some(message) = self.on_inbound_message.admit(
             epoch_state,
@@ -1235,7 +1256,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             from.clone(),
             HotstuffMessage::new_proposal(leaf),
         ) else {
-            return Ok(());
+            return Ok(end_height);
         };
         let result = self
             .on_message_validate
@@ -1249,8 +1270,12 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 &mut self.on_receive_foreign_proposal,
             )
             .await?;
+        if result.is_ready_or_parked() {
+            end_height = end_height.max(Some(leaf_height));
+        }
         self.on_validation_result(epoch_state, current_height, from.clone(), result)
-            .await
+            .await?;
+        Ok(end_height)
     }
 
     /// Decides what follows an imported page from `from` that continues at `next_height`, past `next_skip` of its
@@ -1412,7 +1437,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 return Ok(());
             };
             match self.worker_state.catch_up {
-                Some(ref mut catch_up) if catch_up.epoch == epoch_state.epoch() => {
+                Some(ref mut catch_up) if catch_up.epoch == epoch_state.epoch() && !catch_up.has_timed_out() => {
                     catch_up.reset_timeout(self.config.catch_up_request_timeout);
                     self.request_catch_up_page(epoch_state, to).await?;
                 },
@@ -2397,6 +2422,8 @@ enum AfterPage<TAddr> {
 struct CatchUp<TAddr> {
     /// Heights restart in each epoch, so a catch-up holds only for the epoch it started in.
     pub epoch: Epoch,
+    /// The height to catch up to. It comes only from heights a quorum certified, never from a page's cursor, which
+    /// its responder chooses freely.
     pub remote_height: NodeHeight,
     pub last_progress_height: NodeHeight,
     pub timeout_at: time::Instant,
@@ -2407,7 +2434,14 @@ struct CatchUp<TAddr> {
     pub from: TAddr,
     /// The page request awaiting its reply.
     pub pending_request: Option<u32>,
-    /// Where the next page starts, as the last page said. `None` starts at this node's highest certified block.
+    /// Whether the blocks of the page that answered the last request are being imported. Their imports keep the
+    /// catch-up open until the page's continuation is decided.
+    pub importing_page: bool,
+    /// Whether the last page continued past blocks that passed validation, so the catch-up pages on until a page
+    /// reaches its responder's leaf.
+    pub paging: bool,
+    /// Where the next page starts, as the last page from `from` said. `None` starts at this node's highest certified
+    /// block.
     pub next_height: Option<NodeHeight>,
     /// The blocks at `next_height` the next page skips, which an earlier page carried.
     pub next_skip: u32,
@@ -2432,6 +2466,8 @@ impl<TAddr> CatchUp<TAddr> {
             stall_window_start: now,
             from,
             pending_request: None,
+            importing_page: false,
+            paging: false,
             next_height: None,
             next_skip: 0,
             target_from: None,
@@ -2439,11 +2475,12 @@ impl<TAddr> CatchUp<TAddr> {
     }
 
     /// Records a page request to `from`. The timeout stays as it is, so a catch-up that makes no progress still times
-    /// out however often it asks again. The forks to skip count positions in the last responder's forks at
-    /// `next_height`, so a request to another peer skips none; a fork received twice is imported once.
+    /// out however often it asks again. A cursor is a position in the last responder's chain, so a request to another
+    /// peer starts at this node's highest certified block; a block received twice is imported once.
     pub fn requested(&mut self, from: TAddr, request_id: u32)
     where TAddr: PartialEq {
         if self.from != from {
+            self.next_height = None;
             self.next_skip = 0;
         }
         self.from = from;
@@ -2451,13 +2488,14 @@ impl<TAddr> CatchUp<TAddr> {
         self.restart_stall_window();
     }
 
-    /// Takes the outstanding request when `request_id` from `from` answers it.
+    /// Takes the outstanding request when `request_id` from `from` answers it, and starts importing its page.
     pub fn take_page(&mut self, request_id: u32, from: &TAddr) -> bool
     where TAddr: PartialEq {
         if self.pending_request != Some(request_id) || self.from != *from {
             return false;
         }
         self.pending_request = None;
+        self.importing_page = true;
         true
     }
 
@@ -2476,12 +2514,18 @@ impl<TAddr> CatchUp<TAddr> {
         }
     }
 
+    /// Whether this node is below its target or paging through a responder's blocks, so it does not propose.
     pub fn is_behind_target(&self) -> bool {
-        !self.has_timed_out() && self.last_progress_height < self.remote_height
+        !self.has_timed_out() && (self.last_progress_height < self.remote_height || self.paging)
     }
 
     /// Decides what follows a page from `from` that continues at `next_height`, past `next_skip` of its blocks, and
-    /// reached `end_height`, with this node at `current_height`.
+    /// whose highest block that passed validation is at `end_height`, with this node at `current_height`.
+    ///
+    /// The continuation is followed only when it lies at or beyond `end_height`, the validated blocks reach the
+    /// requested cursor, and the continuation is past that cursor. A responder starts a page at the cursor and
+    /// continues it past the last block it carried, so a continuation that breaks these says nothing about its
+    /// chain, and the page is treated as the end of the responder's blocks.
     pub fn after_page(
         &mut self,
         from: &TAddr,
@@ -2493,9 +2537,18 @@ impl<TAddr> CatchUp<TAddr> {
     where
         TAddr: Clone + PartialEq,
     {
-        self.next_height = next_height;
-        self.next_skip = if next_height.is_some() { next_skip } else { 0 };
-        if next_height.is_some() {
+        let cursor = self.next_height.map(|height| (height, self.next_skip));
+        let continuation = next_height.filter(|&next| {
+            end_height.is_some_and(|end| {
+                next >= end &&
+                    cursor.is_none_or(|(cursor_height, _)| end >= cursor_height) &&
+                    cursor.is_none_or(|cursor| (next, next_skip) > cursor)
+            })
+        });
+        self.paging = continuation.is_some();
+        self.next_height = continuation;
+        self.next_skip = if continuation.is_some() { next_skip } else { 0 };
+        if continuation.is_some() {
             return AfterPage::RequestFrom(from.clone());
         }
         if current_height >= self.remote_height {
@@ -2511,16 +2564,20 @@ impl<TAddr> CatchUp<TAddr> {
     }
 
     /// Updates catch-up progress to `current_height` and returns whether catch-up is still in progress: below its
-    /// target, or with a page outstanding. Only progress toward the target refreshes the timeout, so a catch-up at
-    /// its target whose page never arrives still lapses.
+    /// target, paging, importing a page, or with a page outstanding. A timed-out catch-up has ended. Only progress
+    /// toward the target or from importing a page refreshes the timeout, so a catch-up whose pages bring no blocks
+    /// lapses while live blocks arrive.
     pub fn record_progress(&mut self, current_height: NodeHeight, timeout: Duration) -> bool {
+        if self.has_timed_out() {
+            return false;
+        }
         if current_height > self.last_progress_height {
             self.last_progress_height = current_height;
-            if current_height < self.remote_height {
+            if current_height < self.remote_height || self.importing_page {
                 self.reset_timeout(timeout);
             }
         }
-        current_height < self.remote_height || self.is_awaiting_page()
+        current_height < self.remote_height || self.paging || self.importing_page || self.is_awaiting_page()
     }
 
     pub fn reset_timeout(&mut self, timeout: Duration) {
@@ -2782,7 +2839,146 @@ mod tests {
             assert_eq!(catch_up.next_skip, 2, "the same peer resumes past the forks it sent");
             catch_up.requested("peer-b", 2);
             assert_eq!(catch_up.next_skip, 0);
-            assert_eq!(catch_up.next_height, Some(NodeHeight(30)));
+            assert_eq!(
+                catch_up.next_height, None,
+                "another peer's page starts at this node's certified block"
+            );
+        }
+
+        #[test]
+        fn a_continuation_without_validated_blocks_is_not_followed() {
+            let timeout = Duration::from_secs(20);
+            let mut catch_up = CatchUp::new(Epoch(1), NodeHeight(10), NodeHeight(10), timeout, "peer-a");
+            catch_up.requested("peer-a", 0);
+            assert!(catch_up.take_page(0, &"peer-a"));
+            assert_eq!(
+                catch_up.after_page(&"peer-a", Some(NodeHeight(u64::MAX)), 0, None, NodeHeight(10)),
+                AfterPage::Finished
+            );
+            assert_eq!(catch_up.remote_height, NodeHeight(10));
+            assert_eq!(catch_up.next_height, None);
+            assert!(!catch_up.is_behind_target());
+        }
+
+        #[test]
+        fn a_continuation_whose_blocks_fall_short_of_the_cursor_is_not_followed() {
+            let timeout = Duration::from_secs(20);
+            let mut catch_up = CatchUp::new(Epoch(1), NodeHeight(10), NodeHeight(10), timeout, "peer-a");
+            assert_eq!(
+                catch_up.after_page(&"peer-a", Some(NodeHeight(30)), 0, Some(NodeHeight(29)), NodeHeight(29)),
+                AfterPage::RequestFrom("peer-a")
+            );
+            catch_up.requested("peer-a", 1);
+            assert!(catch_up.take_page(1, &"peer-a"));
+            assert_eq!(
+                catch_up.after_page(
+                    &"peer-a",
+                    Some(NodeHeight(u64::MAX)),
+                    0,
+                    Some(NodeHeight(12)),
+                    NodeHeight(29)
+                ),
+                AfterPage::Finished,
+                "a page answering from height 30 carried no validated block at or above it"
+            );
+            assert!(!catch_up.paging);
+            assert!(!catch_up.is_behind_target());
+        }
+
+        #[test]
+        fn a_continuation_must_advance_past_the_cursor() {
+            let timeout = Duration::from_secs(20);
+            let mut catch_up = CatchUp::new(Epoch(1), NodeHeight(10), NodeHeight(10), timeout, "peer-a");
+            assert_eq!(
+                catch_up.after_page(&"peer-a", Some(NodeHeight(30)), 2, Some(NodeHeight(30)), NodeHeight(29)),
+                AfterPage::RequestFrom("peer-a")
+            );
+            assert_eq!(
+                catch_up.after_page(&"peer-a", Some(NodeHeight(30)), 2, Some(NodeHeight(30)), NodeHeight(29)),
+                AfterPage::Finished,
+                "a page that repeats its cursor makes no progress"
+            );
+            assert_eq!(
+                catch_up.after_page(&"peer-a", Some(NodeHeight(30)), 3, Some(NodeHeight(30)), NodeHeight(29)),
+                AfterPage::RequestFrom("peer-a"),
+                "a page from the certified block may continue at any height its blocks reach"
+            );
+            assert_eq!(
+                catch_up.after_page(&"peer-a", Some(NodeHeight(30)), 4, Some(NodeHeight(30)), NodeHeight(29)),
+                AfterPage::RequestFrom("peer-a"),
+                "a page past a fork at the cursor height continues"
+            );
+        }
+
+        #[test]
+        fn honest_paging_holds_back_proposals_until_the_last_page() {
+            let timeout = Duration::from_secs(20);
+            let mut catch_up = CatchUp::new(Epoch(1), NodeHeight(10), NodeHeight(10), timeout, "peer-a");
+            catch_up.requested("peer-a", 0);
+            assert!(catch_up.take_page(0, &"peer-a"));
+            for height in 11..=60 {
+                assert!(
+                    catch_up.record_progress(NodeHeight(height), timeout),
+                    "a page's blocks keep the catch-up open at height {height}"
+                );
+            }
+            catch_up.importing_page = false;
+            assert_eq!(
+                catch_up.after_page(&"peer-a", Some(NodeHeight(61)), 0, Some(NodeHeight(60)), NodeHeight(60)),
+                AfterPage::RequestFrom("peer-a")
+            );
+            catch_up.requested("peer-a", 1);
+            assert!(catch_up.is_behind_target(), "no proposal while paging");
+
+            assert!(catch_up.take_page(1, &"peer-a"));
+            for height in 61..=100 {
+                assert!(catch_up.record_progress(NodeHeight(height), timeout));
+            }
+            catch_up.importing_page = false;
+            assert_eq!(
+                catch_up.after_page(&"peer-a", None, 0, Some(NodeHeight(100)), NodeHeight(100)),
+                AfterPage::Finished
+            );
+            assert!(!catch_up.is_behind_target());
+        }
+
+        #[test]
+        fn live_blocks_do_not_extend_a_paging_catch_up() {
+            let timeout = Duration::from_secs(20);
+            let mut catch_up = CatchUp::new(Epoch(1), NodeHeight(10), NodeHeight(10), timeout, "peer-a");
+            assert_eq!(
+                catch_up.after_page(
+                    &"peer-a",
+                    Some(NodeHeight(1_000)),
+                    0,
+                    Some(NodeHeight(11)),
+                    NodeHeight(11)
+                ),
+                AfterPage::RequestFrom("peer-a")
+            );
+            catch_up.requested("peer-a", 1);
+            let timeout_at = catch_up.timeout_at;
+            for height in 12..100 {
+                assert!(catch_up.record_progress(NodeHeight(height), timeout));
+            }
+            assert_eq!(
+                catch_up.timeout_at, timeout_at,
+                "only blocks a page imports, or progress toward a certified target, extend the catch-up"
+            );
+
+            catch_up.timeout_at = time::Instant::now();
+            assert!(!catch_up.is_behind_target());
+            assert!(!catch_up.record_progress(NodeHeight(100), timeout));
+        }
+
+        #[test]
+        fn a_timed_out_catch_up_is_not_revived() {
+            let timeout = Duration::from_secs(20);
+            let mut catch_up = CatchUp::new(Epoch(1), NodeHeight(50), NodeHeight(10), timeout, "peer-a");
+            catch_up.timeout_at = time::Instant::now();
+            assert!(!catch_up.record_progress(NodeHeight(11), timeout));
+            assert!(catch_up.has_timed_out());
+            assert!(!catch_up.is_behind_target());
         }
 
         #[test]

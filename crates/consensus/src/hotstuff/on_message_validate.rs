@@ -1014,6 +1014,13 @@ pub enum MessageValidationResult<TAddr> {
     },
 }
 
+impl<TAddr> MessageValidationResult<TAddr> {
+    /// Whether the message passed validation and goes on to be processed now or once its transactions arrive.
+    pub fn is_ready_or_parked(&self) -> bool {
+        matches!(self, Self::Ready { .. } | Self::ParkedProposal { .. })
+    }
+}
+
 /// A missing-transaction request we sent and are still willing to accept a response for.
 #[derive(Debug, Clone)]
 struct PendingMissingTransactionsRequest<TAddr> {

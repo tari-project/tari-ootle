@@ -18,7 +18,6 @@ pub async fn list(
     Extension(context): Extension<Arc<HandlerContext>>,
     Path(db_name): Path<String>,
 ) -> Result<Json<TableResponse>, WebError> {
-    const OPERATION: &str = "list_bookkeeping";
     let db = context.open_db(&db_name)?;
     let mut table = TableResponse::new([Column::new("name", "Name"), Column::new("contents", "Contents")]);
     let tx = db.read_only_context();
@@ -108,9 +107,7 @@ pub async fn list(
         &mut table,
     )?;
 
-    // Count the total number of entries in the bookkeeping column family (HighQcCf chosen arbitrarily)
-    let cf = tx.cf(column_families::bookkeeping::HighPcCf)?;
-    let total = cf.count(OPERATION)?;
+    let total = table.row_count();
     table.set_total_entries(total);
 
     Ok(Json(table))

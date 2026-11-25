@@ -78,17 +78,22 @@ pub async fn run(context: HandlerContext) -> anyhow::Result<()> {
         column_families::foreign_proposal::EpochIndex,
         column_families::foreign_proposal::UnconfirmedIndex,
         column_families::block::EpochHeightIndex,
+        column_families::block::ExecutedBlockIndex,
         column_families::certificates::proposal::ProposalCertificateCf,
         column_families::certificates::timeout::TimeoutCertificateCf,
         column_families::block_transaction_execution::BlockTransactionExecutionCf,
         column_families::block_transaction_execution::BlockIndex,
         column_families::finalized_transaction::FinalizedTransactionLinkCf,
+        column_families::finalized_transaction::EpochIndex,
+        column_families::finalized_transaction::BlockCommitProofTransactionCitationCf,
         column_families::transaction::TransactionCf,
         column_families::transaction_pool::TransactionPoolCf,
         column_families::transaction_pool_state_update::TransactionPoolStateUpdateCf,
         column_families::transaction_pool_state_update::TransactionPoolStateUpdateDebugHistoryCf,
         column_families::missing_transactions::MissingTransactionCf,
+        column_families::missing_transactions::MissingTransactionBlockIdIndex,
         column_families::parked_block::ParkedBlockCf,
+        column_families::parked_block::ParkedBlockEpochHeightIndex,
         column_families::foreign_parked_blocks::ForeignParkedBlockCf,
         column_families::foreign_parked_blocks::MissingTransactionsModel,
         column_families::foreign_parked_blocks::MissingTransactionsBlockIdIndex,
@@ -98,6 +103,8 @@ pub async fn run(context: HandlerContext) -> anyhow::Result<()> {
         column_families::substate::UnprunedDownedValuesIndex,
         column_families::substate_down_proof::SubstateDownProofCf,
         column_families::substate_down_proof::SubstateDownProofEpochIndex,
+        column_families::state_version_proof::StateVersionProofCf,
+        column_families::state_version_proof::BlockCommitProofCf,
         column_families::state_version_proof::StateVersionProofRetentionCf,
         column_families::state_version_proof::StateVersionProofEpochIndex,
         column_families::state_version_proof::BlockCommitProofCitationCf,
@@ -106,10 +113,15 @@ pub async fn run(context: HandlerContext) -> anyhow::Result<()> {
         column_families::pending_state_tree_diff::PendingStateTreeDiffRecordCf,
         // column_families::state_tree::StateTreeCf,
         column_families::state_tree::StateTreeStaleNodesCf,
+        column_families::state_tree::StateTreeDeferredStaleNodesCf,
         column_families::state_tree_shard_versions::StateTreeShardVersionCf,
+        column_families::state_sync_rewind_point::StateSyncRewindPointCf,
+        column_families::state_sync_rewind_point::StateSyncMissingValueCf,
         column_families::epoch_checkpoint::EpochCheckpointCf,
         column_families::lock_conflict::LockConflictCf,
         column_families::lock_conflict::LockConflictBlockIdIndex,
+        column_families::rollback_history::RollbackHistoryCf,
+        column_families::validator_liveness_log::ValidatorLivenessLogCf,
         column_families::validator_node_epoch_stats::ValidatorNodeEpochStatsCf,
         column_families::diagnostic_no_vote::DiagnosticsNoVoteCf,
         column_families::diagnostic_event::DiagnosticEventCf,
@@ -172,8 +184,10 @@ async fn fallback_handler(uri: Uri) -> impl IntoResponse {
 
 pub fn register_all_cfs(context: &mut HandlerContext) -> &mut HandlerContext {
     context
+        .register_cf_name("bookkeeping")
         .register_cf(column_families::block::BlockCf)
         .register_cf(column_families::block::EpochHeightIndex)
+        .register_cf(column_families::block::ExecutedBlockIndex)
         .register_cf(column_families::block_diff::BlockDiffRecordCf)
         .register_cf(column_families::block_transaction_execution::BlockIndex)
         .register_cf(column_families::block_transaction_execution::BlockTransactionExecutionCf)
@@ -186,6 +200,8 @@ pub fn register_all_cfs(context: &mut HandlerContext) -> &mut HandlerContext {
         .register_cf(column_families::diagnostic_no_vote::DiagnosticsNoVoteCf)
         .register_cf(column_families::epoch_checkpoint::EpochCheckpointCf)
         .register_cf(column_families::finalized_transaction::FinalizedTransactionLinkCf)
+        .register_cf(column_families::finalized_transaction::EpochIndex)
+        .register_cf(column_families::finalized_transaction::BlockCommitProofTransactionCitationCf)
         .register_cf(column_families::foreign_parked_blocks::ForeignParkedBlockCf)
         .register_cf(column_families::foreign_parked_blocks::MissingTransactionsModel)
         .register_cf(column_families::foreign_parked_blocks::MissingTransactionsBlockIdIndex)
@@ -197,17 +213,25 @@ pub fn register_all_cfs(context: &mut HandlerContext) -> &mut HandlerContext {
         .register_cf(column_families::lock_conflict::LockConflictBlockIdIndex)
         .register_cf(column_families::lock_conflict::LockConflictCf)
         .register_cf(column_families::missing_transactions::MissingTransactionCf)
+        .register_cf(column_families::missing_transactions::MissingTransactionBlockIdIndex)
         .register_cf(column_families::parked_block::ParkedBlockCf)
+        .register_cf(column_families::parked_block::ParkedBlockEpochHeightIndex)
         .register_cf(column_families::pending_state_tree_diff::PendingStateTreeDiffRecordCf)
+        .register_cf(column_families::rollback_history::RollbackHistoryCf)
+        .register_cf(column_families::state_sync_rewind_point::StateSyncRewindPointCf)
+        .register_cf(column_families::state_sync_rewind_point::StateSyncMissingValueCf)
         .register_cf(column_families::state_transition::StateTransitionCf)
         .register_cf(column_families::state_tree::StateTreeCf)
         .register_cf(column_families::state_tree::StateTreeStaleNodesCf)
+        .register_cf(column_families::state_tree::StateTreeDeferredStaleNodesCf)
         .register_cf(column_families::state_tree_shard_versions::StateTreeShardVersionCf)
         .register_cf(column_families::substate::HeadIndex)
         .register_cf(column_families::substate::SubstateCf)
         .register_cf(column_families::substate::UnprunedDownedValuesIndex)
         .register_cf(column_families::substate_down_proof::SubstateDownProofCf)
         .register_cf(column_families::substate_down_proof::SubstateDownProofEpochIndex)
+        .register_cf(column_families::state_version_proof::StateVersionProofCf)
+        .register_cf(column_families::state_version_proof::BlockCommitProofCf)
         .register_cf(column_families::state_version_proof::StateVersionProofRetentionCf)
         .register_cf(column_families::state_version_proof::StateVersionProofEpochIndex)
         .register_cf(column_families::state_version_proof::BlockCommitProofCitationCf)
@@ -216,6 +240,67 @@ pub fn register_all_cfs(context: &mut HandlerContext) -> &mut HandlerContext {
         .register_cf(column_families::transaction_pool::TransactionPoolCf)
         .register_cf(column_families::transaction_pool_state_update::TransactionPoolStateUpdateCf)
         .register_cf(column_families::transaction_pool_state_update::TransactionPoolStateUpdateDebugHistoryCf)
+        .register_cf(column_families::validator_liveness_log::ValidatorLivenessLogCf)
         .register_cf(column_families::validator_node_epoch_stats::ValidatorNodeEpochStatsCf)
         .register_cf(column_families::vote_equivocation::VoteEquivocationCf)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
+
+    use super::*;
+    use crate::config::{Config, WebServerConfig};
+
+    #[test]
+    fn register_all_cfs_registers_unique_column_families_including_bookkeeping() {
+        let config = Config {
+            webserver: WebServerConfig {
+                bind_address: ([127, 0, 0, 1], 0).into(),
+            },
+            dbs: vec![],
+        };
+        let mut context = HandlerContext::new(config);
+        register_all_cfs(&mut context);
+
+        let registered = context.registered_cfs();
+        assert!(registered.contains(&"bookkeeping".to_string()));
+        assert!(registered.contains(&slugify_type_name(column_families::block::ExecutedBlockIndex)));
+        assert!(registered.contains(&slugify_type_name(
+            column_families::finalized_transaction::EpochIndex
+        )));
+        assert!(registered.contains(&slugify_type_name(
+            column_families::finalized_transaction::BlockCommitProofTransactionCitationCf
+        )));
+        assert!(registered.contains(&slugify_type_name(
+            column_families::missing_transactions::MissingTransactionBlockIdIndex
+        )));
+        assert!(registered.contains(&slugify_type_name(
+            column_families::parked_block::ParkedBlockEpochHeightIndex
+        )));
+        assert!(registered.contains(&slugify_type_name(
+            column_families::rollback_history::RollbackHistoryCf
+        )));
+        assert!(registered.contains(&slugify_type_name(
+            column_families::state_sync_rewind_point::StateSyncRewindPointCf
+        )));
+        assert!(registered.contains(&slugify_type_name(
+            column_families::state_sync_rewind_point::StateSyncMissingValueCf
+        )));
+        assert!(registered.contains(&slugify_type_name(
+            column_families::state_tree::StateTreeDeferredStaleNodesCf
+        )));
+        assert!(registered.contains(&slugify_type_name(
+            column_families::state_version_proof::StateVersionProofCf
+        )));
+        assert!(registered.contains(&slugify_type_name(
+            column_families::state_version_proof::BlockCommitProofCf
+        )));
+        assert!(registered.contains(&slugify_type_name(
+            column_families::validator_liveness_log::ValidatorLivenessLogCf
+        )));
+
+        let unique: HashSet<_> = registered.iter().collect();
+        assert_eq!(unique.len(), registered.len());
+    }
 }

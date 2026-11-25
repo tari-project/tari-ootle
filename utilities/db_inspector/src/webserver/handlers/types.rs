@@ -3,7 +3,12 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json as json;
-use tari_state_store_rocksdb::traits::Cf;
+use tari_ootle_storage::Ordering;
+use tari_state_store_rocksdb::{
+    cf_api::CfContext,
+    error::RocksDbStorageError,
+    traits::{Cf, RocksReader},
+};
 
 use crate::webserver::error::WebError;
 
@@ -93,6 +98,10 @@ impl TableResponse {
         self.smallest_row_size = size;
         self
     }
+
+    pub fn row_count(&self) -> usize {
+        self.rows.len()
+    }
 }
 
 #[macro_export]
@@ -120,4 +129,70 @@ pub fn decode_hex_prefix<CF: Cf>(prefix_hex: &str) -> Result<Vec<u8>, WebError> 
         prefix.remove(0);
     }
     Ok(prefix)
+}
+
+pub fn scan_page<T, IE, E, F>(
+    iter: impl Iterator<Item = Result<T, IE>>,
+    skip: usize,
+    page_size: usize,
+    count_all: bool,
+    mut on_page_item: F,
+) -> Result<usize, E>
+where
+    E: From<IE>,
+    F: FnMut(T) -> Result<(), E>,
+{
+    let mut matched = 0usize;
+    let mut emitted = 0usize;
+    for item in iter {
+        let item = item?;
+        matched += 1;
+        if matched <= skip {
+            continue;
+        }
+        if emitted >= page_size {
+            if !count_all {
+                break;
+            }
+            continue;
+        }
+        on_page_item(item)?;
+        emitted += 1;
+    }
+    Ok(matched)
+}
+
+pub fn paginate_cf<CF, DB, E, F>(
+    cf: &CfContext<'_, DB, CF>,
+    ordering: Ordering,
+    query: Option<&str>,
+    skip: usize,
+    page_size: usize,
+    operation: &'static str,
+    mut on_page_row: F,
+) -> Result<usize, E>
+where
+    CF: Cf,
+    DB: RocksReader,
+    E: From<RocksDbStorageError> + From<WebError>,
+    F: FnMut(CF::Key, CF::Value) -> Result<(), E>,
+{
+    if let Some(prefix_hex) = query.filter(|q| !q.is_empty()) {
+        let key_prefix = decode_hex_prefix::<CF>(prefix_hex)?;
+        scan_page(
+            cf.prefix_range_key_iterator_raw_key(ordering, key_prefix),
+            skip,
+            page_size,
+            true,
+            |key| {
+                let value = cf.get(&key, operation)?;
+                on_page_row(key, value)
+            },
+        )
+    } else {
+        scan_page(cf.iterator(ordering, operation), skip, page_size, false, |(k, v)| {
+            on_page_row(k, v)
+        })?;
+        Ok(cf.count(operation)?)
+    }
 }

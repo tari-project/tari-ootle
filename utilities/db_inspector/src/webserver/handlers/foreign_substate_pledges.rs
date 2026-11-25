@@ -10,12 +10,12 @@ use axum::{
 };
 use serde_json::json;
 use tari_ootle_storage::Ordering;
-use tari_state_store_rocksdb::{column_families, error::RocksDbStorageError, traits::Cf};
+use tari_state_store_rocksdb::{column_families, traits::Cf};
 
 use crate::webserver::{
     context::HandlerContext,
     error::WebError,
-    handlers::types::{Column, TableRequest, TableResponse, decode_hex_prefix},
+    handlers::types::{Column, TableRequest, TableResponse, paginate_cf},
 };
 
 pub async fn list(
@@ -40,32 +40,28 @@ pub async fn list(
     } else {
         Ordering::Ascending
     };
-    type Key = <column_families::foreign_substate_pledge::ForeignSubstatePledgeCf as Cf>::Key;
-    type Value = <column_families::foreign_substate_pledge::ForeignSubstatePledgeCf as Cf>::Value;
-    let iter: Box<dyn Iterator<Item = Result<(Key, Value), RocksDbStorageError>>> =
-        if let Some(prefix_hex) = req.query.as_ref().filter(|q| !q.is_empty()) {
-            let key_prefix =
-                decode_hex_prefix::<column_families::foreign_substate_pledge::ForeignSubstatePledgeCf>(prefix_hex)?;
-            Box::new(cf.prefix_range_iterator_raw_key(ordering, key_prefix))
-        } else {
-            Box::new(cf.iterator(ordering, OPERATION))
-        };
-
     let has_key_prefix = column_families::foreign_substate_pledge::ForeignSubstatePledgeCf::key_prefix().is_some();
     let page_size = req.limit.unwrap_or(1_000);
     let skip = req.page.unwrap_or(0).saturating_mul(page_size);
-    for result in iter.skip(skip).take(page_size) {
-        let ((tx_id, substate_addr), data) = result?;
-        let encoded_key = cf.encode_key(&(tx_id, substate_addr));
-        table.add_row(json!({
-            "id": hex::encode(&encoded_key[usize::from(has_key_prefix)..]),
-            "tx_id": tx_id,
-            "substate_id": data.versioned_substate_id(),
-            "value": data.substate_value(),
-            "lock_type": data.as_substate_lock_type(),
-        }));
-    }
-    let total = cf.count(OPERATION)?;
+    let total = paginate_cf(
+        &cf,
+        ordering,
+        req.query.as_deref(),
+        skip,
+        page_size,
+        OPERATION,
+        |(tx_id, substate_addr), data| {
+            let encoded_key = cf.encode_key(&(tx_id, substate_addr));
+            table.add_row(json!({
+                "id": hex::encode(&encoded_key[usize::from(has_key_prefix)..]),
+                "tx_id": tx_id,
+                "substate_id": data.versioned_substate_id(),
+                "value": data.substate_value(),
+                "lock_type": data.as_substate_lock_type(),
+            }));
+            Ok::<_, WebError>(())
+        },
+    )?;
     table.set_total_entries(total);
 
     Ok(Json(table))

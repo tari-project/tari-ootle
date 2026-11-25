@@ -16,14 +16,13 @@ use tari_ootle_common_types::displayable::Displayable;
 use tari_ootle_storage::{Ordering, consensus_models::Evidence};
 use tari_state_store_rocksdb::{
     codecs::{DbEncoder, KeyPrefix},
-    error::RocksDbStorageError,
     traits::Cf,
 };
 
 use crate::webserver::{
     context::HandlerContext,
     error::WebError,
-    handlers::types::{Column, TableRequest, TableResponse, decode_hex_prefix},
+    handlers::types::{Column, TableRequest, TableResponse, paginate_cf},
 };
 
 pub fn list<CF, F, S>(cf: F) -> impl Handler<(), S>
@@ -52,14 +51,6 @@ where
                 } else {
                     Ordering::Ascending
                 };
-                #[allow(clippy::type_complexity)]
-                let iter: Box<dyn Iterator<Item = Result<(CF::Key, CF::Value), RocksDbStorageError>>> =
-                    if let Some(prefix_hex) = req.query.as_ref().filter(|q| !q.is_empty()) {
-                        let key_prefix = decode_hex_prefix::<CF>(prefix_hex)?;
-                        Box::new(cf.prefix_range_iterator_raw_key(ordering, key_prefix))
-                    } else {
-                        Box::new(cf.iterator(ordering, OPERATION))
-                    };
 
                 let page_size = req.limit.unwrap_or(1_000);
                 let skip = req.page.unwrap_or(0).saturating_mul(page_size);
@@ -67,42 +58,51 @@ where
                 let mut total_bytes = 0usize;
                 let mut largest_row_size = 0usize;
                 let mut smallest_row_size = usize::MAX;
-                for result in iter.skip(skip).take(page_size) {
-                    let (key, value) = result?;
-                    let bytes = cf
-                        .get_raw_pinned(&key, OPERATION)
-                        .map_err(|e| anyhow!("Failed to get_raw_pinned: {}", e))?;
-                    let size = bytes.map(|b| b.len()).unwrap_or(0);
-                    total_bytes += size;
-                    if size > largest_row_size {
-                        largest_row_size = size;
-                    }
-                    if size < smallest_row_size {
-                        smallest_row_size = size;
-                    }
+                let total = paginate_cf(
+                    &cf,
+                    ordering,
+                    req.query.as_deref(),
+                    skip,
+                    page_size,
+                    OPERATION,
+                    |key, value| {
+                        let bytes = cf
+                            .get_raw_pinned(&key, OPERATION)
+                            .map_err(|e| anyhow!("Failed to get_raw_pinned: {}", e))?;
+                        let size = bytes.map(|b| b.len()).unwrap_or(0);
+                        total_bytes += size;
+                        if size > largest_row_size {
+                            largest_row_size = size;
+                        }
+                        if size < smallest_row_size {
+                            smallest_row_size = size;
+                        }
 
-                    let value = serde_json::to_value(value).map_err(|e| anyhow!("Failed to serialize value: {}", e))?;
-                    let mut value = transformer(value).map_err(|e| anyhow!("Failed to transform value: {}", e))?;
-                    let key = key_codec
-                        .encode(&key)
-                        .map_err(|e| anyhow!("Failed to encode key: {}", e))?;
-                    if !value.is_object() {
-                        // Must return an object
-                        value = json!({
-                            "value": value,
-                        });
-                    }
+                        let value =
+                            serde_json::to_value(value).map_err(|e| anyhow!("Failed to serialize value: {}", e))?;
+                        let mut value =
+                            transformer(value).map_err(|e| anyhow!("Failed to transform value: {}", e))?;
+                        let key = key_codec
+                            .encode(&key)
+                            .map_err(|e| anyhow!("Failed to encode key: {}", e))?;
+                        if !value.is_object() {
+                            // Must return an object
+                            value = json!({
+                                "value": value,
+                            });
+                        }
 
-                    value.set_value(
-                        "id",
-                        serde_json::Value::String(hex::encode(&key[usize::from(has_key_prefix)..])),
-                    );
-                    table.add_row(value);
-                }
+                        value.set_value(
+                            "id",
+                            serde_json::Value::String(hex::encode(&key[usize::from(has_key_prefix)..])),
+                        );
+                        table.add_row(value);
+                        Ok::<_, WebError>(())
+                    },
+                )?;
                 if smallest_row_size == usize::MAX {
                     smallest_row_size = 0;
                 }
-                let total = cf.count(OPERATION)?;
                 table
                     .set_total_entries(total)
                     .set_total_bytes(total_bytes)
@@ -145,11 +145,12 @@ fn create_table_for_cf<CF: Cf>() -> TableResponse {
         },
         KeyPrefix::Transactions => {
             table.with_columns([
-                Column::new("transaction.V1.body.transaction.instructions", "Instructions"),
-                Column::new("transaction.V1.body.transaction.fee_instructions", "Fee Instructions"),
-                Column::new("transaction.V1.body.transaction.inputs", "Inputs"),
-                Column::new("transaction.V1.body.signatures", "Signatures"),
-                Column::new("transaction.V1.seal_signature.public_key", "Seal signer"),
+                Column::new("schema_version", "Schema"),
+                Column::new("tx.body.transaction.instructions", "Instructions"),
+                Column::new("tx.body.transaction.fee_instructions", "Fee Instructions"),
+                Column::new("tx.body.transaction.inputs", "Inputs"),
+                Column::new("tx.body.signatures", "Signatures"),
+                Column::new("tx.seal_signature.public_key", "Seal signer"),
             ]);
         },
         KeyPrefix::ForeignProposals => {
@@ -233,6 +234,16 @@ fn create_transformer<CF: Cf>() -> Box<dyn Fn(serde_json::Value) -> anyhow::Resu
         return Box::new(Ok);
     };
     match prefix {
+        KeyPrefix::Transactions => Box::new(|mut v| {
+            if !v["transaction"]["V2"].is_null() {
+                v["tx"] = v["transaction"]["V2"].clone();
+                v["schema_version"] = serde_json::Value::String("V2".to_string());
+            } else if !v["transaction"]["V1"].is_null() {
+                v["tx"] = v["transaction"]["V1"].clone();
+                v["schema_version"] = serde_json::Value::String("V1".to_string());
+            }
+            Ok(v)
+        }),
         KeyPrefix::TransactionPool => Box::new(|mut v| {
             let stage = v
                 .get("pending_stage")
@@ -311,5 +322,99 @@ trait SetJsonValue {
 impl SetJsonValue for serde_json::Value {
     fn set_value(&mut self, key: &str, value: serde_json::Value) {
         *key.index_or_insert(self) = value;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+    use tari_state_store_rocksdb::column_families::{
+        certificates::proposal::ProposalCertificateCf,
+        transaction::TransactionCf,
+    };
+
+    use super::*;
+
+    #[test]
+    fn transaction_transformer_populates_neutral_tx_fields_for_v1_and_v2() {
+        let transformer = create_transformer::<TransactionCf>();
+        let v2_record = json!({
+            "id": "010203",
+            "transaction": {
+                "V2": {
+                    "body": {
+                        "transaction": {
+                            "instructions": ["call"],
+                            "fee_instructions": ["pay_fee"],
+                            "inputs": ["input_0"]
+                        },
+                        "signatures": ["sig_0"]
+                    },
+                    "seal_signature": {
+                        "public_key": "pk_hex"
+                    }
+                }
+            }
+        });
+
+        let transformed = transformer(v2_record).unwrap();
+        assert_eq!(transformed["schema_version"], json!("V2"));
+        assert!(transformed["transaction"]["V1"].is_null());
+        assert_eq!(
+            transformed["tx"]["body"]["transaction"]["instructions"],
+            json!(["call"])
+        );
+        assert_eq!(
+            transformed["tx"]["body"]["transaction"]["fee_instructions"],
+            json!(["pay_fee"])
+        );
+        assert_eq!(
+            transformed["tx"]["body"]["transaction"]["inputs"],
+            json!(["input_0"])
+        );
+        assert_eq!(transformed["tx"]["body"]["signatures"], json!(["sig_0"]));
+        assert_eq!(transformed["tx"]["seal_signature"]["public_key"], json!("pk_hex"));
+
+        let v1_record = json!({
+            "id": "040506",
+            "transaction": {
+                "V1": {
+                    "body": {
+                        "transaction": {
+                            "instructions": ["call_v1"],
+                            "fee_instructions": ["pay_fee_v1"],
+                            "inputs": []
+                        },
+                        "signatures": []
+                    },
+                    "seal_signature": {
+                        "public_key": "pk_v1"
+                    }
+                }
+            }
+        });
+        let transformed_v1 = transformer(v1_record).unwrap();
+        assert_eq!(transformed_v1["schema_version"], json!("V1"));
+        assert!(transformed_v1["transaction"]["V2"].is_null());
+        assert_eq!(
+            transformed_v1["tx"]["body"]["transaction"]["instructions"],
+            json!(["call_v1"])
+        );
+    }
+
+    #[test]
+    fn proposal_certificate_transformer_counts_schnorr_signatures() {
+        let transformer = create_transformer::<ProposalCertificateCf>();
+        let cert = json!({
+            "signatures": {
+                "Schnorr": {
+                    "signers": "03",
+                    "signatures": [{"public_nonce": "a", "signature": "b"}, {"public_nonce": "c", "signature": "d"}]
+                }
+            }
+        });
+
+        let transformed = transformer(cert).unwrap();
+        assert_eq!(transformed["num_signatures"], json!(2));
     }
 }

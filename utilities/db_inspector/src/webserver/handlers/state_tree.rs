@@ -10,12 +10,12 @@ use axum::{
 };
 use serde_json::json;
 use tari_ootle_storage::Ordering;
-use tari_state_store_rocksdb::{column_families::state_tree::StateTreeCf, error::RocksDbStorageError, traits::Cf};
+use tari_state_store_rocksdb::{column_families::state_tree::StateTreeCf, traits::Cf};
 
 use crate::webserver::{
     context::HandlerContext,
     error::WebError,
-    handlers::types::{Column, TableRequest, TableResponse, decode_hex_prefix},
+    handlers::types::{Column, TableRequest, TableResponse, paginate_cf},
 };
 
 pub async fn list(
@@ -42,60 +42,57 @@ pub async fn list(
     } else {
         Ordering::Ascending
     };
-    type Key = <StateTreeCf as Cf>::Key;
-    type Value = <StateTreeCf as Cf>::Value;
-    let iter: Box<dyn Iterator<Item = Result<(Key, Value), RocksDbStorageError>>> =
-        if let Some(prefix_hex) = req.query.as_ref().filter(|q| !q.is_empty()) {
-            let key_prefix = decode_hex_prefix::<StateTreeCf>(prefix_hex)?;
-            Box::new(cf.prefix_range_iterator_raw_key(ordering, key_prefix))
-        } else {
-            Box::new(cf.iterator(ordering, OPERATION))
-        };
-
     let has_key_prefix = StateTreeCf::key_prefix().is_some();
     let row_limit = req.limit.unwrap_or(1_000);
     let row_skip = req.page.unwrap_or(0).saturating_mul(row_limit);
-    for result in iter.skip(row_skip).take(row_limit) {
-        let ((shard, node_key), node) = result?;
-        let encoded_key = cf.encode_key(&(shard, node_key.clone()));
-        let key_hex = hex::encode(&encoded_key[usize::from(has_key_prefix)..]);
-        match node {
-            tari_jellyfish::Node::Internal(node) => {
-                table.add_row(json!({
-                    "id": key_hex,
-                    "shard": shard,
-                    "key": node_key.to_string(),
-                    "type": "Internal",
-                    "leaf_count": node.leaf_count(),
-                    "substate_addr": "",
-                    "version": node_key.version(),
-                }));
-            },
-            tari_jellyfish::Node::Leaf(node) => {
-                table.add_row(json!({
-                    "id": key_hex,
-                    "shard": shard,
-                    "key": node_key.to_string(),
-                    "type": "Leaf",
-                    "leaf_count": 0,
-                    "substate_addr": node.payload(),
-                    "version": node.version(),
-                }));
-            },
-            tari_jellyfish::Node::Null => {
-                table.add_row(json!({
-                    "id": key_hex,
-                    "shard": shard,
-                    "key": node_key.to_string(),
-                    "type": "Null",
-                    "leaf_count": 0,
-                    "substate_addr": "",
-                    "version": node_key.version(),
-                }));
-            },
-        }
-    }
-    let count = cf.count(OPERATION)?;
+    let count = paginate_cf(
+        &cf,
+        ordering,
+        req.query.as_deref(),
+        row_skip,
+        row_limit,
+        OPERATION,
+        |(shard, node_key), node| {
+            let encoded_key = cf.encode_key(&(shard, node_key.clone()));
+            let key_hex = hex::encode(&encoded_key[usize::from(has_key_prefix)..]);
+            match node {
+                tari_jellyfish::Node::Internal(node) => {
+                    table.add_row(json!({
+                        "id": key_hex,
+                        "shard": shard,
+                        "key": node_key.to_string(),
+                        "type": "Internal",
+                        "leaf_count": node.leaf_count(),
+                        "substate_addr": "",
+                        "version": node_key.version(),
+                    }));
+                },
+                tari_jellyfish::Node::Leaf(node) => {
+                    table.add_row(json!({
+                        "id": key_hex,
+                        "shard": shard,
+                        "key": node_key.to_string(),
+                        "type": "Leaf",
+                        "leaf_count": 1,
+                        "substate_addr": node.payload(),
+                        "version": node.version(),
+                    }));
+                },
+                tari_jellyfish::Node::Null => {
+                    table.add_row(json!({
+                        "id": key_hex,
+                        "shard": shard,
+                        "key": node_key.to_string(),
+                        "type": "Null",
+                        "leaf_count": 0,
+                        "substate_addr": "",
+                        "version": node_key.version(),
+                    }));
+                },
+            }
+            Ok::<_, WebError>(())
+        },
+    )?;
     table.set_total_entries(count);
 
     Ok(Json(table))

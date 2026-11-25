@@ -212,7 +212,12 @@ mod tests {
         assert_eq!(parsed["footer"]["blocks_deleted"], 5);
 
         let mut jsonl_out = Vec::new();
-        convert_records(AuditReader::new(bytes.as_slice()).unwrap(), Format::Jsonl, &mut jsonl_out).unwrap();
+        convert_records(
+            AuditReader::new(bytes.as_slice()).unwrap(),
+            Format::Jsonl,
+            &mut jsonl_out,
+        )
+        .unwrap();
         let lines: Vec<&str> = std::str::from_utf8(&jsonl_out).unwrap().lines().collect();
         assert_eq!(lines.len(), 2);
     }

@@ -126,6 +126,11 @@ mod template {
             self.confidential.deposit(bucket);
         }
 
+        pub fn recall_all_confidential(&mut self, vault_id: VaultId) {
+            let bucket = ResourceManager::get(self.confidential.resource_address()).recall_all(vault_id);
+            self.confidential.deposit(bucket);
+        }
+
         pub fn recall_stealth(&mut self, vault_id: VaultId, revealed_amount: Amount) {
             let bucket =
                 ResourceManager::get(self.stealth.resource_address()).recall_fungible_amount(vault_id, revealed_amount);

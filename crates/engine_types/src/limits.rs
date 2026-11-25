@@ -603,8 +603,8 @@ impl NativeExecutionPoints {
     /// Each non-fungible id or confidential commitment moved from one container to another. Integer
     /// ids measure at ~600-900 points a move; the costliest, the longest string ids, which every
     /// comparison reads nearly to the end, at ~1,100 taken or joined and ~2,100 locked or unlocked,
-    /// since a lock copies each id. Commitments, fixed 32-byte keys, measure at ~1,500-1,800 locked,
-    /// unlocked or deposited. Set above all of these. Charged by [`non_fungible_move_points`].
+    /// since a lock copies each id. Commitments, fixed 32-byte keys, measure at ~1,500-1,900 locked,
+    /// unlocked, recalled or deposited. Set above all of these. Charged by [`non_fungible_move_points`].
     pub const PER_NON_FUNGIBLE_ID_MOVED: u64 = 4_000;
     /// One stealth/confidential output: its share of the aggregated bulletproof range proof
     /// (~0.68ms measured marginal, no view key). Outputs on a resource with a view key add

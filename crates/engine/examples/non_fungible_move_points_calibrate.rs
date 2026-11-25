@@ -183,8 +183,8 @@ fn main() {
         );
     }
 
-    // Commitments are taken out of a container only by a withdraw proof naming each one, which is priced per
-    // input, so only the moves that carry a whole set are timed: a proof's lock and unlock, and a deposit.
+    // A withdraw proof also takes commitments out of a container, but it names each one as an input priced on its
+    // own, so the moves timed here are those charged by the commitment count alone.
     let commitments = commitments(2 * IDS);
     let mut container = ResourceContainer::confidential(address, commitments.iter().take(IDS).copied(), Amount::zero());
     report(
@@ -195,19 +195,19 @@ fn main() {
             container.unlock(black_box(locked)).unwrap();
         }),
     );
-    // A deposit moves each commitment once; it is reported as half a round trip of the same moves.
-    let held = ResourceContainer::confidential(address, commitments.iter().step_by(2).copied(), Amount::zero());
-    let moved =
-        ResourceContainer::confidential(address, commitments.iter().skip(1).step_by(2).copied(), Amount::zero());
-    let mut best = f64::MAX;
-    for _ in 0..TRIALS {
-        let (mut held, moved) = (held.clone(), moved.clone());
-        let start = Instant::now();
-        held.deposit(black_box(moved)).unwrap();
-        best = best.min(start.elapsed().as_nanos() as f64 / 1e6);
-        drop(black_box(held));
-    }
-    report("commitment", "deposit into held (x2)", 2.0 * best);
+    // Every other commitment stays behind, as for the ids above.
+    let moved = commitments.iter().step_by(2).copied().collect::<BTreeSet<_>>();
+    let mut container = ResourceContainer::confidential(address, commitments.iter().copied(), Amount::zero());
+    report(
+        "commitment",
+        "recall, deposit held",
+        best_ms(|| {
+            let recalled = container
+                .recall_confidential_commitments(&moved, Amount::zero())
+                .unwrap();
+            container.deposit(black_box(recalled)).unwrap();
+        }),
+    );
 
     println!(
         "\nPER_NON_FUNGIBLE_ID_MOVED = {}. The last column is what that charges over what was measured.",

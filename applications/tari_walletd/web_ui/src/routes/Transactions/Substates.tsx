@@ -34,6 +34,7 @@ import {
   substateIdToString,
   TransactionResult,
 } from "@tari-project/ootle-ts-bindings";
+import { nftIdToString } from "@utils/helpers";
 import { useState } from "react";
 import { IoArrowDownCircle, IoArrowUpCircle } from "react-icons/io5";
 
@@ -41,7 +42,10 @@ interface SubstateRowDataProps {
   id: SubstateId;
   substate?: Substate | number;
   state: string;
-  index: number;
+}
+
+function stringifyValue(value: unknown): string {
+  return JSON.stringify(value, (_key, v) => (typeof v === "bigint" ? v.toString() : v)) ?? "undefined";
 }
 
 function cborObjectEntries(value: any): [string, string][] | null {
@@ -49,10 +53,13 @@ function cborObjectEntries(value: any): [string, string][] | null {
   if (!decoded || typeof decoded !== "object" || Array.isArray(decoded)) {
     return null;
   }
-  return Object.entries(decoded).map(([k, v]) => [k, typeof v === "string" ? v : JSON.stringify(v)]);
+  return Object.entries(decoded).map(([k, v]) => [
+    k,
+    typeof v === "string" ? v : typeof v === "bigint" ? v.toString() : stringifyValue(v),
+  ]);
 }
 
-function renderSubstateDetails(substate: any, id: SubstateId) {
+function renderSubstateDetails(substate: any) {
   if (!substate || typeof substate === "number") {
     return null;
   }
@@ -162,13 +169,7 @@ function renderSubstateDetails(substate: any, id: SubstateId) {
                       </Typography>
                       <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
                         {vault.resource_container.NonFungible.token_ids.map((token: any, index: number) => (
-                          <Chip
-                            key={index}
-                            label={token.Uint64 || JSON.stringify(token)}
-                            size="small"
-                            color="info"
-                            variant="outlined"
-                          />
+                          <Chip key={index} label={nftIdToString(token)} size="small" color="info" variant="outlined" />
                         ))}
                       </Box>
                     </Box>
@@ -184,22 +185,28 @@ function renderSubstateDetails(substate: any, id: SubstateId) {
 
   if (substateObj?.Resource) {
     const resource = substateObj.Resource;
+    const metadataEntries = cborObjectEntries(resource.metadata);
     return (
       <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
         <Typography variant="subtitle2">Resource Details</Typography>
 
         <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
           <Chip label={`Type: ${resource.resource_type}`} size="small" color="primary" variant="outlined" />
-          <Chip label={`Supply: ${resource.total_supply}`} size="small" color="secondary" variant="outlined" />
+          <Chip
+            label={`Supply: ${resource.total_supply ?? "Untracked"}`}
+            size="small"
+            color="secondary"
+            variant="outlined"
+          />
         </Box>
 
-        {resource.metadata && (
+        {metadataEntries && metadataEntries.length > 0 && (
           <Box>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
               Metadata:
             </Typography>
             <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
-              {Object.entries(resource.metadata).map(([key, value]) => (
+              {metadataEntries.map(([key, value]) => (
                 <Chip key={key} label={`${key}: ${value}`} size="small" variant="outlined" />
               ))}
             </Box>
@@ -212,14 +219,15 @@ function renderSubstateDetails(substate: any, id: SubstateId) {
   return null;
 }
 
-function SubstateRowData({ id, substate, state, index }: SubstateRowDataProps) {
+function SubstateRowData({ id, substate, state }: SubstateRowDataProps) {
   const [open, setOpen] = useState(false);
   const theme = useTheme();
 
   const substateId = substateIdToString(id);
+  const details = renderSubstateDetails(substate);
   return (
     <>
-      <TableRow key={`${index}-1`}>
+      <TableRow>
         <DataTableCell sx={{ borderTop: 1, borderTopColor: "divider", borderBottom: "none" }}>
           <div
             style={{
@@ -255,7 +263,7 @@ function SubstateRowData({ id, substate, state, index }: SubstateRowDataProps) {
           </AccordionIconButton>
         </DataTableCell>
       </TableRow>
-      <TableRow key={`${index}-2`}>
+      <TableRow>
         <DataTableCell
           style={{
             paddingBottom: theme.spacing(1),
@@ -266,7 +274,7 @@ function SubstateRowData({ id, substate, state, index }: SubstateRowDataProps) {
         >
           <Collapse in={open} timeout="auto" unmountOnExit>
             <Box sx={{ p: 2, backgroundColor: theme.palette.accent.background, borderRadius: 1 }}>
-              {renderSubstateDetails(substate, id) && <Box sx={{ mb: 2 }}>{renderSubstateDetails(substate, id)}</Box>}
+              {details && <Box sx={{ mb: 2 }}>{details}</Box>}
               <CodeBlockExpand title="Raw Substate Data" content={{ substate, id }} />
             </Box>
           </Collapse>
@@ -294,10 +302,10 @@ export default function Substates({ data }: { data: TransactionResult }) {
       <Table>
         <TableBody>
           {up.map(([id, substate]: [SubstateId, Substate | number], index: number) => {
-            return <SubstateRowData index={index} id={id} substate={substate} state="Up" key={index} />;
+            return <SubstateRowData id={id} substate={substate} state="Up" key={`up-${index}`} />;
           })}
           {down.map(([id, substate]: [SubstateId, Substate | number], index: number) => {
-            return <SubstateRowData index={index} id={id} substate={substate} state="Down" key={index} />;
+            return <SubstateRowData id={id} substate={substate} state="Down" key={`down-${index}`} />;
           })}
         </TableBody>
       </Table>

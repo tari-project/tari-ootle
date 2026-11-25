@@ -32,6 +32,7 @@ pub fn abort_code(reason: &AbortReason) -> &'static str {
         AbortReason::ValidityWindowTooLong => "VALIDITY_WINDOW_TOO_LONG",
         AbortReason::InputPledgeTooLarge => "INPUT_PLEDGE_TOO_LARGE",
         AbortReason::GovernanceCallAfterPinnedEpoch => "GOVERNANCE_CALL_AFTER_PINNED_EPOCH",
+        AbortReason::InputLoadTooLarge => "INPUT_LOAD_TOO_LARGE",
     }
 }
 
@@ -289,7 +290,7 @@ pub struct FinalizedResult {
 mod tests {
     use super::*;
 
-    /// Every canonical [`AbortReason`] variant — exhaustively listed so adding a 13th variant upstream
+    /// Every canonical [`AbortReason`] variant — exhaustively listed so adding a 14th variant upstream
     /// forces this test (and the canonical code set) to be updated, not silently dropped.
     const ALL_ABORT_REASONS: &[AbortReason] = &[
         AbortReason::ForeignPledgeInputConflict,
@@ -304,6 +305,7 @@ mod tests {
         AbortReason::ValidityWindowTooLong,
         AbortReason::InputPledgeTooLarge,
         AbortReason::GovernanceCallAfterPinnedEpoch,
+        AbortReason::InputLoadTooLarge,
     ];
 
     /// Every [`ExecutionFailureCode`] variant, exhaustively listed on the same contract as
@@ -413,7 +415,7 @@ mod tests {
         }
     }
 
-    /// Each of the 12 canonical `AbortReason` variants surfaces a non-empty, unique stable code.
+    /// Each of the 13 canonical `AbortReason` variants surfaces a non-empty, unique stable code.
     #[test]
     fn abort_codes_are_non_empty_and_unique() {
         let mut seen = std::collections::HashSet::new();
@@ -422,7 +424,7 @@ mod tests {
             assert!(!code.is_empty(), "abort code for {reason:?} is empty");
             assert!(seen.insert(code), "duplicate abort code {code} for {reason:?}");
         }
-        assert_eq!(seen.len(), 12, "expected exactly 12 canonical abort codes");
+        assert_eq!(seen.len(), 13, "expected exactly 13 canonical abort codes");
         assert_eq!(abort_code(&AbortReason::EpochExpired), "EPOCH_EXPIRED");
         assert_eq!(
             abort_code(&AbortReason::ValidityWindowTooLong),

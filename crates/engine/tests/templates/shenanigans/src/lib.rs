@@ -187,6 +187,46 @@ mod template {
             }
         }
 
+        /// Creates one vault and names it in the state of two new components.
+        pub fn with_vault_in_two_components() -> Component<Self> {
+            let vault = Vault::new_empty(STEALTH_TARI_RESOURCE_ADDRESS);
+            let vault_id = vault.vault_id();
+            let _first = Component::new(Self {
+                vault: Some(vault),
+                ..Default::default()
+            })
+            .create();
+            Component::new(Self {
+                vault: Some(Vault::for_test(vault_id)),
+                ..Default::default()
+            })
+            .create()
+        }
+
+        /// Names this component's vault in the state of a new component.
+        pub fn share_vault_with_new_component(&self) -> Component<Self> {
+            let vault_id = self.vault.as_ref().unwrap().vault_id();
+            Component::new(Self {
+                vault: Some(Vault::for_test(vault_id)),
+                ..Default::default()
+            })
+            .with_access_rules(AccessRules::allow_all())
+            .create()
+        }
+
+        /// Creates a component holding a new vault, then names that vault in this component's state as well.
+        pub fn share_new_component_vault_with_self(&mut self) -> ComponentAddress {
+            let vault = Vault::new_empty(STEALTH_TARI_RESOURCE_ADDRESS);
+            let vault_id = vault.vault_id();
+            let other = Component::new(Self {
+                vault: Some(vault),
+                ..Default::default()
+            })
+            .create();
+            self.vault_copy = Some(Vault::for_test(vault_id));
+            *other.address()
+        }
+
         pub fn dangling_resource() -> Self {
             let _resx = ResourceBuilder::non_fungible().build();
             Self::default()
@@ -276,38 +316,38 @@ mod template {
         }
 
         pub fn take_from_vault_and_return_bucket(vault_id: VaultId) -> Bucket {
-            let mut stolen = Vault::for_test(vault_id.into());
-            stolen.withdraw_all()
+            Self::steal_from(vault_id)
         }
 
         pub fn take_from_hardcoded_vault() -> Bucket {
             let vault_id = option_env!["VAULT_ID"].expect("VAULT_ID must be set at compile time");
-            let mut stolen = Vault::for_test(vault_id.parse().unwrap());
-            stolen.withdraw_all()
+            Self::steal_from(vault_id.parse().unwrap())
         }
 
         pub fn take_from_hardcoded_vault_in_component_context(&self) -> Bucket {
             let vault_id = option_env!["VAULT_ID"].expect("VAULT_ID must be set at compile time");
-            let mut stolen = Vault::for_test(vault_id.parse().unwrap());
-            stolen.withdraw_all()
+            Self::steal_from(vault_id.parse().unwrap())
+        }
+
+        /// Withdraws a fixed amount from the vault. NOTE: withdraw_all is not used because it first fetches
+        /// the balance, then withdraws and since the vault is not in scope, it would fail on the _get balance_ 
+        /// read instead of the withdraw (write).
+        fn steal_from(vault_id: VaultId) -> Bucket {
+            Vault::for_test(vault_id).withdraw(Amount::from(1000u64))
         }
 
         /// Calls a method the victim permits, then withdraws directly from a vault of the victim's it never
         /// handed over.
         pub fn call_then_steal_from_vault(victim: ComponentAddress, vault_id: VaultId) -> Bucket {
-            let _balances: Vec<(ResourceAddress, Amount)> =
-                ComponentManager::get(victim).call("get_balances", args![]);
-            let mut stolen = Vault::for_test(vault_id.into());
-            stolen.withdraw_all()
+            let _balances: Vec<(ResourceAddress, Amount)> = ComponentManager::get(victim).call("get_balances", args![]);
+            Self::steal_from(vault_id)
         }
 
         /// The same attack from inside a component frame, where the vault is checked against the component the
         /// frame executes on rather than against the absence of one.
         pub fn call_then_steal_from_vault_as_component(&self, victim: ComponentAddress, vault_id: VaultId) -> Bucket {
-            let _balances: Vec<(ResourceAddress, Amount)> =
-                ComponentManager::get(victim).call("get_balances", args![]);
-            let mut stolen = Vault::for_test(vault_id.into());
-            stolen.withdraw_all()
+            let _balances: Vec<(ResourceAddress, Amount)> = ComponentManager::get(victim).call("get_balances", args![]);
+            Self::steal_from(vault_id)
         }
 
         /// Bucket ids are a transaction-wide counter, so a frame can name a bucket it was never handed. Takes the id
@@ -412,6 +452,19 @@ mod template {
             let joined = target.join(locked);
             proof.drop();
             self.vault.as_mut().unwrap().deposit(joined);
+        }
+
+        pub fn read_vault_balance(vault_id: VaultId) -> Amount {
+            Vault::for_test(vault_id).balance()
+        }
+
+        pub fn read_vault_balance_in_component_context(&self, vault_id: VaultId) -> Amount {
+            Vault::for_test(vault_id).balance()
+        }
+
+        pub fn call_then_read_vault_balance(victim: ComponentAddress, vault_id: VaultId) -> Amount {
+            let _balances: Vec<(ResourceAddress, Amount)> = ComponentManager::get(victim).call("get_balances", args![]);
+            Vault::for_test(vault_id).balance()
         }
     }
 }

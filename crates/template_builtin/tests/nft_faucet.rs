@@ -65,6 +65,45 @@ fn mint_multiple_times() {
     assert!(result.finalize.result.is_any_accept());
 }
 
+#[test]
+fn mint_allows_up_to_ten_nfts() {
+    let mut test = TemplateTest::new_builtin_only();
+    let (owner_component_address, owner_token, _) = test.create_funded_account();
+
+    let result = test
+        .build_and_execute(
+            Transaction::builder_localnet(Epoch(1))
+                .call_method(NFT_FAUCET_COMPONENT_ADDRESS, "mint", args![10, Metadata::new()])
+                .put_last_instruction_output_on_workspace("my_nfts")
+                .call_method(owner_component_address, "deposit", args![Workspace("my_nfts")]),
+            vec![owner_token.clone()],
+        )
+        .unwrap_success();
+    assert!(result.finalize.result.is_any_accept());
+
+    let vault = test
+        .read_only_state_store()
+        .get_vaults_for_account(owner_component_address)
+        .unwrap()
+        .get(&NFT_FAUCET_RESOURCE_ADDRESS)
+        .cloned()
+        .unwrap();
+    assert_eq!(vault.get_non_fungible_ids().len(), 10);
+
+    let reason = test.execute_expect_failure(
+        Transaction::builder_localnet(Epoch(1))
+            .call_method(NFT_FAUCET_COMPONENT_ADDRESS, "mint", args![11, Metadata::new()])
+            .put_last_instruction_output_on_workspace("my_nfts")
+            .call_method(owner_component_address, "deposit", args![Workspace("my_nfts")])
+            .build_and_seal(test.secret_key()),
+        vec![owner_token],
+    );
+    assert!(
+        reason.to_string().contains("Amount must be less than or equal to 10"),
+        "unexpected rejection reason: {reason}"
+    );
+}
+
 fn mint_faucet_nft(
     test: &mut TemplateTest,
     account: ComponentAddress,

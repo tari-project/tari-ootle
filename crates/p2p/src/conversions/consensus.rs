@@ -25,12 +25,14 @@ use std::convert::{TryFrom, TryInto};
 use anyhow::{Context, anyhow};
 use tari_common_types::types::CompressedPublicKey;
 use tari_consensus::messages::{
+    CatchUpPageMessage,
     CatchUpRequestMessage,
     EncodedTransaction,
     ForeignProposalMessage,
     ForeignProposalNotificationMessage,
     ForeignProposalRequestMessage,
     HotstuffMessage,
+    MAX_CATCH_UP_PAGE_BLOCKS,
     MAX_REQUESTED_TRANSACTIONS,
     MissingTransactionsRequest,
     MissingTransactionsResponse,
@@ -84,6 +86,7 @@ use tari_ootle_storage::{
         ForeignProposalAtom,
         LeaderFee,
         LocalOnlyAtom,
+        LockedEpoch,
         MultiShardAtom,
         SubstateCreated,
         SubstateDestroyed,
@@ -92,7 +95,7 @@ use tari_ootle_storage::{
 };
 use tari_ootle_transaction::TransactionId;
 use tari_sidechain::{QcSignatures, SignerBitmap, ValidatorBlockSignature};
-use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
+use tari_template_lib::types::{Hash32, crypto::RistrettoPublicKeyBytes};
 
 use crate::{
     encoding::{decode_from_slice, encode_to_vec},
@@ -126,6 +129,9 @@ impl From<&HotstuffMessage> for proto::consensus::HotStuffMessage {
             },
             HotstuffMessage::CatchUpSyncResponse(msg) => {
                 proto::consensus::hot_stuff_message::Message::CatchUpSyncResponse((&**msg).into())
+            },
+            HotstuffMessage::CatchUpPage(msg) => {
+                proto::consensus::hot_stuff_message::Message::CatchUpPage((&**msg).into())
             },
         };
         Self { message: Some(message) }
@@ -163,6 +169,9 @@ impl TryFrom<proto::consensus::HotStuffMessage> for HotstuffMessage {
             },
             proto::consensus::hot_stuff_message::Message::CatchUpSyncResponse(msg) => {
                 HotstuffMessage::new_catch_up_sync_response(msg.try_into()?)
+            },
+            proto::consensus::hot_stuff_message::Message::CatchUpPage(msg) => {
+                HotstuffMessage::CatchUpPage(Box::new(msg.try_into()?))
             },
         })
     }
@@ -311,6 +320,22 @@ impl TryFrom<proto::consensus::ForeignProposalNotification> for ForeignProposalN
     type Error = anyhow::Error;
 
     fn try_from(value: proto::consensus::ForeignProposalNotification) -> Result<Self, Self::Error> {
+        // A notification names at most one shard group per shard.
+        let max_shard_groups = Shard::max().as_u32() as usize;
+        if value.shard_groups.len() > max_shard_groups {
+            return Err(anyhow!(
+                "ForeignProposalNotification carries {} shard groups, exceeding maximum {max_shard_groups}",
+                value.shard_groups.len(),
+            ));
+        }
+        let shard_groups = value
+            .shard_groups
+            .into_iter()
+            .map(|sg| {
+                ShardGroup::decode_from_u32(sg)
+                    .ok_or_else(|| anyhow!("Invalid shard group in foreign proposal notification: {sg}"))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(Self {
             block_id: BlockId::try_from(value.block_id)?,
             epoch: Epoch(value.epoch),
@@ -320,14 +345,7 @@ impl TryFrom<proto::consensus::ForeignProposalNotification> for ForeignProposalN
                     value.shard_group
                 )
             })?,
-            shard_groups: value
-                .shard_groups
-                .into_iter()
-                .map(|sg| {
-                    ShardGroup::decode_from_u32(sg)
-                        .ok_or_else(|| anyhow!("Invalid shard group in foreign proposal notification: {sg}"))
-                })
-                .collect::<Result<_, _>>()?,
+            shard_groups,
         })
     }
 }
@@ -710,15 +728,24 @@ impl TryFrom<proto::consensus::TcSignatures> for TcSignatures {
             .scheme
             .ok_or_else(|| anyhow!("TC signature scheme not provided"))?
         {
-            proto::consensus::tc_signatures::Scheme::Schnorr(schnorr) => Ok(Self::Schnorr {
-                signers: SignerBitmap::from_bytes(schnorr.signers),
-                timeouts: schnorr
-                    .timeouts
-                    .into_iter()
-                    .map(TryInto::try_into)
-                    .collect::<Result<_, _>>()
-                    .context("invalid encoding of timeouts")?,
-            }),
+            proto::consensus::tc_signatures::Scheme::Schnorr(schnorr) => {
+                if schnorr.timeouts.len() > tari_sidechain::MAX_QC_SIGNATURES {
+                    return Err(anyhow!(
+                        "TcSignatures carries {} timeouts, exceeding maximum {}",
+                        schnorr.timeouts.len(),
+                        tari_sidechain::MAX_QC_SIGNATURES
+                    ));
+                }
+                Ok(Self::Schnorr {
+                    signers: SignerBitmap::from_bytes(schnorr.signers),
+                    timeouts: schnorr
+                        .timeouts
+                        .into_iter()
+                        .map(TryInto::try_into)
+                        .collect::<Result<_, _>>()
+                        .context("invalid encoding of timeouts")?,
+                })
+            },
         }
     }
 }
@@ -817,7 +844,34 @@ impl From<&MultiShardAtom> for proto::consensus::MultiShardAtom {
             fee: value.transaction_fee,
             leader_fee: value.leader_fee.as_ref().map(|a| a.into()),
             fee_intent_only: value.fee_intent_only,
+            locked_epoch: Some((&value.locked_epoch).into()),
         }
+    }
+}
+
+impl From<&LockedEpoch> for proto::consensus::LockedEpoch {
+    fn from(value: &LockedEpoch) -> Self {
+        Self {
+            epoch: value.epoch().as_u64(),
+            hash: value.hash().as_slice().to_vec(),
+            exhaust_burn_rate_bps: u32::from(value.exhaust_burn_rate().as_bps()),
+        }
+    }
+}
+
+impl TryFrom<proto::consensus::LockedEpoch> for LockedEpoch {
+    type Error = anyhow::Error;
+
+    fn try_from(value: proto::consensus::LockedEpoch) -> Result<Self, Self::Error> {
+        let exhaust_burn_rate = u16::try_from(value.exhaust_burn_rate_bps)
+            .ok()
+            .and_then(ExhaustBurnRate::try_new)
+            .ok_or_else(|| anyhow!("exhaust burn rate {} is above the ceiling", value.exhaust_burn_rate_bps))?;
+        Ok(LockedEpoch::new(
+            Epoch(value.epoch),
+            Hash32::try_from(value.hash).context("LockedEpoch::hash")?,
+            exhaust_burn_rate,
+        ))
     }
 }
 
@@ -836,6 +890,10 @@ impl TryFrom<proto::consensus::MultiShardAtom> for MultiShardAtom {
             transaction_fee: value.fee,
             leader_fee: value.leader_fee.map(TryInto::try_into).transpose()?,
             fee_intent_only: value.fee_intent_only,
+            locked_epoch: value
+                .locked_epoch
+                .ok_or_else(|| anyhow!("locked epoch not provided"))?
+                .try_into()?,
         })
     }
 }
@@ -971,6 +1029,7 @@ impl From<AbortReason> for proto::consensus::AbortReason {
             AbortReason::ValidityWindowTooLong => Self::ValidityWindowTooLong,
             AbortReason::InputPledgeTooLarge => Self::InputPledgeTooLarge,
             AbortReason::GovernanceCallAfterPinnedEpoch => Self::GovernanceCallAfterPinnedEpoch,
+            AbortReason::InputLoadTooLarge => Self::InputLoadTooLarge,
         }
     }
 }
@@ -993,6 +1052,7 @@ impl TryFrom<proto::consensus::AbortReason> for AbortReason {
             proto::consensus::AbortReason::ValidityWindowTooLong => Ok(Self::ValidityWindowTooLong),
             proto::consensus::AbortReason::InputPledgeTooLarge => Ok(Self::InputPledgeTooLarge),
             proto::consensus::AbortReason::GovernanceCallAfterPinnedEpoch => Ok(Self::GovernanceCallAfterPinnedEpoch),
+            proto::consensus::AbortReason::InputLoadTooLarge => Ok(Self::InputLoadTooLarge),
         }
     }
 }
@@ -1099,20 +1159,29 @@ impl TryFrom<proto::consensus::QcSignatures> for QcSignatures {
             .scheme
             .ok_or_else(|| anyhow!("QC signature scheme not provided"))?
         {
-            proto::consensus::qc_signatures::Scheme::Schnorr(schnorr) => Ok(Self::Schnorr {
-                signers: SignerBitmap::from_bytes(schnorr.signers),
-                signatures: schnorr
-                    .signatures
-                    .into_iter()
-                    .map(|signature| {
-                        let public_nonce = CompressedPublicKey::from_canonical_bytes(&signature.public_nonce)
-                            .map_err(|e| anyhow!("QC signature public nonce: {e}"))?;
-                        let signature = RistrettoSecretKey::from_canonical_bytes(&signature.signature)
-                            .map_err(|e| anyhow!("QC signature scalar: {e}"))?;
-                        Ok(ValidatorBlockSignature::new(public_nonce, signature))
-                    })
-                    .collect::<Result<_, anyhow::Error>>()?,
-            }),
+            proto::consensus::qc_signatures::Scheme::Schnorr(schnorr) => {
+                if schnorr.signatures.len() > tari_sidechain::MAX_QC_SIGNATURES {
+                    return Err(anyhow!(
+                        "QcSignatures carries {} signatures, exceeding maximum {}",
+                        schnorr.signatures.len(),
+                        tari_sidechain::MAX_QC_SIGNATURES
+                    ));
+                }
+                Ok(Self::Schnorr {
+                    signers: SignerBitmap::from_bytes(schnorr.signers),
+                    signatures: schnorr
+                        .signatures
+                        .into_iter()
+                        .map(|signature| {
+                            let public_nonce = CompressedPublicKey::from_canonical_bytes(&signature.public_nonce)
+                                .map_err(|e| anyhow!("QC signature public nonce: {e}"))?;
+                            let signature = RistrettoSecretKey::from_canonical_bytes(&signature.signature)
+                                .map_err(|e| anyhow!("QC signature scalar: {e}"))?;
+                            Ok(ValidatorBlockSignature::new(public_nonce, signature))
+                        })
+                        .collect::<Result<_, anyhow::Error>>()?,
+                })
+            },
         }
     }
 }
@@ -1243,7 +1312,9 @@ impl From<&CatchUpRequestMessage> for proto::consensus::SyncRequest {
     fn from(value: &CatchUpRequestMessage) -> Self {
         Self {
             epoch: value.epoch.as_u64(),
-            block_height: value.block_height.as_u64(),
+            from_height: value.from_height.as_u64(),
+            request_id: value.request_id,
+            skip: value.skip,
         }
     }
 }
@@ -1253,8 +1324,70 @@ impl TryFrom<proto::consensus::SyncRequest> for CatchUpRequestMessage {
 
     fn try_from(value: proto::consensus::SyncRequest) -> Result<Self, Self::Error> {
         Ok(Self {
+            request_id: value.request_id,
             epoch: Epoch(value.epoch),
-            block_height: NodeHeight(value.block_height),
+            from_height: NodeHeight(value.from_height),
+            skip: value.skip,
+        })
+    }
+}
+
+// -------------------------------- CatchUpPage -------------------------------- //
+
+impl From<&CatchUpPageMessage> for proto::consensus::CatchUpPage {
+    fn from(value: &CatchUpPageMessage) -> Self {
+        Self {
+            request_id: value.request_id,
+            epoch: value.epoch.as_u64(),
+            blocks: value.blocks.iter().map(Into::into).collect(),
+            leaf: value.leaf.as_ref().map(Into::into),
+            transactions: value
+                .transactions
+                .iter()
+                .map(|tx| proto::transaction::Transaction {
+                    bor_encoded: tx.as_bytes().to_vec(),
+                })
+                .collect(),
+            next_height: value.next_height.map(|height| height.as_u64()),
+            next_skip: value.next_skip,
+        }
+    }
+}
+
+impl TryFrom<proto::consensus::CatchUpPage> for CatchUpPageMessage {
+    type Error = anyhow::Error;
+
+    fn try_from(value: proto::consensus::CatchUpPage) -> Result<Self, Self::Error> {
+        if value.blocks.len() > MAX_CATCH_UP_PAGE_BLOCKS {
+            return Err(anyhow!(
+                "CatchUpPage carries {} blocks, the maximum is {}",
+                value.blocks.len(),
+                MAX_CATCH_UP_PAGE_BLOCKS
+            ));
+        }
+        if value.transactions.len() > MAX_REQUESTED_TRANSACTIONS {
+            return Err(anyhow!(
+                "CatchUpPage carries {} transactions, the maximum is {}",
+                value.transactions.len(),
+                MAX_REQUESTED_TRANSACTIONS
+            ));
+        }
+        Ok(Self {
+            request_id: value.request_id,
+            epoch: Epoch(value.epoch),
+            blocks: value
+                .blocks
+                .into_iter()
+                .map(TryInto::try_into)
+                .collect::<Result<_, _>>()?,
+            leaf: value.leaf.map(TryInto::try_into).transpose()?,
+            transactions: value
+                .transactions
+                .into_iter()
+                .map(|tx| EncodedTransaction::from_bytes(tx.bor_encoded))
+                .collect(),
+            next_height: value.next_height.map(NodeHeight),
+            next_skip: value.next_skip,
         })
     }
 }
@@ -1415,6 +1548,44 @@ mod tests {
         assert_eq!(decoded.calculate_id(), certificate.calculate_id());
     }
 
+    #[test]
+    fn qc_and_tc_signatures_beyond_the_maximum_do_not_decode() {
+        let qc = proto::consensus::QcSignatures {
+            scheme: Some(proto::consensus::qc_signatures::Scheme::Schnorr(
+                proto::consensus::SchnorrQcSignatures {
+                    signers: vec![],
+                    signatures: vec![proto::common::Signature::default(); tari_sidechain::MAX_QC_SIGNATURES + 1],
+                },
+            )),
+        };
+        let err = QcSignatures::try_from(qc).unwrap_err();
+        assert!(err.to_string().contains("exceeding maximum"), "unexpected error: {err}");
+
+        let tc = proto::consensus::TcSignatures {
+            scheme: Some(proto::consensus::tc_signatures::Scheme::Schnorr(
+                proto::consensus::SchnorrTcSignatures {
+                    signers: vec![],
+                    timeouts: vec![proto::consensus::SignedTimeout::default(); tari_sidechain::MAX_QC_SIGNATURES + 1],
+                },
+            )),
+        };
+        let err = TcSignatures::try_from(tc).unwrap_err();
+        assert!(err.to_string().contains("exceeding maximum"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn foreign_proposal_notification_beyond_max_shard_groups_does_not_decode() {
+        let sg = ShardGroup::new(1u32, 1u32).encode_as_u32();
+        let notification = proto::consensus::ForeignProposalNotification {
+            block_id: vec![0u8; 32],
+            epoch: 1,
+            shard_group: sg,
+            shard_groups: vec![sg; Shard::max().as_u32() as usize + 1],
+        };
+        let err = ForeignProposalNotificationMessage::try_from(notification).unwrap_err();
+        assert!(err.to_string().contains("exceeding maximum"), "unexpected error: {err}");
+    }
+
     mod block_commands {
         use tari_ootle_common_types::NumPreshards;
         use tari_ootle_transaction::Network;
@@ -1430,6 +1601,11 @@ mod tests {
                 transaction_fee: 0,
                 leader_fee: None,
                 fee_intent_only: false,
+                locked_epoch: LockedEpoch::new(
+                    Epoch(3),
+                    Hash32::from_array([seed; 32]),
+                    ExhaustBurnRate::try_new(500).unwrap(),
+                ),
             })
         }
 

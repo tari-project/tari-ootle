@@ -17,7 +17,10 @@
 
 use std::time::Instant;
 
-use tari_engine::{fees::FeeTable, wasm::WasmModule};
+use tari_engine::{
+    fees::FeeTable,
+    wasm::{WasmModule, validate_module_structure},
+};
 use tari_engine_types::{fees::FeeSource, limits};
 use tari_ootle_transaction::{Epoch, Transaction, args};
 use tari_template_test_tooling::TemplateTest;
@@ -44,8 +47,8 @@ const LARGE_SEGMENT: usize = 1024 * 1024;
 /// See `tests/wasm_loader.rs` — the same encoded `TemplateDef` for a template named `Buggy` with a
 /// single `main`.
 const TEMPLATE_DEF: &[u8] = &[
-    28, 0, 0, 0, 130, 0, 129, 131, 101, 66, 117, 103, 103, 121, 0, 129, 133, 100, 109, 97, 105, 110, 128, 130, 0, 128,
-    244, 244,
+    29, 0, 0, 0, 130, 1, 129, 131, 101, 66, 117, 103, 103, 121, 0, 129, 132, 100, 109, 97, 105, 110, 130, 0, 128, 128,
+    130, 0, 128,
 ];
 
 fn wat_bytes(bytes: &[u8]) -> String {
@@ -79,8 +82,7 @@ fn module_with_data_segment(len: usize) -> Vec<u8> {
 fn instantiate_ms(segment_len: usize) -> (f64, usize) {
     let code = module_with_data_segment(segment_len);
     let code_size = code.len();
-    let tari_engine::template::LoadedTemplate::Wasm(loaded) =
-        WasmModule::load_template_from_code(&code).expect("module was rejected");
+    let tari_engine::template::LoadedTemplate::Wasm(loaded) = WasmModule::load(&code).expect("module was rejected");
 
     let mut best = f64::MAX;
     for _ in 0..TRIALS {
@@ -102,15 +104,23 @@ fn instantiate_ms(segment_len: usize) -> (f64, usize) {
     (best, code_size)
 }
 
-/// A module whose tables are filled by active element segments, which `Instance::new` writes out on
-/// every instantiation just as it copies the data segments. `tables` x `entries` funcref writes.
-fn module_with_element_segments(tables: usize, entries: usize) -> Vec<u8> {
+/// A module of `segments` active element segments, each filling a fixed table of its own with
+/// `entries` funcrefs, which `Instance::new` writes out on every instantiation just as it copies the
+/// data segments. `segments` x `entries` funcref writes.
+fn module_with_element_segments(segments: usize, entries: usize) -> Vec<u8> {
+    module_with_fixed_tables(segments, entries, entries)
+}
+
+/// A module of `segments` fixed tables of `slots` slots, each written by an active element segment
+/// of its own carrying `entries` funcrefs. With `entries` at 0 the segment writes nothing, and what
+/// it adds over [`module_with_tables_only`] is the table sync wasmer runs after every active segment.
+fn module_with_fixed_tables(segments: usize, slots: usize, entries: usize) -> Vec<u8> {
     let funcrefs = vec!["0"; entries].join(" ");
-    let table_decls = (0..tables)
-        .map(|_| format!("(table {entries} {entries} funcref)"))
+    let table_decls = (0..segments)
+        .map(|_| format!("(table {slots} {slots} funcref)"))
         .collect::<Vec<_>>()
         .join("\n");
-    let elem_decls = (0..tables)
+    let elem_decls = (0..segments)
         .map(|i| format!("(elem (table {i}) (i32.const 0) func {funcrefs})"))
         .collect::<Vec<_>>()
         .join("\n");
@@ -185,15 +195,13 @@ fn module_with_empty_data_segments(count: usize) -> Vec<u8> {
 
 /// The charge `code` attracts, read back from the shape its own loader derives.
 fn charged_points(code: &[u8]) -> u64 {
-    let tari_engine::template::LoadedTemplate::Wasm(loaded) =
-        WasmModule::load_template_from_code(code).expect("module was rejected");
+    let tari_engine::template::LoadedTemplate::Wasm(loaded) = WasmModule::load(code).expect("module was rejected");
     limits::instantiation_points(&loaded.shape())
 }
 
 /// Milliseconds one instantiation of `code` takes, minimum over `TRIALS`.
 fn instantiate_code_ms(code: &[u8]) -> f64 {
-    let tari_engine::template::LoadedTemplate::Wasm(loaded) =
-        WasmModule::load_template_from_code(code).expect("module was rejected");
+    let tari_engine::template::LoadedTemplate::Wasm(loaded) = WasmModule::load(code).expect("module was rejected");
     let mut best = f64::MAX;
     for _ in 0..TRIALS {
         let start = Instant::now();
@@ -293,7 +301,7 @@ fn compile_ms(code: &[u8]) -> f64 {
     let mut best = f64::MAX;
     for _ in 0..COMPILE_TRIALS {
         let start = Instant::now();
-        let loaded = WasmModule::load_template_from_code(code);
+        let loaded = WasmModule::load(code);
         best = best.min(start.elapsed().as_nanos() as f64 / 1e6);
         drop(loaded);
     }
@@ -308,11 +316,10 @@ fn real_template_ms(path: &str) -> (f64, usize, u64, u64, f64) {
     let mut compile_ms = f64::MAX;
     for _ in 0..COMPILE_TRIALS {
         let start = Instant::now();
-        WasmModule::load_template_from_code(&code).expect("module was rejected");
+        WasmModule::load(&code).expect("module was rejected");
         compile_ms = compile_ms.min(start.elapsed().as_nanos() as f64 / 1e6);
     }
-    let tari_engine::template::LoadedTemplate::Wasm(loaded) =
-        WasmModule::load_template_from_code(&code).expect("module was rejected");
+    let tari_engine::template::LoadedTemplate::Wasm(loaded) = WasmModule::load(&code).expect("module was rejected");
     let mut best = f64::MAX;
     for _ in 0..TRIALS {
         let start = Instant::now();
@@ -415,7 +422,7 @@ fn strip_custom_sections(code: &[u8]) -> Vec<u8> {
 fn print_builtin_compile_counts(rate: f64) {
     for template in tari_template_builtin::all_builtin_templates() {
         let code = &strip_custom_sections(template.binary);
-        let structure = WasmModule::prevalidate_code(code).expect("built-in template is admitted");
+        let structure = WasmModule::validate(code).expect("built-in template is admitted");
         let counts = structure.compile;
         let charged_ms = limits::template_compile_points(code.len() as u64, &counts) as f64 / rate;
         let ms = compile_ms(code);
@@ -464,7 +471,7 @@ fn print_metering_check_costs(rate: f64) {
                 .min(max_checks as u64 / checks_per_repeat - 1)
                 .min(if name == "loops" { loop_limit } else { u64::MAX });
             let code = module_of_functions(functions as usize, &body.repeat(repeats as usize));
-            let Ok(structure) = WasmModule::prevalidate_code(&code) else {
+            let Ok(structure) = validate_module_structure(&code) else {
                 println!("{functions} functions of {repeats} {name}: refused");
                 continue;
             };
@@ -514,7 +521,7 @@ fn print_metering_check_costs(rate: f64) {
     ];
     for (name, body) in worst_cases {
         let code = module_of_functions(1, &body);
-        let structure = WasmModule::prevalidate_code(&code).expect("within the function limits");
+        let structure = validate_module_structure(&code).expect("within the function limits");
         let charged_ms = limits::template_compile_points(code.len() as u64, &structure.compile) as f64 / rate;
         let ms = compile_ms(&code);
         println!(
@@ -555,13 +562,14 @@ fn main() {
     // Element segments are the other thing copied per instantiation.
     let tables = limits::WASM_LIMITS.max_tables;
     let entries = limits::WASM_LIMITS.max_table_elements as usize;
+    let segments = limits::WASM_LIMITS.max_element_segments;
     let none = instantiate_code_ms(&module_with_element_segments(0, 0));
-    let full = instantiate_code_ms(&module_with_element_segments(tables, entries));
+    let full = instantiate_code_ms(&module_with_element_segments(segments, entries));
     println!();
     println!(
-        "element segments: none {none:.4} ms, {tables}x{entries} {full:.4} ms -> {} points for {} writes",
+        "element segments: none {none:.4} ms, {segments}x{entries} {full:.4} ms -> {} points for {} writes",
         ((full - none) * rate).ceil() as i64,
-        tables * entries,
+        segments * entries,
     );
 
     // Declared table capacity, with nothing written into it.
@@ -573,6 +581,23 @@ fn main() {
         ((tables_only_ms - none) * rate).ceil() as i64,
         charged_points(&tables_only),
     );
+
+    // The fullest table one empty active segment can make wasmer re-sync, against the same table
+    // with no segment at all. Both figures are whole instantiations, measured and charged.
+    for (empty_segments, code) in [
+        (0, module_with_tables_only(1, entries)),
+        (segments, module_with_fixed_tables(segments, entries, 0)),
+    ] {
+        let ms = instantiate_code_ms(&code);
+        let charged = charged_points(&code);
+        let measured = (ms * rate).ceil() as u64;
+        println!(
+            "{entries}-slot fixed table, {empty_segments} empty active segments ({} bytes): {ms:.4} ms -> {measured} \
+             points, charged {charged} ({:.2}x)",
+            code.len(),
+            charged as f64 / measured as f64,
+        );
+    }
 
     // Zero-length active data segments.
     // wasmparser refuses a data section above 100,000 segments, so this is the whole range.
@@ -599,7 +624,7 @@ fn main() {
             let Some(path) = path.to_str() else { continue };
             let (ms, size, data, elements, compile_ms) = real_template_ms(path);
             let tari_engine::template::LoadedTemplate::Wasm(l) =
-                WasmModule::load_template_from_code(&std::fs::read(path).unwrap()).unwrap();
+                WasmModule::load(&std::fs::read(path).unwrap()).unwrap();
             let artifact = l.wasm_module().serialize().unwrap().len();
             println!(
                 "  artifact {artifact} bytes = {:.1}x the {size}-byte source",

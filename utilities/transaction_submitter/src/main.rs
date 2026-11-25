@@ -5,6 +5,7 @@ use std::{cmp, fs::File, io::Write, path::Path, time::Duration};
 
 use anyhow::bail;
 use tari_indexer_client::{
+    error::IndexerRestClientError,
     rest_api_client::IndexerRestApiClient,
     types::{
         GetTransactionResultRequest,
@@ -122,12 +123,8 @@ async fn stress_test(args: StressTestArgs) -> anyhow::Result<Option<StressTestRe
                         return;
                     },
                 };
-                match client
-                    .client
-                    .submit_transaction(SubmitTransactionRequest { transaction: envelope })
-                    .await
-                {
-                    Ok(SubmitTransactionResponse { transaction_id, .. }) => {
+                match submit_transaction(&client, envelope).await {
+                    Ok(transaction_id) => {
                         submitted_tx.send(transaction_id).unwrap();
                     },
                     Err(e) => {
@@ -296,6 +293,9 @@ async fn fetch_result_summary(
                             );
                             sleep(Duration::from_secs(1)).await;
                         },
+                        Err(e) if is_rate_limited(&e) => {
+                            sleep(Duration::from_secs(1)).await;
+                        },
                         Err(e) => {
                             println!("Failed to get transaction result: {}", e);
                             results_tx
@@ -318,6 +318,43 @@ async fn fetch_result_summary(
     // Drop the remaining sender handle so that the result collector ends when all results have been received
     drop(results_tx);
     results_handle.await.unwrap()
+}
+
+/// Retries of one submission a rate-limited indexer answers with HTTP 429. The backoff grows by a second per attempt
+/// up to [`MAX_RATE_LIMITED_BACKOFF`], so the retries span about 75 seconds, enough for the submit bucket to refill.
+const MAX_RATE_LIMITED_RETRIES: u32 = 12;
+const MAX_RATE_LIMITED_BACKOFF: Duration = Duration::from_secs(10);
+
+async fn submit_transaction(
+    client: &IndexerClient,
+    envelope: TransactionEnvelope,
+) -> Result<TransactionId, IndexerRestClientError> {
+    let mut attempt = 0u32;
+    loop {
+        match client
+            .client
+            .submit_transaction(SubmitTransactionRequest {
+                transaction: envelope.clone(),
+            })
+            .await
+        {
+            Ok(SubmitTransactionResponse { transaction_id, .. }) => return Ok(transaction_id),
+            Err(e) if is_rate_limited(&e) && attempt < MAX_RATE_LIMITED_RETRIES => {
+                attempt += 1;
+                sleep(cmp::min(Duration::from_secs(attempt.into()), MAX_RATE_LIMITED_BACKOFF)).await;
+            },
+            Err(e) => return Err(e),
+        }
+    }
+}
+
+fn is_rate_limited(err: &IndexerRestClientError) -> bool {
+    match err {
+        IndexerRestClientError::ErrorResponse { source, .. } | IndexerRestClientError::RequestFailed { source } => {
+            source.status().is_some_and(|s| s.as_u16() == 429)
+        },
+        _ => false,
+    }
 }
 
 #[derive(Clone)]

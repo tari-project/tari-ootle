@@ -182,19 +182,21 @@ fn dispatch_ristretto(intrinsic: IntrinsicId, args: &EngineArgs) -> Result<Invok
             encode_point(&a - &b)
         },
         I::RISTRETTO_NEGATE => {
-            let a = point(args, 0)?;
+            let a = one_point(args)?;
             encode_point(&RistrettoPublicKey::default() - &a)
         },
         I::RISTRETTO_MUL => {
+            args.assert_n_args(2)?;
             let p = point(args, 0)?;
             let s = scalar(args, 1)?;
             encode_point(&p * &s)
         },
         I::RISTRETTO_MUL_BASE => {
-            let s = scalar(args, 0)?;
+            let s = one_scalar(args)?;
             encode_point(RistrettoPublicKey::from_secret_key(&s))
         },
         I::RISTRETTO_MSM => {
+            args.assert_n_args(2)?;
             let points = args.get::<Vec<RistrettoPublicKeyBytes>>(0)?;
             let scalars = args.get::<Vec<Scalar32Bytes>>(1)?;
             if points.len() != scalars.len() {
@@ -212,11 +214,11 @@ fn dispatch_ristretto(intrinsic: IntrinsicId, args: &EngineArgs) -> Result<Invok
             encode_point(RistrettoPublicKey::batch_mul(&scalars, &points))
         },
         I::RISTRETTO_IS_IDENTITY => {
-            let a = point(args, 0)?;
+            let a = one_point(args)?;
             Ok(InvokeResult::encode(&(a == RistrettoPublicKey::default()))?)
         },
         I::RISTRETTO_IS_CANONICAL => {
-            let bytes = args.get::<RistrettoPublicKeyBytes>(0)?;
+            let bytes = args.assert_one_arg::<RistrettoPublicKeyBytes>()?;
             Ok(InvokeResult::encode(&decode_point(&bytes).is_ok())?)
         },
         unknown => Err(RuntimeError::IntrinsicNotSupported { intrinsic: unknown }),
@@ -239,11 +241,11 @@ fn dispatch_scalar(intrinsic: IntrinsicId, args: &EngineArgs) -> Result<InvokeRe
             encode_scalar(&a * &b)
         },
         I::SCALAR_NEGATE => {
-            let a = scalar(args, 0)?;
+            let a = one_scalar(args)?;
             encode_scalar(&RistrettoSecretKey::default() - &a)
         },
         I::SCALAR_INVERT => {
-            let inverse = scalar(args, 0)?
+            let inverse = one_scalar(args)?
                 .invert()
                 .map(|s| Scalar32Bytes::from_bytes(s.as_bytes()))
                 .transpose()
@@ -254,7 +256,7 @@ fn dispatch_scalar(intrinsic: IntrinsicId, args: &EngineArgs) -> Result<InvokeRe
             Ok(InvokeResult::encode(&inverse)?)
         },
         I::SCALAR_FROM_UNIFORM_BYTES => {
-            let bytes = args.get::<Bytes>(0)?;
+            let bytes = args.assert_one_arg::<Bytes>()?;
             let s = RistrettoSecretKey::from_uniform_bytes(&bytes).map_err(|e| RuntimeError::InvalidArgument {
                 argument: "scalar_from_uniform_bytes",
                 reason: format!("expected 64 uniform bytes: {e}"),
@@ -262,7 +264,7 @@ fn dispatch_scalar(intrinsic: IntrinsicId, args: &EngineArgs) -> Result<InvokeRe
             encode_scalar(s)
         },
         I::SCALAR_IS_CANONICAL => {
-            let bytes = args.get::<Scalar32Bytes>(0)?;
+            let bytes = args.assert_one_arg::<Scalar32Bytes>()?;
             Ok(InvokeResult::encode(&decode_scalar(&bytes).is_ok())?)
         },
         unknown => Err(RuntimeError::IntrinsicNotSupported { intrinsic: unknown }),
@@ -313,7 +315,15 @@ fn per_byte(args: &EngineArgs) -> u64 {
 /// Merkle path pays one engine crossing per level rather than one per node. Hashing a single blob is
 /// the one-element case, which keeps the wire shape unambiguous.
 fn hash_parts(args: &EngineArgs) -> Result<Vec<Bytes>, RuntimeError> {
-    args.get::<Vec<Bytes>>(0)
+    args.assert_one_arg::<Vec<Bytes>>()
+}
+
+fn one_point(args: &EngineArgs) -> Result<RistrettoPublicKey, RuntimeError> {
+    decode_point(&args.assert_one_arg::<RistrettoPublicKeyBytes>()?)
+}
+
+fn one_scalar(args: &EngineArgs) -> Result<RistrettoSecretKey, RuntimeError> {
+    decode_scalar(&args.assert_one_arg::<Scalar32Bytes>()?)
 }
 
 fn point(args: &EngineArgs, index: usize) -> Result<RistrettoPublicKey, RuntimeError> {
@@ -325,10 +335,12 @@ fn scalar(args: &EngineArgs, index: usize) -> Result<RistrettoSecretKey, Runtime
 }
 
 fn two_points(args: &EngineArgs) -> Result<(RistrettoPublicKey, RistrettoPublicKey), RuntimeError> {
+    args.assert_n_args(2)?;
     Ok((point(args, 0)?, point(args, 1)?))
 }
 
 fn two_scalars(args: &EngineArgs) -> Result<(RistrettoSecretKey, RistrettoSecretKey), RuntimeError> {
+    args.assert_n_args(2)?;
     Ok((scalar(args, 0)?, scalar(args, 1)?))
 }
 
@@ -473,5 +485,52 @@ mod tests {
             dispatch(unknown, EngineArgs::new(), &NoEnv),
             Err(RuntimeError::IntrinsicNotSupported { .. })
         ));
+    }
+
+    #[test]
+    fn trailing_arguments_are_rejected_for_every_intrinsic() {
+        let point = || Bytes::from(tari_bor::encode(&RistrettoPublicKeyBytes::zero()).unwrap());
+        let scalar = || Bytes::from(tari_bor::encode(&Scalar32Bytes::zero()).unwrap());
+        let uniform = || Bytes::from(tari_bor::encode(&Bytes::from(vec![0u8; 64])).unwrap());
+        let parts = || Bytes::from(tari_bor::encode(&vec![Bytes::from(vec![1u8, 2, 3])]).unwrap());
+        let points_list = || Bytes::from(tari_bor::encode(&vec![RistrettoPublicKeyBytes::zero()]).unwrap());
+        let scalars_list = || Bytes::from(tari_bor::encode(&vec![Scalar32Bytes::zero()]).unwrap());
+
+        for (id, valid_args) in [
+            (IntrinsicId::RISTRETTO_ADD, vec![point(), point()]),
+            (IntrinsicId::RISTRETTO_SUB, vec![point(), point()]),
+            (IntrinsicId::RISTRETTO_NEGATE, vec![point()]),
+            (IntrinsicId::RISTRETTO_MUL, vec![point(), scalar()]),
+            (IntrinsicId::RISTRETTO_MUL_BASE, vec![scalar()]),
+            (IntrinsicId::RISTRETTO_MSM, vec![points_list(), scalars_list()]),
+            (IntrinsicId::RISTRETTO_IS_IDENTITY, vec![point()]),
+            (IntrinsicId::RISTRETTO_IS_CANONICAL, vec![point()]),
+            (IntrinsicId::SCALAR_ADD, vec![scalar(), scalar()]),
+            (IntrinsicId::SCALAR_SUB, vec![scalar(), scalar()]),
+            (IntrinsicId::SCALAR_MUL, vec![scalar(), scalar()]),
+            (IntrinsicId::SCALAR_NEGATE, vec![scalar()]),
+            (IntrinsicId::SCALAR_INVERT, vec![scalar()]),
+            (IntrinsicId::SCALAR_FROM_UNIFORM_BYTES, vec![uniform()]),
+            (IntrinsicId::SCALAR_IS_CANONICAL, vec![scalar()]),
+            (IntrinsicId::HASH_BLAKE2B, vec![parts()]),
+            (IntrinsicId::HASH_SHA256, vec![parts()]),
+            (IntrinsicId::HASH_SHA512, vec![parts()]),
+            (IntrinsicId::HASH_KECCAK256, vec![parts()]),
+        ] {
+            assert!(
+                dispatch(id, EngineArgs::from(valid_args.clone()), &NoEnv).is_ok(),
+                "{id} failed on valid arguments"
+            );
+            let mut with_extra = valid_args;
+            with_extra.push(scalar());
+            let err = dispatch(id, EngineArgs::from(with_extra), &NoEnv).unwrap_err();
+            assert!(
+                matches!(
+                    err,
+                    RuntimeError::InvalidArgument { .. } | RuntimeError::InvalidNumberOfArguments { .. }
+                ),
+                "{id} accepted trailing argument or returned unexpected error: {err:?}"
+            );
+        }
     }
 }

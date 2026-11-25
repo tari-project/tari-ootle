@@ -45,6 +45,7 @@ use tari_template_lib_types::{
 use crate::{
     cbor_literal::{cbor_from_macro, metadata_from_macro, negative_int_value},
     error::ManifestError,
+    rules::{AccessRulesExpr, OwnerRuleExpr, parse_access_rules, parse_owner_rule},
     value::MAX_LIST_DEPTH,
 };
 
@@ -61,7 +62,22 @@ pub enum ManifestIntent {
     DropProofAuthorization(Ident),
     PublishTemplate(PublishTemplateIntent),
     PutIntoBucket(PutIntoBucketIntent),
+    SetComponentRules(SetComponentRulesIntent),
     CallLocalFunction(Ident),
+}
+
+/// `set_access_rules!(component, ..)` or `set_owner_rule!(component, ..)`. `component` is an input component address
+/// or a workspace value.
+#[derive(Debug, Clone)]
+pub struct SetComponentRulesIntent {
+    pub component: Ident,
+    pub change: ComponentRulesChangeExpr,
+}
+
+#[derive(Debug, Clone)]
+pub enum ComponentRulesChangeExpr {
+    AccessRules(AccessRulesExpr),
+    OwnerRule(OwnerRuleExpr),
 }
 
 #[derive(Debug, Clone)]
@@ -689,8 +705,33 @@ fn macro_call(mac: &Ident, tokens: TokenStream) -> Result<ManifestIntent, syn::E
             }))
         },
         "publish_template" => parse_publish_template_args(tokens),
+        "set_access_rules" => parse_set_component_rules_args(tokens, |input| {
+            parse_access_rules(input).map(ComponentRulesChangeExpr::AccessRules)
+        }),
+        "set_owner_rule" => parse_set_component_rules_args(tokens, |input| {
+            parse_owner_rule(input).map(ComponentRulesChangeExpr::OwnerRule)
+        }),
         _ => Err(syn::Error::new_spanned(mac, "Invalid macro name")),
     }
+}
+
+/// Parse `set_access_rules!(component, ..)` or `set_owner_rule!(component, ..)`.
+fn parse_set_component_rules_args(
+    tokens: TokenStream,
+    parse_change: impl FnOnce(ParseStream) -> syn::Result<ComponentRulesChangeExpr>,
+) -> Result<ManifestIntent, syn::Error> {
+    syn::parse::Parser::parse2(
+        |input: ParseStream| {
+            let component: Ident = input.parse()?;
+            input.parse::<syn::Token![,]>()?;
+            let change = parse_change(input)?;
+            Ok(ManifestIntent::SetComponentRules(SetComponentRulesIntent {
+                component,
+                change,
+            }))
+        },
+        tokens,
+    )
 }
 
 /// Parse the name in `blob!(name)` or `blob!("name")`. A string literal must hold a single identifier because the
@@ -731,6 +772,12 @@ fn parse_publish_template_args(tokens: TokenStream) -> Result<ManifestIntent, sy
                 input.parse::<syn::Token![=]>()?;
                 match key.to_string().as_str() {
                     "metadata" => {
+                        if metadata_hash_hex.is_some() {
+                            return Err(syn::Error::new_spanned(
+                                key,
+                                "duplicate `metadata` argument in publish_template!",
+                            ));
+                        }
                         let value: LitStr = input.parse()?;
                         metadata_hash_hex = Some(value.value());
                     },
@@ -930,9 +977,33 @@ fn parse_create_account_args(tokens: TokenStream) -> Result<CreateAccountArgs, s
                 let value: Ident = input.parse()?;
 
                 match key.to_string().as_str() {
-                    "owner_rule" => owner_rule = Some(value),
-                    "access_rules" => access_rules = Some(value),
-                    "bucket" => bucket = Some(value),
+                    "owner_rule" => {
+                        if owner_rule.is_some() {
+                            return Err(syn::Error::new_spanned(
+                                key,
+                                "duplicate `owner_rule` argument in create_account!",
+                            ));
+                        }
+                        owner_rule = Some(value);
+                    },
+                    "access_rules" => {
+                        if access_rules.is_some() {
+                            return Err(syn::Error::new_spanned(
+                                key,
+                                "duplicate `access_rules` argument in create_account!",
+                            ));
+                        }
+                        access_rules = Some(value);
+                    },
+                    "bucket" => {
+                        if bucket.is_some() {
+                            return Err(syn::Error::new_spanned(
+                                key,
+                                "duplicate `bucket` argument in create_account!",
+                            ));
+                        }
+                        bucket = Some(value);
+                    },
                     _ => {
                         return Err(syn::Error::new_spanned(
                             key,
@@ -990,7 +1061,9 @@ fn lit_to_nonfungible_id(lit: &Lit) -> Result<NonFungibleId, ManifestError> {
             Ok(NonFungibleId::from_u256(id))
         },
         Lit::Int(v) => match v.suffix() {
-            "u8" | "u16" | "u32" => Ok(NonFungibleId::from_u32(v.base10_parse()?)),
+            "u8" => Ok(NonFungibleId::from_u32(u32::from(v.base10_parse::<u8>()?))),
+            "u16" => Ok(NonFungibleId::from_u32(u32::from(v.base10_parse::<u16>()?))),
+            "u32" => Ok(NonFungibleId::from_u32(v.base10_parse()?)),
             "u64" => Ok(NonFungibleId::from_u64(v.base10_parse()?)),
             "" => Err(ManifestError::UnsupportedExpr(
                 "Non-fungible ID integer literal must have a type suffix specified (1u32, 2u64 etc)".to_string(),

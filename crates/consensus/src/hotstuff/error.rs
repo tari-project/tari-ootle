@@ -78,8 +78,6 @@ pub enum HotStuffError {
         transaction_id: TransactionId,
         reject_reason: String,
     },
-    #[error("Pacemaker channel dropped: {details}")]
-    PacemakerChannelDropped { details: String },
     #[error(
         "Bad new view message: HighQC height {high_pc_height}, received new height {received_new_height}: {details}"
     )]
@@ -103,8 +101,6 @@ pub enum HotStuffError {
     },
     #[error("Transaction executor error: {0}")]
     TransactionExecutorError(String),
-    #[error("Invalid sync request: {details}")]
-    InvalidSyncRequest { details: String },
     #[error("Some input versions were not resolved at execution time: {0}")]
     VersionedSubstateIdError(#[from] VersionedSubstateIdError),
     #[error("Substate store error: {0}")]
@@ -339,17 +335,41 @@ pub enum ProposalValidationError {
         details: anyhow::Error,
     },
 
+    #[error("Foreign proposal for block {block_id} names the local shard group {shard_group} as its source")]
+    ForeignProposalFromLocalShardGroup { block_id: BlockId, shard_group: ShardGroup },
+
     #[error(
         "Foreign proposal for block {block_id} from {shard_group} carries block metadata that does not hash to the \
          metadata hash its proven header commits to"
     )]
     ForeignBlockMetadataNotProven { block_id: BlockId, shard_group: ShardGroup },
 
-    #[error(
-        "Foreign proposal for block {block_id} from {shard_group} names no exhaust burn rate its transactions can \
-         settle at"
-    )]
+    #[error("Foreign proposal for block {block_id} from {shard_group} names no exhaust burn rate for its epoch")]
     ForeignBlockNamesNoExhaustBurnRate { block_id: BlockId, shard_group: ShardGroup },
+
+    #[error(
+        "Foreign proposal for block {block_id} from {shard_group} in {block_epoch} pins transaction {transaction_id} \
+         to the later {locked_epoch}"
+    )]
+    ForeignTransactionPinnedAfterBlock {
+        block_id: BlockId,
+        shard_group: ShardGroup,
+        transaction_id: TransactionId,
+        locked_epoch: Epoch,
+        block_epoch: Epoch,
+    },
+
+    #[error(
+        "Foreign proposal for block {block_id} from {shard_group} pins transaction {transaction_id} to \
+         {locked_epoch}, earlier than its minimum epoch {min_epoch}"
+    )]
+    ForeignTransactionPinnedBeforeMinEpoch {
+        block_id: BlockId,
+        shard_group: ShardGroup,
+        transaction_id: TransactionId,
+        locked_epoch: Epoch,
+        min_epoch: Epoch,
+    },
 
     #[error("Foreign proposal commit proof error: {0}")]
     ForeignProposalCommitProofError(#[from] ForeignProposalCommitProofError),
@@ -440,10 +460,18 @@ impl ProposalValidationError {
     /// which commands it sends in full, so two messages carrying the same block can differ in them. An error in that
     /// part says nothing about the block, so nothing is recorded against its block id and another delivery of the
     /// block is still accepted.
+    ///
+    /// `FutureEpoch` and `ForeignProposalFromLocalShardGroup` are conditions of the local node's current epoch or
+    /// shard-group assignment rather than defects in the proven block. Recording them against the block id would
+    /// refuse the proposal after this node catches up or rotates to another shard group, so the message is turned
+    /// away and a later delivery is evaluated afresh.
     pub fn rejects_message_not_block(&self) -> bool {
         matches!(
             self,
-            Self::ForeignPledgesNotCommitted { .. } | Self::ForeignProposalWithholdsCommand { .. }
+            Self::ForeignPledgesNotCommitted { .. } |
+                Self::ForeignProposalWithholdsCommand { .. } |
+                Self::ForeignProposalFromLocalShardGroup { .. } |
+                Self::FutureEpoch { .. }
         )
     }
 }

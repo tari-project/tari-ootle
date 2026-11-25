@@ -3,7 +3,7 @@
 
 use std::{fmt, fmt::Display};
 
-use tari_ootle_common_types::Epoch;
+use tari_ootle_common_types::{Epoch, ShardGroup};
 
 use crate::hotstuff::HotStuffError;
 
@@ -25,6 +25,16 @@ pub enum ConsensusStateEvent {
         target_epoch: Option<Epoch>,
     },
     SyncComplete,
+    /// This node joins `shard_group`'s committee at a later epoch and has not synced its state in the current epoch.
+    PendingActivation {
+        shard_group: ShardGroup,
+    },
+    /// The state of the shard group this node joins later was synced while `epoch` was current.
+    PresyncComplete {
+        epoch: Epoch,
+    },
+    /// No peer held the checkpoint the presync syncs to yet. `Idle` retries it.
+    PresyncDeferred,
     Ready,
     Failure {
         error: HotStuffError,
@@ -46,6 +56,9 @@ impl Display for ConsensusStateEvent {
             } => write!(f, "Behind peers (target epoch {})", epoch),
             NeedSync { target_epoch: None } => write!(f, "Behind peers"),
             SyncComplete => write!(f, "Sync complete"),
+            PendingActivation { shard_group } => write!(f, "Pending activation into {}", shard_group),
+            PresyncComplete { epoch } => write!(f, "Presync complete at epoch {}", epoch),
+            PresyncDeferred => write!(f, "Presync deferred until its checkpoint is available"),
             Ready => write!(f, "Ready"),
             Failure { error } => write!(f, "Failure({error})"),
             Resume => write!(f, "Resume"),

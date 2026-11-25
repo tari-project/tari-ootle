@@ -25,11 +25,7 @@ mod method_resolution {
                 value: 7,
             })
             .with_owner_rule(OwnerRule::OwnedBySigner)
-            .with_access_rules(
-                ComponentAccessRules::new()
-                    .default(rule!(deny_all))
-                    .add_method_rule("version", rule!(allow_all)),
-            )
+            .with_access_rules(ComponentAccessRules::new().default(rule!(deny_all)))
             .create()
         }
 

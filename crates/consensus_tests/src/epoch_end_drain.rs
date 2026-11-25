@@ -3,17 +3,21 @@
 
 //! Tests for draining cross-shard transactions before an end of epoch that changes the number of committees.
 
-use std::time::{Duration, Instant};
+use std::{
+    sync::{Arc, Mutex},
+    time::{Duration, Instant},
+};
 
 use tari_consensus::{hotstuff::ConsensusCurrentState, messages::HotstuffMessage};
-use tari_consensus_types::{Decision, PcId};
+use tari_consensus_types::{BlockId, Decision, PcId};
 use tari_engine_types::commit_result::AbortReason;
+use tari_epoch_manager::EpochManagerReader;
 use tari_ootle_common_types::{Epoch, ShardGroup, SubstateVersion, VersionedSubstateId, optional::Optional};
 use tari_ootle_storage::{
     StateStore,
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
-    consensus_models::{EpochCheckpoint, TransactionPoolRecord, TransactionPoolStage, TransactionRecord},
+    consensus_models::{Block, EpochCheckpoint, TransactionPoolRecord, TransactionPoolStage, TransactionRecord},
 };
 use tari_ootle_transaction::TransactionId;
 
@@ -72,7 +76,18 @@ fn at_epoch_end(test: &Test, addr: &str, epoch: Epoch, transaction_id: &Transact
 /// committees must finalize it and release its locks, before either ends the epoch.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn cross_shard_transaction_is_finalized_before_an_epoch_end_that_changes_the_committees() {
+    cross_shard_drain(false).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_non_end_epoch_drain_abort_is_accepted_with_a_current_epoch_oracle_and_next_validator_set() {
+    cross_shard_drain(true).await;
+}
+
+async fn cross_shard_drain(lag_oracle: bool) {
     setup_logger();
+    let drain_block = Arc::new(Mutex::new(None));
+    let captured_drain_block = drain_block.clone();
     let mut test = Test::builder()
         .modify_config(|cfg| {
             cfg.epoch_end_grace_period = Duration::from_millis(10);
@@ -84,7 +99,17 @@ async fn cross_shard_transaction_is_finalized_before_an_epoch_end_that_changes_t
             c.pacemaker_block_time = Duration::from_secs(1);
         })
         .with_test_timeout(Duration::from_secs(90))
-        .with_message_filter(Box::new(|from: &TestAddress, to: &TestAddress, msg| {
+        .with_message_filter(Box::new(move |from: &TestAddress, to: &TestAddress, msg| {
+            if to == "2" &&
+                let HotstuffMessage::Proposal(proposal) = msg &&
+                !proposal.block.is_epoch_end() &&
+                proposal.block.commands().iter().any(|cmd| {
+                    cmd.local_accept()
+                        .is_some_and(|atom| atom.decision == Decision::Abort(AbortReason::EpochExpired))
+                })
+            {
+                *captured_drain_block.lock().unwrap() = Some(*proposal.block.id());
+            }
             let is_foreign_proposal = matches!(
                 msg,
                 HotstuffMessage::ForeignProposal(_) | HotstuffMessage::ForeignProposalNotification(_)
@@ -121,7 +146,17 @@ async fn cross_shard_transaction_is_finalized_before_an_epoch_end_that_changes_t
         .epoch_manager
         .set_epoch_num_committees(Epoch(2), 4)
         .await;
+    if lag_oracle {
+        test.get_validator(&TestAddress::new("2"))
+            .epoch_manager
+            .set_oracle_current_epoch_cap(Epoch(1));
+    }
     test.start_epoch(Epoch(2)).await;
+    if lag_oracle {
+        let oracle = &test.get_validator(&TestAddress::new("2")).epoch_manager;
+        assert_eq!(oracle.current_epoch().await.unwrap(), Epoch(1));
+        assert!(oracle.get_validator_set_hash(Epoch(2)).await.is_ok());
+    }
 
     // After the end of epoch 1 commits, validators move to new shard groups, which the harness cannot sync them
     // into. Only the state each validator wrote up to that point is inspected, so the store is polled rather than
@@ -152,7 +187,23 @@ async fn cross_shard_transaction_is_finalized_before_an_epoch_end_that_changes_t
         );
     }
 
+    let drain_block = drain_block
+        .lock()
+        .unwrap()
+        .expect("a non-EndEpoch LocalAccept drain abort was proposed");
+    assert_justified(&test, "2", &drain_block);
     test.stop();
+}
+
+fn assert_justified(test: &Test, addr: &str, block_id: &BlockId) {
+    test.get_validator(&TestAddress::new(addr))
+        .state_store
+        .with_read_tx(|tx| {
+            let block = Block::get(tx, block_id)?;
+            assert!(block.has_justify_qc(), "the drain abort must have reached quorum");
+            Ok::<_, tari_ootle_storage::StorageError>(())
+        })
+        .unwrap();
 }
 
 /// Waits until every validator in `addresses` pools each of `transaction_ids`, and asserts it holds them in `New`.

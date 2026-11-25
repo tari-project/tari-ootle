@@ -19,7 +19,7 @@ use tokio::{
 };
 
 use crate::{
-    consensus::{leader_selection::RoundRobinLeaderStrategy, spec::TariConsensusSpec},
+    consensus::spec::TariConsensusSpec,
     event_subscription::EventSubscription,
     p2p::services::messaging::{ConsensusInboundMessaging, ConsensusOutboundMessaging},
 };
@@ -28,7 +28,6 @@ mod block_transaction_executor;
 mod block_transaction_validator;
 mod chain_template_provider;
 mod handle;
-mod leader_selection;
 mod signer_service;
 pub mod spec;
 
@@ -37,7 +36,11 @@ pub use block_transaction_validator::*;
 pub use chain_template_provider::*;
 pub use handle::*;
 pub use signer_service::*;
-use tari_consensus::{consensus_constants::ConsensusConstants, hotstuff::HotstuffEvent};
+use tari_consensus::{
+    consensus_constants::ConsensusConstants,
+    hotstuff::HotstuffEvent,
+    leader_selection::SmoothWeightedRoundRobin,
+};
 use tari_ootle_p2p::PeerAddress;
 use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
 
@@ -69,7 +72,7 @@ pub async fn spawn(
 ) -> (JoinHandle<Result<(), anyhow::Error>>, ConsensusHandle) {
     let (tx_new_transaction, rx_new_transactions) = mpsc::channel(10);
 
-    let leader_strategy = RoundRobinLeaderStrategy::new();
+    let leader_strategy = SmoothWeightedRoundRobin::new();
     let transaction_pool = TransactionPool::new();
 
     let hs_config = HotstuffConfig {
@@ -86,6 +89,7 @@ pub async fn spawn(
         epoch_end_grace_period: Duration::from_secs(10),
         epoch_end_drain_period: Duration::from_secs(60),
         catch_up_request_timeout: Duration::from_secs(20),
+        catch_up_page_bytes: tari_consensus::hotstuff::DEFAULT_CATCH_UP_PAGE_BYTES,
     };
 
     let hotstuff_worker = HotstuffWorker::<TariConsensusSpec>::new(
@@ -105,7 +109,7 @@ pub async fn spawn(
         hooks,
         shutdown_signal.clone(),
     );
-    let current_view = hotstuff_worker.pacemaker().current_view().clone();
+    let current_view = hotstuff_worker.current_view();
 
     let (tx_current_state, rx_current_state) = watch::channel(Default::default());
     let context = ConsensusWorkerContext {

@@ -64,6 +64,7 @@ use crate::{
         BlockTransactionExecution,
         EpochCheckpoint,
         Evidence,
+        FinalizedTransactionInclusion,
         ForeignParkedProposal,
         ForeignProposal,
         ForeignProposalRecord,
@@ -200,6 +201,13 @@ pub trait StateStoreReadTransaction: Sized {
         &self,
         tx_id: &TransactionId,
     ) -> Result<PrimitiveDateTime, StorageError>;
+    /// Where the decision this node finalized for `tx_id` is proven, or `None` if the transaction is not finalized or
+    /// was finalized without one, as a commit is: its receipt proves it. The commit proof of the inclusion's block is
+    /// held by [`StateStoreReadTransaction::block_commit_proofs_get`].
+    fn finalized_transaction_inclusion_get(
+        &self,
+        tx_id: &TransactionId,
+    ) -> Result<Option<FinalizedTransactionInclusion>, StorageError>;
 
     fn block_transaction_executions_get_pending_for_block(
         &self,
@@ -223,6 +231,8 @@ pub trait StateStoreReadTransaction: Sized {
         limit: usize,
     ) -> Result<Vec<Block>, StorageError>;
     fn blocks_exists(&self, block_id: &BlockId) -> Result<bool, StorageError>;
+    /// True if the change set of the uncommitted block `block_id` has been saved. Committing the block clears this.
+    fn blocks_is_executed(&self, block_id: &BlockId) -> Result<bool, StorageError>;
     fn blocks_is_pending_ancestor(&self, descendant: &BlockId, ancestor: &BlockId) -> Result<bool, StorageError>;
     fn blocks_get_committed_by_parent(&self, parent: &BlockId) -> Result<Block, StorageError>;
     fn blocks_get_pending_ids_by_parent(&self, parent: &BlockId) -> Result<Vec<BlockId>, StorageError>;
@@ -495,7 +505,8 @@ pub trait StateStoreReadTransaction: Sized {
         from: Version,
         to: Version,
     ) -> Result<Vec<StateVersionProof>, StorageError>;
-    /// The CBOR-encoded commit proof of `block_id`, a block this node committed that produced state versions.
+    /// The CBOR-encoded commit proof of `block_id`, a block this node committed that produced state versions or
+    /// finalized transactions.
     fn block_commit_proofs_get(&self, block_id: &BlockId) -> Result<Vec<u8>, StorageError>;
 
     /// The proof that `id` was committed before it went down in `shard`, if this node recorded one.
@@ -537,6 +548,8 @@ pub trait StateStoreReadTransaction: Sized {
     ) -> Result<SubstatePledges, StorageError>;
     // -------------------------------- Parked blocks / Missing Transactions -------------------------------- //
     fn parked_block_exists(&self, block_id: &BlockId) -> Result<bool, StorageError>;
+    /// The transactions a parked block is still waiting on. Empty when the block is not parked.
+    fn parked_block_missing_transactions(&self, block_id: &BlockId) -> Result<Vec<TransactionId>, StorageError>;
     fn parked_blocks_count_by_proposer(
         &self,
         epoch: Epoch,
@@ -594,6 +607,8 @@ pub trait StateStoreWriteTransaction {
     // -------------------------------- Block -------------------------------- //
     fn blocks_insert(&mut self, block: &Block) -> Result<(), StorageError>;
     fn blocks_delete(&mut self, block_id: &BlockId) -> Result<(), StorageError>;
+    /// Records that the change set of the uncommitted block `block_id` has been saved.
+    fn blocks_set_executed(&mut self, block_id: &BlockId) -> Result<(), StorageError>;
     fn blocks_set_qcs(
         &mut self,
         block_id: &BlockId,
@@ -642,11 +657,12 @@ pub trait StateStoreWriteTransaction {
     /// Marks the given transactions as finalized in the epoch of the finalizing block. The epoch is
     /// recorded so that epoch GC can prune finalized transaction bookkeeping once it ages out of the
     /// retained window.
-    fn transactions_finalize_all<'a, I: IntoIterator<Item = &'a TransactionPoolRecord>>(
-        &mut self,
-        epoch: Epoch,
-        transactions: I,
-    ) -> Result<(), StorageError>;
+    ///
+    /// A transaction given with an inclusion keeps the commit proof of the inclusion's block from being deleted
+    /// until its bookkeeping is removed, so the commit proof must already be stored with
+    /// [`StateStoreWriteTransaction::block_commit_proofs_insert`].
+    fn transactions_finalize_all<'a, I>(&mut self, epoch: Epoch, transactions: I) -> Result<(), StorageError>
+    where I: IntoIterator<Item = (&'a TransactionPoolRecord, Option<FinalizedTransactionInclusion>)>;
 
     /// Forgets the node-local finalized bookkeeping for a transaction: the finalized marker and all
     /// recorded executions. This never reverts committed state — a commit's effects, fees and
@@ -694,7 +710,7 @@ pub trait StateStoreWriteTransaction {
     // -------------------------------- Parked blocks / Missing Transactions -------------------------------- //
 
     /// Parks a block until its missing transactions arrive. Parking a block that is already parked keeps the first
-    /// record, except that a `CatchUp` origin replaces a `Live` one.
+    /// record, except that a `Live` origin replaces a `CatchUp` one.
     fn parked_block_insert<'a, IMissing: IntoIterator<Item = &'a TransactionId>>(
         &mut self,
         park_block: &Block,
@@ -703,10 +719,12 @@ pub trait StateStoreWriteTransaction {
         missing_transaction_ids: IMissing,
     ) -> Result<(), StorageError>;
 
+    /// Removes `transaction_id` from every parked local block waiting on it and returns each block that has no
+    /// missing transactions left.
     fn parked_block_remove_missing_transaction(
         &mut self,
         transaction_id: &TransactionId,
-    ) -> Result<Option<(Block, Vec<ForeignProposal>, ProposalOrigin)>, StorageError>;
+    ) -> Result<Vec<(Block, Vec<ForeignProposal>, ProposalOrigin)>, StorageError>;
 
     /// Removes every parked block, with its missing-transaction records, from earlier epochs and from `epoch` up to and
     /// including `height`. Returns the number of blocks removed.
@@ -747,6 +765,10 @@ pub trait StateStoreWriteTransaction {
 
     /// Commits the batch's transitions, recording each state version's transitions with the shard's
     /// [`TransitionAccumulator`] extended by them.
+    ///
+    /// Each state version in the batch must hold all of its transitions. A substate's head becomes the highest version
+    /// the batch writes for it, and DOWN if the batch puts that version down, whatever order the transitions are listed
+    /// in.
     fn substates_commit_batch(&mut self, update_batch: SubstateUpdateBatch) -> Result<(), StorageError>;
     /// Clears the values of substates downed in or before `epoch`, stopping at the first index entry that takes the
     /// count to `limit` or more. Returns the number of values cleared; a result below `limit` means none remain.

@@ -150,6 +150,10 @@ mod template {
             ResourceManager::get(resource).freeze_utxos(utxos);
         }
 
+        pub fn unfreeze_utxos_of(resource: ResourceAddress, utxos: Vec<UtxoId>) {
+            ResourceManager::get(resource).unfreeze_utxos(utxos);
+        }
+
         pub fn burn_utxo_of(resource: ResourceAddress, utxo: UtxoId, proof: CommitmentValueProof) {
             ResourceManager::get(resource).burn_utxo(utxo, proof);
         }

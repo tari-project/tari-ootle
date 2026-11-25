@@ -35,8 +35,8 @@ pub async fn worker_loop(config: Config, handle: ManagerHandle) -> anyhow::Resul
         if !is_registered {
             if config.auto_register {
                 match ensure_registered(&handle, &vn_registration_file).await {
-                    Ok(_) => {
-                        is_registered = true;
+                    Ok(registered) => {
+                        is_registered = registered;
                     },
                     Err(e) => {
                         error!("Unable to ensure validator registration: {}", e);
@@ -51,10 +51,10 @@ pub async fn worker_loop(config: Config, handle: ManagerHandle) -> anyhow::Resul
     }
 }
 
-async fn ensure_registered(handle: &ManagerHandle, vn_registration_file: &PathBuf) -> anyhow::Result<()> {
+async fn ensure_registered(handle: &ManagerHandle, vn_registration_file: &PathBuf) -> anyhow::Result<bool> {
     let Some(vn_reg_data) = read_registration_file(&vn_registration_file).await? else {
         info!("No registration data found, will try again in 30s");
-        return Ok(());
+        return Ok(false);
     };
     let public_key = vn_reg_data.public_key;
     debug!("Local public key: {}", public_key.clone());
@@ -73,7 +73,7 @@ async fn ensure_registered(handle: &ManagerHandle, vn_registration_file: &PathBu
     // if the node is already registered
     if active_keys.contains(&public_key) {
         info!("VN has an active registration");
-        return Ok(());
+        return Ok(true);
     }
 
     info!("VN not active, attempting to register..");
@@ -86,7 +86,7 @@ async fn ensure_registered(handle: &ManagerHandle, vn_registration_file: &PathBu
         current_height, tx.transaction_id
     );
 
-    Ok(())
+    Ok(true)
 }
 
 async fn check_and_submit_layer_one_transactions(

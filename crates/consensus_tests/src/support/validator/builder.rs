@@ -10,8 +10,15 @@ use std::{
 use serde::Serialize;
 use tari_common_types::types::PrivateKey;
 use tari_consensus::{
-    hotstuff::{ConsensusCurrentState, ConsensusWorker, ConsensusWorkerContext, HotstuffConfig, HotstuffWorker},
-    traits::hooks::NoopHooks,
+    hotstuff::{
+        ConsensusCurrentState,
+        ConsensusWorker,
+        ConsensusWorkerContext,
+        HotstuffConfig,
+        HotstuffEvent,
+        HotstuffWorker,
+    },
+    traits::{InboundMessagingError, hooks::NoopHooks},
 };
 use tari_crypto::{keys::PublicKey, ristretto::RistrettoPublicKey};
 use tari_engine_types::substate::{SubstateId, SubstateValue};
@@ -38,7 +45,7 @@ use tempfile::TempDir;
 use tokio::sync::{broadcast, mpsc, watch};
 
 use crate::support::{
-    RoundRobinLeaderStrategy,
+    SmoothWeightedRoundRobin,
     TEST_NUM_PRESHARDS,
     TestBlockTransactionProcessor,
     TestConsensusSpec,
@@ -62,7 +69,7 @@ pub struct ValidatorBuilder {
     pub shard_group: ShardGroup,
     pub rocks_tmp_path: TempDir,
     pub rocks_override_path: Option<PathBuf>,
-    pub leader_strategy: RoundRobinLeaderStrategy,
+    pub leader_strategy: SmoothWeightedRoundRobin,
     pub num_committees: u32,
     pub epoch_manager: Option<TestEpochManager>,
     pub transaction_executions: TestExecutionSpecStore,
@@ -82,7 +89,7 @@ impl ValidatorBuilder {
             shard_group: ShardGroup::all_shards(TEST_NUM_PRESHARDS),
             rocks_override_path: None,
             rocks_tmp_path: tempfile::tempdir().unwrap(),
-            leader_strategy: RoundRobinLeaderStrategy::new(),
+            leader_strategy: SmoothWeightedRoundRobin::new(),
             epoch_manager: None,
             transaction_executions: TestExecutionSpecStore::new(),
             config: None,
@@ -127,7 +134,7 @@ impl ValidatorBuilder {
         self
     }
 
-    pub fn with_leader_strategy(&mut self, leader_strategy: RoundRobinLeaderStrategy) -> &mut Self {
+    pub fn with_leader_strategy(&mut self, leader_strategy: SmoothWeightedRoundRobin) -> &mut Self {
         self.leader_strategy = leader_strategy;
         self
     }
@@ -154,7 +161,6 @@ impl ValidatorBuilder {
             .with_pinned_checkpoint_epochs(config.pinned_checkpoint_epochs)
     }
 
-    #[allow(clippy::too_many_lines)]
     pub fn spawn(&self, shutdown_signal: ShutdownSignal) -> (ValidatorChannels, Validator) {
         log::info!(
             "Spawning validator with address {} and public key {}",
@@ -162,6 +168,54 @@ impl ValidatorBuilder {
             self.public_key
         );
 
+        let UnstartedValidator {
+            worker,
+            channels,
+            epoch_manager,
+            transaction_executor,
+            tx_events,
+            tx_malformed_message,
+        } = self.build(shutdown_signal.clone());
+        let store = channels.state_store.clone();
+        let tx_inbound_message = channels.tx_hs_message.clone();
+
+        let current_view = worker.current_view();
+
+        let (tx_current_state, rx_current_state) = watch::channel(ConsensusCurrentState::default());
+        let sync_manager = TestSyncManager::default();
+        let context = ConsensusWorkerContext {
+            epoch_manager: epoch_manager.clone(),
+            hotstuff: worker,
+            state_sync: sync_manager.clone(),
+            tx_current_state: tx_current_state.clone(),
+        };
+
+        let mut worker = ConsensusWorker::new(shutdown_signal).no_initial_delay();
+        let handle = tokio::spawn(async move { worker.run(context).await });
+
+        let validator = Validator {
+            address: self.address.clone(),
+
+            shard_address: self.shard_address,
+            shard_group: self.shard_group,
+            num_committees: self.num_committees,
+            transaction_executor,
+            state_store: store,
+            _current_view: current_view,
+            epoch_manager,
+            events: tx_events.subscribe(),
+            current_state_machine_state: rx_current_state,
+            sync_manager,
+            tx_inbound_message,
+            tx_malformed_message,
+            handle,
+        };
+        (channels, validator)
+    }
+
+    /// Builds the validator's hotstuff worker without the state machine that drives it, so a test can call
+    /// [`HotstuffWorker::start`] itself.
+    pub fn build(&self, shutdown_signal: ShutdownSignal) -> UnstartedValidator {
         let (tx_broadcast, rx_broadcast) = mpsc::channel(100);
         let (tx_new_transactions, rx_new_transactions) = mpsc::channel(100);
         let (tx_hs_message, rx_hs_message) = mpsc::channel(100);
@@ -226,54 +280,39 @@ impl ValidatorBuilder {
             transaction_executor.clone(),
             tx_events.clone(),
             NoopHooks,
-            shutdown_signal.clone(),
+            shutdown_signal,
         );
 
-        let current_view = worker.pacemaker().current_view().clone();
-
-        let (tx_current_state, rx_current_state) = watch::channel(ConsensusCurrentState::default());
-        let sync_manager = TestSyncManager::default();
-        let context = ConsensusWorkerContext {
-            epoch_manager: epoch_manager.clone(),
-            hotstuff: worker,
-            state_sync: sync_manager.clone(),
-            tx_current_state: tx_current_state.clone(),
-        };
-
-        let mut worker = ConsensusWorker::new(shutdown_signal).no_initial_delay();
-        let handle = tokio::spawn(async move { worker.run(context).await });
-
-        let tx_inbound_message = tx_hs_message.clone();
         let channels = ValidatorChannels {
             address: self.address.clone(),
             shard_group: self.shard_group,
             num_committees: self.num_committees,
-            state_store: store.clone(),
+            state_store: store,
             tx_new_transactions,
             tx_hs_message,
             rx_broadcast,
             rx_leader,
         };
 
-        let validator = Validator {
-            address: self.address.clone(),
-
-            shard_address: self.shard_address,
-            shard_group: self.shard_group,
-            num_committees: self.num_committees,
-            transaction_executor,
-            state_store: store,
-            _current_view: current_view,
+        UnstartedValidator {
+            worker,
+            channels,
             epoch_manager,
-            events: tx_events.subscribe(),
-            current_state_machine_state: rx_current_state,
-            sync_manager,
-            tx_inbound_message,
+            transaction_executor,
+            tx_events,
             tx_malformed_message,
-            handle,
-        };
-        (channels, validator)
+        }
     }
+}
+
+/// A validator's hotstuff worker and the channels around it, before anything has started the worker.
+pub struct UnstartedValidator {
+    pub worker: HotstuffWorker<TestConsensusSpec>,
+    pub channels: ValidatorChannels,
+    pub epoch_manager: TestEpochManager,
+    pub transaction_executor: TestBlockTransactionProcessor,
+    pub tx_events: broadcast::Sender<HotstuffEvent>,
+    pub tx_malformed_message: mpsc::Sender<InboundMessagingError>,
 }
 
 fn create_substate<TTx, TId, TVal>(tx: &mut TTx, substate_id: TId, value: TVal) -> Result<(), StorageError>

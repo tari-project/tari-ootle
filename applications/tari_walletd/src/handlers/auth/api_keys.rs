@@ -149,6 +149,13 @@ fn reject_user_only_grants(permissions: &Permissions) -> Result<(), anyhow::Erro
              session"
         ));
     }
+    let approve_signing = Permission::SigningRequests(TxRequestAction::Approve);
+    if permissions.has_permission(&approve_signing) {
+        return Err(anyhow!(
+            "{approve_signing} cannot be granted to an API key: approving a signing request requires an interactive \
+             user session"
+        ));
+    }
     Ok(())
 }
 
@@ -416,9 +423,18 @@ mod tests {
         .into();
         assert!(reject_user_only_grants(&approve).is_err());
 
+        let approve_signing: Permissions = vec![
+            Permission::SigningRequests(TxRequestAction::Create),
+            Permission::SigningRequests(TxRequestAction::Approve),
+        ]
+        .into();
+        assert!(reject_user_only_grants(&approve_signing).is_err());
+
         let create_and_read: Permissions = vec![
             Permission::TransactionRequests(TxRequestAction::Create),
             Permission::TransactionRequests(TxRequestAction::Read),
+            Permission::SigningRequests(TxRequestAction::Create),
+            Permission::SigningRequests(TxRequestAction::Read),
         ]
         .into();
         assert!(reject_user_only_grants(&create_and_read).is_ok());

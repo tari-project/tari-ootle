@@ -31,8 +31,12 @@ impl LockedSubstates {
                     });
                 }
 
-                self.locks.insert(addr.clone(), LockState::Read(*count + 1));
+                let next_count = count.checked_add(1).ok_or_else(|| LockError::InvariantError {
+                    function: "LockedSubstates::try_lock",
+                    details: "read lock count overflowed".to_string(),
+                })?;
                 let id = self.next_id()?;
+                self.locks.insert(addr.clone(), LockState::Read(next_count));
                 self.lock_ids.insert(id, addr);
                 Ok(id)
             },
@@ -49,8 +53,8 @@ impl LockedSubstates {
                 })
             },
             None => {
-                self.locks.insert(addr.clone(), lock_flag.into());
                 let id = self.next_id()?;
+                self.locks.insert(addr.clone(), lock_flag.into());
                 self.lock_ids.insert(id, addr);
                 Ok(id)
             },
@@ -243,5 +247,31 @@ pub enum LockError {
 impl IsNotFoundError for LockError {
     fn is_not_found_error(&self) -> bool {
         matches!(self, Self::LockIdNotFound { .. })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn failed_lock_id_allocation_leaves_locks_unchanged() {
+        let addr = SubstateId::Resource([1u8; 32].into());
+        let mut locked = LockedSubstates {
+            id_counter: LockId::MAX,
+            ..Default::default()
+        };
+
+        assert!(locked.try_lock(addr.clone(), LockFlag::Write).is_err());
+        assert!(locked.locks.is_empty());
+        assert!(locked.lock_ids.is_empty());
+
+        let mut locked = LockedSubstates::default();
+        let first_id = locked.try_lock(addr.clone(), LockFlag::Read).unwrap();
+        locked.id_counter = LockId::MAX;
+
+        assert!(locked.try_lock(addr, LockFlag::Read).is_err());
+        locked.try_unlock(first_id).unwrap();
+        assert!(locked.locks.is_empty());
     }
 }

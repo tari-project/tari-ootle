@@ -109,4 +109,71 @@ mod tests {
             "unexpected error: {err}"
         );
     }
+
+    #[test]
+    fn a_stealth_script_path_spend_referencing_an_unknown_template_is_rejected() {
+        use tari_ootle_transaction::ResourceAddressRef;
+        use tari_template_lib::types::{
+            Amount,
+            constants::TARI_TOKEN,
+            crypto::PedersenCommitmentBytes,
+            stealth::{
+                MerkleProof,
+                SpendCondition,
+                SpendWitness,
+                StealthInput,
+                StealthInputsStatement,
+                StealthOutputsStatement,
+                StealthTransferStatement,
+                TemplateFunction,
+            },
+        };
+
+        let known = TemplateAddress::from_array([1; 32]);
+        let unknown = TemplateAddress::from_array([2; 32]);
+        let validator = TemplateExistsValidator::new(KnownTemplates(HashSet::from([known])));
+
+        let stealth_tx = |template: TemplateAddress| {
+            let func = TemplateFunction::new(template, "check".try_into().unwrap(), vec![]);
+            let leaf = SpendCondition::template_function(func);
+            let witness = SpendWitness::script_path(leaf, MerkleProof::empty());
+            let input = StealthInput::with_witness(PedersenCommitmentBytes::zero(), witness);
+            let outputs_statement =
+                StealthOutputsStatement::new_revealed_only(Amount::from(10u64), RistrettoPublicKeyBytes::zero());
+            let statement = StealthTransferStatement {
+                inputs_statement: StealthInputsStatement::new(vec![input], Amount::ZERO),
+                outputs_statement,
+                balance_proof: None,
+                covenant_claims: vec![],
+            };
+            let instruction = Instruction::StealthTransfer {
+                resource_address_ref: ResourceAddressRef::Address(TARI_TOKEN),
+                statement,
+                revealed_input_bucket: None,
+            };
+            Transaction::new(
+                UnsealedTransactionV1::new(
+                    UnsignedTransactionV1::new(
+                        Network::LocalNet.as_byte(),
+                        vec![],
+                        vec![instruction],
+                        IndexSet::new(),
+                        None,
+                        tari_ootle_common_types::Epoch(10),
+                        false,
+                    ),
+                    vec![],
+                )
+                .into(),
+                TransactionSealSignature::new(RistrettoPublicKeyBytes::zero(), Sr25519SignatureBytes::zero()),
+            )
+        };
+
+        validator.validate(&(), &stealth_tx(known)).unwrap();
+        let err = validator.validate(&(), &stealth_tx(unknown)).unwrap_err();
+        assert!(
+            matches!(err, TransactionValidationError::TemplateNotFound { address } if address == unknown),
+            "unexpected error: {err}"
+        );
+    }
 }

@@ -54,6 +54,7 @@ use tari_template_lib::{
         ResourceType,
         TemplateAddress,
         TransactionReceiptAddress,
+        UtxoId,
         VaultId,
         access_rules::RuleRequirement,
         crypto::PedersenCommitmentBytes,
@@ -152,6 +153,14 @@ pub enum RuntimeError {
         requirement: RuleRequirement,
     },
     #[error(
+        "{argument} has an {composite} rule that lists nothing; an {composite} rule must list at least one rule or \
+         requirement, and deny_all is the rule that admits nobody"
+    )]
+    EmptyAccessRuleComposite {
+        argument: &'static str,
+        composite: &'static str,
+    },
+    #[error(
         "Intrinsic {intrinsic} is not supported by this validator. The template requires a newer engine — validators \
          and indexers must be upgraded before it can be called."
     )]
@@ -189,6 +198,12 @@ pub enum RuntimeError {
         op: &'static str,
         resource_address: ResourceAddress,
         nf_id: NonFungibleId,
+    },
+    #[error("Invalid op '{op}' on burnt stealth UTXO {resource_address} id {utxo_id}")]
+    InvalidOpStealthUtxoBurnt {
+        op: &'static str,
+        resource_address: ResourceAddress,
+        utxo_id: UtxoId,
     },
     #[error("Bucket not found with id {bucket_id}")]
     BucketNotFound { bucket_id: BucketId },
@@ -272,6 +287,13 @@ pub enum RuntimeError {
     AccessDeniedOwnerRequired { action: ActionIdent },
     #[error("Component {component} cannot be upgraded: its upgrade rule is Locked")]
     ComponentUpgradesLocked { component: ComponentAddress },
+    #[error("The access rules and owner rule of component {component} cannot change: its rules updater is Locked")]
+    ComponentRulesLocked { component: ComponentAddress },
+    #[error(
+        "The access rules and owner rule of component {component} are changed only by its own template code: its \
+         rules updater is TemplateManaged"
+    )]
+    ComponentRulesTemplateManaged { component: ComponentAddress },
     #[error("Write attempted in a read-only execution context")]
     WriteInReadOnlyContext,
     #[error("Host operation '{operation}' is forbidden inside a read-only (spend-script) context")]
@@ -404,6 +426,11 @@ pub enum RuntimeError {
     CallFrameRemainingOnStack { remaining: usize },
     #[error("Duplicate reference to substate {address}")]
     DuplicateReference { address: SubstateId },
+    #[error(
+        "Vault {vault_id} already belongs to a component and cannot be placed in another component's state: a vault \
+         may be added to component state only by the call that created it, and only once"
+    )]
+    VaultAlreadyOwned { vault_id: VaultId },
     #[error("Invalid argument: {0}")]
     ArgumentValidationError(#[from] ArgumentValidationError),
     #[error("Fee payment found in main intent, which is not allowed")]
@@ -438,6 +465,12 @@ pub enum RuntimeError {
     AddressAllocationNotUsed { id: u32 },
     #[error("Address allocation type mismatch: got {id}, expected: {expected}")]
     AddressAllocationTypeMismatch { id: SubstateId, expected: &'static str },
+    #[error("Address allocation {id} was created by template {allocated_by} and cannot be used by template {used_by}")]
+    AddressAllocationTemplateMismatch {
+        id: AddressAllocationId,
+        allocated_by: TemplateAddress,
+        used_by: TemplateAddress,
+    },
     #[error("Allocated address does not have an associated template")]
     AddressAllocationNoTemplate,
 
@@ -550,6 +583,7 @@ impl RuntimeError {
             Self::InvalidNumberOfArguments { .. } |
             Self::InvalidMOfNThreshold { .. } |
             Self::DuplicateMOfNRequirement { .. } |
+            Self::EmptyAccessRuleComposite { .. } |
             Self::InvalidAmount { .. } |
             Self::BucketNotFound { .. } |
             Self::BucketNotInScope { .. } |
@@ -563,10 +597,12 @@ impl RuntimeError {
             Self::NoFeesPaid { .. } |
             Self::InvalidOpLockedBucket { .. } |
             Self::DuplicateReference { .. } |
+            Self::VaultAlreadyOwned { .. } |
             Self::ArgumentValidationError(_) |
             Self::FeePaymentInMainIntent |
             Self::AddressAllocationNotFound { .. } |
             Self::AddressAllocationTypeMismatch { .. } |
+            Self::AddressAllocationTemplateMismatch { .. } |
             Self::AddressAllocationNoTemplate |
             Self::NumericConversionError { .. } |
             Self::WriteToReadDeclaredInput { .. } |
@@ -593,6 +629,8 @@ impl RuntimeError {
             Self::AccessDeniedAuthHook { .. } |
             Self::AccessDeniedOwnerRequired { .. } |
             Self::ComponentUpgradesLocked { .. } |
+            Self::ComponentRulesLocked { .. } |
+            Self::ComponentRulesTemplateManaged { .. } |
             Self::WriteInReadOnlyContext |
             Self::ForbiddenInReadOnlyContext { .. } |
             Self::WriteOutsideOwnComponent { .. } |
@@ -602,6 +640,7 @@ impl RuntimeError {
 
             Self::VaultFrozen { .. } |
             Self::InvalidOpNonFungibleBurnt { .. } |
+            Self::InvalidOpStealthUtxoBurnt { .. } |
             Self::FreezeResourceMismatch { .. } |
             Self::RecallResourceMismatch { .. } => C::ResourceRestricted,
 
@@ -697,6 +736,7 @@ impl LimitError {
         match self {
             Self::SubstateSizeExceeded { .. } |
             Self::TransactionOutputSizeExceeded { .. } |
+            Self::SubstateOutputsExceeded { .. } |
             Self::LogSizeExceeded { .. } |
             Self::MaxLogsExceeded |
             Self::MaxEventsExceeded |
@@ -813,6 +853,8 @@ pub enum LimitError {
     SubstateSizeExceeded { id: SubstateId, size: usize },
     #[error("Transaction writes {size} bytes of state, exceeding the maximum of {} bytes per transaction", limits::ENGINE_LIMITS.max_transaction_output_bytes)]
     TransactionOutputSizeExceeded { size: usize },
+    #[error("Transaction persists {count} substates, exceeding the maximum of {} per transaction", limits::ENGINE_LIMITS.max_substate_outputs)]
+    SubstateOutputsExceeded { count: usize },
     #[error("Log entry of {size} bytes exceeds maximum size of {} bytes", limits::ENGINE_LIMITS.max_log_size_bytes)]
     LogSizeExceeded { size: usize },
     #[error("Exceeded maximum number of logs per transaction: {}", limits::ENGINE_LIMITS.max_logs)]

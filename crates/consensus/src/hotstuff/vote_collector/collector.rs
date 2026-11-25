@@ -11,7 +11,6 @@ use log::*;
 use tari_consensus_types::Vote;
 use tari_ootle_common_types::{Epoch, NodeAddressable, NodeHeight, VotePower, committee::Committee};
 use tari_ootle_storage::global::models::ValidatorNode;
-use tari_sidechain::QuorumDecision;
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use tokio::sync::RwLock;
 
@@ -24,6 +23,12 @@ const LOG_TARGET: &str = "tari::ootle::consensus::hotstuff::vote_collector";
 /// reaches those views by importing the blocks, not by certifying them from buffered votes.
 const MAX_VOTE_VIEW_LOOKAHEAD: NodeHeight = NodeHeight(20);
 
+/// Whether a vote at `vote_height` is below the window `[current_height - 1, current_height + MAX_VOTE_VIEW_LOOKAHEAD]`
+/// that the collector retains.
+pub fn is_before_vote_window(current_height: NodeHeight, vote_height: NodeHeight) -> bool {
+    vote_height < current_height.saturating_sub(NodeHeight(1))
+}
+
 /// Whether a vote at `vote_height` is too far ahead of `current_height` to be worth keeping.
 pub fn exceeds_vote_lookahead(current_height: NodeHeight, vote_height: NodeHeight) -> bool {
     vote_height > current_height.saturating_add(MAX_VOTE_VIEW_LOOKAHEAD)
@@ -34,7 +39,9 @@ pub struct VoteCollector<V: Vote> {
     store: Arc<RwLock<VoteStoreInner<V>>>,
 }
 
-impl<V: Vote + Display + Clone> VoteCollector<V> {
+impl<V: Vote + Display + Clone> VoteCollector<V>
+where V::AggregationKey: Clone
+{
     pub fn new() -> Self {
         Self {
             store: Arc::new(RwLock::new(VoteStoreInner::new())),
@@ -48,9 +55,21 @@ impl<V: Vote + Display + Clone> VoteCollector<V> {
         current_height: NodeHeight,
         vote: V,
         committee: &Committee<TAddr>,
-    ) -> Result<Option<(Vec<V>, QuorumDecision)>, DuplicateVoteDetected<V>> {
+    ) -> Result<Option<Vec<V>>, DuplicateVoteDetected<V>> {
         let mut access_mut = self.store.write().await;
         access_mut.clear_votes_before(current_epoch, current_height);
+
+        if vote.epoch() != current_epoch || is_before_vote_window(current_height, vote.height()) {
+            debug!(
+                target: LOG_TARGET,
+                "🗑️ Discarding stale or wrong-epoch {} from {}: current view is {}/{}",
+                vote,
+                sender_vn.address,
+                current_epoch,
+                current_height
+            );
+            return Ok(None);
+        }
 
         if exceeds_vote_lookahead(current_height, vote.height()) {
             warn!(
@@ -71,71 +90,65 @@ impl<V: Vote + Display + Clone> VoteCollector<V> {
         let vote_display = vote.to_string();
         access_mut.save_vote(vote)?;
 
-        let threshold_decision = access_mut.calculate_threshold_decision(epoch, height, &agg_key, committee);
-
-        let quorum_threshold = committee.quorum_threshold();
-        let Some(quorum_decision) = threshold_decision.decision else {
-            debug!(
-                target: LOG_TARGET,
-                "🔥 Received {} from {} ({} of {}).",
-                vote_display,
-                sender_vn.address,
-                threshold_decision.total_power,
-                quorum_threshold
-            );
-            return Ok(None);
-        };
+        let accept_power = access_mut.accept_power(epoch, height, &agg_key, committee);
 
         // We only generate the next qc once when we have a quorum of votes. Any votes received after this
         // are not included in the QC.
-        if threshold_decision.total_power < quorum_threshold {
+        let quorum_threshold = committee.quorum_threshold();
+        if accept_power < quorum_threshold {
             debug!(
                 target: LOG_TARGET,
                 "🔥 Received {} from {} ({} of {}).",
                 vote_display,
                 sender_vn.address,
-                threshold_decision.total_power,
+                accept_power,
                 quorum_threshold
             );
             return Ok(None);
         }
 
-        debug!(
-            target: LOG_TARGET,
-            "🔥 Received {} from {} ({} of {}). QUORUM!",
-            vote_display,
-            sender_vn.address,
-            threshold_decision.total_power,
-            quorum_threshold
-        );
+        let quorum_votes = access_mut.take_accept_votes(epoch, height, &agg_key);
+        if quorum_votes.is_some() {
+            debug!(
+                target: LOG_TARGET,
+                "🔥 Received {} from {} ({} of {}). QUORUM!",
+                vote_display,
+                sender_vn.address,
+                accept_power,
+                quorum_threshold
+            );
+        }
 
-        let votes = access_mut.take_votes_with_decision(epoch, height, &agg_key, quorum_decision);
-
-        Ok(votes.map(|v| (v, quorum_decision)))
+        Ok(quorum_votes)
     }
 
     pub async fn return_votes(&self, votes: Vec<V>) {
         let mut access_mut = self.store.write().await;
-        for vote in votes {
-            if let Err(err) = access_mut.save_vote(vote) {
-                // To panic or not to panic? That is the question...
-                error!(
-                    target: LOG_TARGET,
-                    "❌: BUG DETECTED: a duplicate vote on returned votes should not be possible: {}", err,
-                );
-            }
-        }
+        access_mut.restore_unprocessed_quorum(votes);
     }
 }
 
 /// Collection of votes indexed by sender leaf hash
 type SenderVotesCollection<V> = HashMap<RistrettoPublicKeyBytes, V>;
 
-#[derive(Debug, Default)]
+struct ViewVotes<V: Vote> {
+    votes: SenderVotesCollection<V>,
+    quorums_reached: Vec<V::AggregationKey>,
+}
+
+impl<V: Vote> Default for ViewVotes<V> {
+    fn default() -> Self {
+        Self {
+            votes: HashMap::new(),
+            quorums_reached: Vec::new(),
+        }
+    }
+}
+
+#[derive(Default)]
 struct VoteStoreInner<V: Vote> {
-    /// Maps (Epoch,Height) -> map (key -> map (sender leaf hash -> vote))
-    /// The key is some type that uniquely keys the vote e.g BlockId or (Epoch,Height)
-    store: BTreeMap<(Epoch, NodeHeight), SenderVotesCollection<V>>,
+    /// Maps (Epoch,Height) -> per-view votes and formed quorums
+    store: BTreeMap<(Epoch, NodeHeight), ViewVotes<V>>,
 }
 
 impl<V: Vote + Display + Clone> VoteStoreInner<V> {
@@ -158,7 +171,7 @@ impl<V: Vote + Display + Clone> VoteStoreInner<V> {
     /// committee is forming, so dropping it would let an equivocator erase a real vote.
     pub fn save_vote(&mut self, vote: V) -> Result<(), DuplicateVoteDetected<V>> {
         let epoch_height = (vote.epoch(), vote.height());
-        let view_votes_mut = self.store.entry(epoch_height).or_default();
+        let view_votes_mut = &mut self.store.entry(epoch_height).or_default().votes;
         if let Some(prev_vote) = view_votes_mut.get(vote.public_key()) {
             let is_same_vote = prev_vote.signature() == vote.signature();
             if is_same_vote {
@@ -188,79 +201,78 @@ impl<V: Vote + Display + Clone> VoteStoreInner<V> {
         Ok(())
     }
 
-    pub fn take_votes_with_decision(
+    /// Marks `agg_key` at `(epoch, height)` as having formed a quorum and returns its Accept votes, or `None` if a
+    /// quorum was already emitted for `agg_key` at this view.
+    ///
+    /// All votes at `(epoch, height)` remain stored until [`Self::clear_votes_before`] prunes the view so that a
+    /// signer equivocating after the quorum is still detected and votes for sibling forks or `Reject` decisions are
+    /// preserved.
+    pub fn take_accept_votes(
         &mut self,
         epoch: Epoch,
         height: NodeHeight,
         agg_key: &V::AggregationKey,
-        decision: QuorumDecision,
-    ) -> Option<Vec<V>> {
+    ) -> Option<Vec<V>>
+    where
+        V::AggregationKey: Clone,
+    {
         let epoch_height = (epoch, height);
-        // Once a block is decided at this height, votes for any losing fork at the same height can be dropped too.
-        let votes = self.store.remove(&epoch_height)?;
-        Some(
-            votes
-                .into_values()
-                .filter(|vote| vote.decision() == decision && vote.aggregation_key() == *agg_key)
-                .collect(),
-        )
+        let view_votes = self.store.get_mut(&epoch_height)?;
+        if view_votes.quorums_reached.contains(agg_key) {
+            return None;
+        }
+        let accept_votes: Vec<V> = view_votes
+            .votes
+            .values()
+            .filter(|vote| vote.decision().is_accept() && vote.aggregation_key() == *agg_key)
+            .cloned()
+            .collect();
+        view_votes.quorums_reached.push(agg_key.clone());
+        Some(accept_votes)
+    }
+
+    fn restore_unprocessed_quorum(&mut self, votes: Vec<V>) {
+        for vote in votes {
+            let epoch_height = (vote.epoch(), vote.height());
+            let agg_key = vote.aggregation_key();
+            let view_votes = self.store.entry(epoch_height).or_default();
+            view_votes.quorums_reached.retain(|k| *k != agg_key);
+            view_votes.votes.entry(*vote.public_key()).or_insert(vote);
+        }
     }
 
     fn votes_for_key_iter(&self, epoch: Epoch, height: NodeHeight) -> Option<impl Iterator<Item = &V>> {
         let epoch_height = (epoch, height);
-        let votes = self.store.get(&epoch_height)?;
-        Some(votes.values())
+        let view_votes = self.store.get(&epoch_height)?;
+        Some(view_votes.votes.values())
     }
 
-    pub fn calculate_threshold_decision<TAddr: NodeAddressable>(
+    /// The vote power of the Accept votes for `agg_key` at `(epoch, height)`.
+    ///
+    /// Reject votes are held so that a signer who also sends an Accept vote for the view is caught
+    /// equivocating, but they count towards no quorum: every certificate attests to an Accept.
+    pub fn accept_power<TAddr: NodeAddressable>(
         &self,
         epoch: Epoch,
         height: NodeHeight,
         agg_key: &V::AggregationKey,
         committee: &Committee<TAddr>,
-    ) -> ThresholdDecision {
+    ) -> VotePower {
         let Some(votes_iter) = self.votes_for_key_iter(epoch, height) else {
-            // Soft invariant protection - technically, this should not happen but the correct ThresholdDecision is
-            // returned regardless i.e. 0 votes
+            // Soft invariant protection - technically, this should not happen but the correct power is returned
+            // regardless i.e. 0 votes
             error!(
                 target: LOG_TARGET,
-                "INVARIANT: calculate_threshold_decision: no votes for vote ({}/{}). Votes should have been collected before calling this function",
+                "INVARIANT: accept_power: no votes for vote ({}/{}). Votes should have been collected before calling this function",
                 epoch, height,
             );
-
-            return ThresholdDecision {
-                total_power: VotePower::zero(),
-                decision: None,
-            };
+            return VotePower::zero();
         };
-        let mut count_accept = VotePower::zero();
-        let mut count_reject = VotePower::zero();
-        for vote in votes_iter.filter(|vote| vote.aggregation_key() == *agg_key) {
-            let power = committee.get_power_by_public_key(vote.public_key()).unwrap_or_default();
-            match vote.decision() {
-                QuorumDecision::Accept => count_accept += power,
-                QuorumDecision::Reject => count_reject += power,
-            }
+        let mut power = VotePower::zero();
+        for vote in votes_iter.filter(|vote| vote.decision().is_accept() && vote.aggregation_key() == *agg_key) {
+            power = power.saturating_add(committee.get_power_by_public_key(vote.public_key()).unwrap_or_default());
         }
-
-        let quorum_threshold = committee.quorum_threshold();
-        if count_accept >= quorum_threshold {
-            return ThresholdDecision {
-                total_power: count_accept,
-                decision: Some(QuorumDecision::Accept),
-            };
-        }
-        if count_reject >= quorum_threshold {
-            return ThresholdDecision {
-                total_power: count_reject,
-                decision: Some(QuorumDecision::Reject),
-            };
-        }
-
-        ThresholdDecision {
-            total_power: count_accept + count_reject,
-            decision: None,
-        }
+        power
     }
 
     fn log_buffer_size(&self) {
@@ -268,17 +280,11 @@ impl<V: Vote + Display + Clone> VoteStoreInner<V> {
             target: LOG_TARGET,
             "Vote store size: used: >{:.2?}KiB ({} entries)",
             self.store.values()
-                .map(|v| v.len() * Self::VOTE_BYTE_SIZE)
+                .map(|v| v.votes.len() * Self::VOTE_BYTE_SIZE)
                 .sum::<usize>() as f32 / 1024f32,
             self.store.len(),
         );
     }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct ThresholdDecision {
-    pub decision: Option<QuorumDecision>,
-    pub total_power: VotePower,
 }
 
 /// A second, differently signed vote from a signer that already has one in this view's bucket.
@@ -301,7 +307,7 @@ pub struct DuplicateVoteDetected<V: Vote> {
 mod tests {
     use tari_consensus_types::{SignedMessage, ToSignatureMessage};
     use tari_ootle_common_types::{SubstateAddress, committee::CommitteeMember};
-    use tari_sidechain::FixedHash;
+    use tari_sidechain::{FixedHash, QuorumDecision};
     use tari_template_lib_types::crypto::{RistrettoPublicKeyBytes, Scalar32Bytes, SchnorrSignatureBytes};
 
     use super::*;
@@ -391,6 +397,52 @@ mod tests {
     }
 
     #[test]
+    fn quorum_is_reached_when_the_signers_power_crosses_the_threshold() {
+        let heavy = pubkey(1);
+        let lights = [pubkey(2), pubkey(3), pubkey(4)];
+        // n = 5 + 1 + 1 + 1 = 8, f = 2, quorum_threshold = 6
+        let committee = Committee::new(
+            [(heavy, 5), (lights[0], 1), (lights[1], 1), (lights[2], 1)]
+                .into_iter()
+                .map(|(pk, power)| CommitteeMember {
+                    address: pk,
+                    public_key: pk,
+                    vote_power: VotePower::of(power),
+                })
+                .collect(),
+        );
+        assert_eq!(committee.quorum_threshold(), VotePower::of(6));
+
+        let block_id = FixedHash::new([0xAu8; 32]);
+        let vote = |public_key| TestVote {
+            epoch: Epoch(1),
+            height: NodeHeight(1),
+            block_id,
+            decision: QuorumDecision::Accept,
+            sig: ZERO_SIG,
+            public_key,
+        };
+        let power =
+            |store: &VoteStoreInner<TestVote>| store.accept_power(Epoch(1), NodeHeight(1), &block_id, &committee);
+
+        // Three of four members, but only 3 of the 8 power.
+        let mut store = VoteStoreInner::<TestVote>::new();
+        for pk in lights {
+            store.save_vote(vote(pk)).unwrap();
+        }
+        assert_eq!(power(&store), VotePower::of(3));
+        assert!(power(&store) < committee.quorum_threshold());
+
+        // One member holding 5 of the 8 power is still short; one more light vote crosses the threshold.
+        let mut store = VoteStoreInner::<TestVote>::new();
+        store.save_vote(vote(heavy)).unwrap();
+        assert!(power(&store) < committee.quorum_threshold());
+        store.save_vote(vote(lights[0])).unwrap();
+        assert_eq!(power(&store), VotePower::of(6));
+        assert!(power(&store) >= committee.quorum_threshold());
+    }
+
+    #[test]
     fn it_saves_a_new_vote() {
         let mut store = VoteStoreInner::<TestVote>::new();
         let vote = TestVote {
@@ -471,14 +523,13 @@ mod tests {
         store.save_vote(mk(byzantine, block_phantom)).unwrap();
 
         // Block A only has 2 of the required 3 power and does not reach a quorum.
-        let decision_a = store.calculate_threshold_decision(epoch, height, &block_a, &committee);
-        assert_eq!(decision_a.decision, None);
-        assert_eq!(decision_a.total_power, VotePower::of(2));
+        assert_eq!(
+            store.accept_power(epoch, height, &block_a, &committee),
+            VotePower::of(2)
+        );
 
         // The Byzantine phantom-block vote never folds into block A's votes.
-        let votes_a = store
-            .take_votes_with_decision(epoch, height, &block_a, QuorumDecision::Accept)
-            .unwrap();
+        let votes_a = store.take_accept_votes(epoch, height, &block_a).unwrap();
         assert_eq!(votes_a.len(), 2);
         assert!(votes_a.iter().all(|v| v.block_id == block_a));
     }
@@ -530,15 +581,75 @@ mod tests {
 
         store.save_vote(mk(honest2, block_a, ZERO_SIG)).unwrap();
 
-        let decision = store.calculate_threshold_decision(epoch, height, &block_a, &committee);
-        assert_eq!(decision.total_power, VotePower::of(3));
-        assert_eq!(decision.decision, Some(QuorumDecision::Accept));
+        assert_eq!(
+            store.accept_power(epoch, height, &block_a, &committee),
+            VotePower::of(3)
+        );
 
-        let votes = store
-            .take_votes_with_decision(epoch, height, &block_a, QuorumDecision::Accept)
-            .unwrap();
+        let votes = store.take_accept_votes(epoch, height, &block_a).unwrap();
         assert_eq!(votes.len(), 3);
         assert!(votes.iter().any(|v| v.public_key == byzantine && v.block_id == block_a));
+    }
+
+    #[tokio::test]
+    async fn a_reject_quorum_forms_no_certificate() {
+        let collector = VoteCollector::<TestVote>::new();
+        let epoch = Epoch(1);
+        let height = NodeHeight(1);
+        let voters = [pubkey(1), pubkey(2), pubkey(3), pubkey(4)];
+        let committee = committee(&voters);
+
+        for voter in voters {
+            let vote = TestVote {
+                epoch,
+                height,
+                block_id: FixedHash::zero(),
+                decision: QuorumDecision::Reject,
+                sig: ZERO_SIG,
+                public_key: voter,
+            };
+            let quorum = collector
+                .collect_vote(&validator(voter), epoch, height, vote, &committee)
+                .await
+                .unwrap();
+            assert!(quorum.is_none());
+        }
+    }
+
+    /// A Reject vote is held, so a signer that also sends an Accept vote for the same block is caught.
+    #[tokio::test]
+    async fn an_accept_after_a_reject_for_the_same_block_is_detected() {
+        let collector = VoteCollector::<TestVote>::new();
+        let epoch = Epoch(1);
+        let height = NodeHeight(1);
+        let voter = pubkey(1);
+        let committee = committee(&[voter, pubkey(2), pubkey(3), pubkey(4)]);
+
+        let mk = |decision, sig| TestVote {
+            epoch,
+            height,
+            block_id: FixedHash::zero(),
+            decision,
+            sig,
+            public_key: voter,
+        };
+
+        let reject = mk(QuorumDecision::Reject, ZERO_SIG);
+        collector
+            .collect_vote(&validator(voter), epoch, height, reject.clone(), &committee)
+            .await
+            .unwrap();
+
+        let accept = mk(
+            QuorumDecision::Accept,
+            SchnorrSignatureBytes::new([1u8; 32].into(), Scalar32Bytes::zero()),
+        );
+        let duplicate = collector
+            .collect_vote(&validator(voter), epoch, height, accept.clone(), &committee)
+            .await
+            .unwrap_err();
+        assert_eq!(duplicate.previous_vote, reject);
+        assert_eq!(duplicate.new_vote, accept);
     }
 
     #[tokio::test]
@@ -576,5 +687,210 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(collector.store.read().await.store.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn it_discards_votes_before_the_retained_view_window() {
+        let collector = VoteCollector::<TestVote>::new();
+        let epoch = Epoch(2);
+        let current_height = NodeHeight(10);
+        let voter = pubkey(1);
+        let committee = committee(&[voter, pubkey(2), pubkey(3), pubkey(4)]);
+
+        let mk = |vote_epoch, height| TestVote {
+            epoch: vote_epoch,
+            height,
+            block_id: FixedHash::zero(),
+            decision: QuorumDecision::Accept,
+            sig: ZERO_SIG,
+            public_key: voter,
+        };
+
+        // `current_height - 2` and wrong-epoch votes fall outside `[current_height - 1, current_height + lookahead]`.
+        collector
+            .collect_vote(
+                &validator(voter),
+                epoch,
+                current_height,
+                mk(epoch, NodeHeight(8)),
+                &committee,
+            )
+            .await
+            .unwrap();
+        collector
+            .collect_vote(
+                &validator(voter),
+                epoch,
+                current_height,
+                mk(Epoch(1), current_height),
+                &committee,
+            )
+            .await
+            .unwrap();
+        assert!(collector.store.read().await.store.is_empty());
+
+        // `current_height - 1` is the lower boundary kept for NEWVIEW `last_vote` aggregation.
+        collector
+            .collect_vote(
+                &validator(voter),
+                epoch,
+                current_height,
+                mk(epoch, NodeHeight(9)),
+                &committee,
+            )
+            .await
+            .unwrap();
+        assert_eq!(collector.store.read().await.store.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn equivocation_after_quorum_is_detected_and_no_second_quorum_is_emitted() {
+        let collector = VoteCollector::<TestVote>::new();
+        let epoch = Epoch(1);
+        let height = NodeHeight(5);
+        let voters = [pubkey(1), pubkey(2), pubkey(3), pubkey(4)];
+        let committee = committee(&voters);
+        let block_a = FixedHash::new([0xAu8; 32]);
+        let block_b = FixedHash::new([0xBu8; 32]);
+
+        let mk = |public_key, block_id, sig| TestVote {
+            epoch,
+            height,
+            block_id,
+            decision: QuorumDecision::Accept,
+            sig,
+            public_key,
+        };
+
+        for voter in &voters[..2] {
+            let res = collector
+                .collect_vote(
+                    &validator(*voter),
+                    epoch,
+                    height,
+                    mk(*voter, block_a, ZERO_SIG),
+                    &committee,
+                )
+                .await
+                .unwrap();
+            assert!(res.is_none());
+        }
+        let quorum = collector
+            .collect_vote(
+                &validator(voters[2]),
+                epoch,
+                height,
+                mk(voters[2], block_a, ZERO_SIG),
+                &committee,
+            )
+            .await
+            .unwrap();
+        assert_eq!(quorum.unwrap().len(), 3);
+
+        // A late fourth vote for the same block does not emit a duplicate quorum.
+        let late = collector
+            .collect_vote(
+                &validator(voters[3]),
+                epoch,
+                height,
+                mk(voters[3], block_a, ZERO_SIG),
+                &committee,
+            )
+            .await
+            .unwrap();
+        assert!(late.is_none());
+
+        // A quorum signer that subsequently votes for a conflicting block at the same view is still caught.
+        let conflicting = mk(
+            voters[0],
+            block_b,
+            SchnorrSignatureBytes::new([1u8; 32].into(), Scalar32Bytes::zero()),
+        );
+        let err = collector
+            .collect_vote(&validator(voters[0]), epoch, height, conflicting.clone(), &committee)
+            .await
+            .unwrap_err();
+        assert_eq!(err.public_key, voters[0]);
+        assert_eq!(err.new_vote, conflicting);
+    }
+
+    #[tokio::test]
+    async fn returning_votes_for_an_unknown_block_preserves_other_votes_and_allows_recollection() {
+        let collector = VoteCollector::<TestVote>::new();
+        let epoch = Epoch(1);
+        let height = NodeHeight(3);
+        let voters = [pubkey(1), pubkey(2), pubkey(3), pubkey(4)];
+        let committee = committee(&voters);
+        let block_a = FixedHash::new([0xAu8; 32]);
+
+        let mk = |public_key, decision, sig| TestVote {
+            epoch,
+            height,
+            block_id: block_a,
+            decision,
+            sig,
+            public_key,
+        };
+
+        // Voter 4 casts a Reject vote before voters 1..=3 form an Accept quorum on an unknown block.
+        collector
+            .collect_vote(
+                &validator(voters[3]),
+                epoch,
+                height,
+                mk(voters[3], QuorumDecision::Reject, ZERO_SIG),
+                &committee,
+            )
+            .await
+            .unwrap();
+        for voter in &voters[..2] {
+            collector
+                .collect_vote(
+                    &validator(*voter),
+                    epoch,
+                    height,
+                    mk(*voter, QuorumDecision::Accept, ZERO_SIG),
+                    &committee,
+                )
+                .await
+                .unwrap();
+        }
+        let quorum_votes = collector
+            .collect_vote(
+                &validator(voters[2]),
+                epoch,
+                height,
+                mk(voters[2], QuorumDecision::Accept, ZERO_SIG),
+                &committee,
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        collector.return_votes(quorum_votes).await;
+
+        // Voter 4's Reject vote is still retained, so an Accept vote from voter 4 is caught as equivocation.
+        let flip = mk(
+            voters[3],
+            QuorumDecision::Accept,
+            SchnorrSignatureBytes::new([2u8; 32].into(), Scalar32Bytes::zero()),
+        );
+        let dup = collector
+            .collect_vote(&validator(voters[3]), epoch, height, flip, &committee)
+            .await
+            .unwrap_err();
+        assert_eq!(dup.public_key, voters[3]);
+
+        // Re-evaluating one of the returned Accept votes once the block arrives emits the quorum again.
+        let recollected = collector
+            .collect_vote(
+                &validator(voters[0]),
+                epoch,
+                height,
+                mk(voters[0], QuorumDecision::Accept, ZERO_SIG),
+                &committee,
+            )
+            .await
+            .unwrap();
+        assert_eq!(recollected.unwrap().len(), 3);
     }
 }

@@ -4,6 +4,7 @@
 use ootle_network::Network;
 use tari_engine_types::{
     SubstateVersion,
+    ValidatorFeeWithdrawal,
     commit_result::{ExecuteResult, ExecutionFailureCode, FinalizeResult, RejectReason, TransactionResult},
     confidential::ClaimedOutputTombstone,
     encoded::Encoded,
@@ -37,6 +38,7 @@ use tari_template_lib_types::{
     ResourceAddress,
     ResourceType,
     SubstateOwnerRule,
+    ValidatorFeePoolAddress,
 };
 
 const EPOCH: Epoch = Epoch(2);
@@ -229,7 +231,11 @@ fn it_verifies_a_committed_receipt() {
 fn diff_of(ups: &[(SubstateId, SubstateValue)], downs: &[(SubstateId, u64)]) -> SubstateDiff {
     let mut diff = SubstateDiff::new();
     for (id, value) in ups {
-        diff.up(id.clone(), Substate::new(SubstateVersion::ZERO, value.clone()));
+        let version = downs
+            .iter()
+            .find(|(down_id, _)| down_id == id)
+            .map_or(SubstateVersion::ZERO, |(_, v)| SubstateVersion::new(v + 1));
+        diff.up(id.clone(), Substate::new(version, value.clone()));
     }
     for (id, version) in downs {
         diff.down(id.clone(), SubstateVersion::new(*version));
@@ -237,45 +243,151 @@ fn diff_of(ups: &[(SubstateId, SubstateValue)], downs: &[(SubstateId, u64)]) -> 
     diff
 }
 
-#[test]
-fn a_diff_matches_the_receipt_built_from_it() {
-    let transaction_id = TransactionId::new([9; 32]);
-    let diff = diff_of(&[tombstone(1), tombstone(2)], &[
-        (tombstone(3).0, 4),
-        (tombstone(1).0, 0),
-    ]);
-    let receipt = receipt(DiffSummary::from_diff(NETWORK, &diff, EPOCH));
-
-    // The diff the engine returns also ups the receipt itself.
-    let mut full_diff = diff.clone();
-    full_diff.up(
+fn with_receipt(mut diff: SubstateDiff, transaction_id: TransactionId, receipt: &TransactionReceipt) -> SubstateDiff {
+    diff.up(
         SubstateId::TransactionReceipt(transaction_id.into_receipt_address()),
         Substate::new(SubstateVersion::ZERO, receipt.clone()),
     );
+    diff
+}
+
+#[test]
+fn a_diff_matches_the_receipt_built_from_it() {
+    let transaction_id = TransactionId::new([9; 32]);
+    let mut diff = diff_of(&[tombstone(1), tombstone(2)], &[
+        (tombstone(3).0, 4),
+        (tombstone(1).0, 0),
+    ]);
+    let withdrawal = ValidatorFeeWithdrawal {
+        address: ValidatorFeePoolAddress::from_array([7; 32]),
+        amount: 250,
+    };
+    diff.set_once_fee_withdrawals(vec![withdrawal.clone()]);
+    let mut receipt = receipt(DiffSummary::from_diff(NETWORK, &diff, EPOCH));
+    receipt.fee_withdrawals = Box::new([withdrawal]);
+
+    // The diff the engine returns also ups the receipt itself.
+    let full_diff = with_receipt(diff, transaction_id, &receipt);
     check_diff_matches_receipt(NETWORK, transaction_id, &receipt, &full_diff).unwrap();
 }
 
 #[test]
+#[expect(clippy::too_many_lines)]
 fn a_diff_that_differs_from_the_receipt_is_rejected() {
     let transaction_id = TransactionId::new([9; 32]);
-    let diff = diff_of(&[tombstone(1)], &[(tombstone(3).0, 4)]);
-    let receipt = receipt(DiffSummary::from_diff(NETWORK, &diff, EPOCH));
+    let receipt_id = SubstateId::TransactionReceipt(transaction_id.into_receipt_address());
+    let raw_diff = diff_of(&[tombstone(1), tombstone(2)], &[
+        (tombstone(3).0, 4),
+        (tombstone(1).0, 0),
+    ]);
+    let verified_receipt = receipt(DiffSummary::from_diff(NETWORK, &raw_diff, EPOCH));
+    let base_diff = with_receipt(raw_diff.clone(), transaction_id, &verified_receipt);
+
+    let mut forged_v0_down = base_diff.clone();
+    forged_v0_down.down(tombstone(2).0, SubstateVersion::ZERO);
+
+    let mut missing_implied_down = SubstateDiff::new();
+    missing_implied_down.up(tombstone(1).0, Substate::new(SubstateVersion::new(1), tombstone(1).1));
+    missing_implied_down.up(tombstone(2).0, Substate::new(SubstateVersion::ZERO, tombstone(2).1));
+    missing_implied_down.down(tombstone(3).0, SubstateVersion::new(4));
+    let missing_implied_down = with_receipt(missing_implied_down, transaction_id, &verified_receipt);
+
+    let mut wrong_implied_down = missing_implied_down.clone();
+    wrong_implied_down.down(tombstone(1).0, SubstateVersion::new(2));
+
+    let mut forged_receipt_down = base_diff.clone();
+    forged_receipt_down.down(receipt_id.clone(), SubstateVersion::ZERO);
+
+    let mut tampered_receipt_up = raw_diff.clone();
+    tampered_receipt_up.up(
+        receipt_id.clone(),
+        Substate::new(SubstateVersion::ZERO, receipt(DiffSummary::default())),
+    );
+
+    let mut non_zero_receipt_up = raw_diff.clone();
+    non_zero_receipt_up.up(
+        receipt_id,
+        Substate::new(SubstateVersion::new(1), verified_receipt.clone()),
+    );
+
+    let mut duplicate_up = base_diff.clone();
+    duplicate_up.up(tombstone(2).0, Substate::new(SubstateVersion::ZERO, tombstone(2).1));
+
+    let mut duplicate_down = base_diff.clone();
+    duplicate_down.down(tombstone(3).0, SubstateVersion::new(4));
+
+    let mut mismatched_withdrawals = base_diff.clone();
+    mismatched_withdrawals.set_once_fee_withdrawals(vec![ValidatorFeeWithdrawal {
+        address: ValidatorFeePoolAddress::from_array([7; 32]),
+        amount: 100,
+    }]);
 
     let cases = [
         (
             "an extra up",
-            diff_of(&[tombstone(1), tombstone(2)], &[(tombstone(3).0, 4)]),
+            with_receipt(
+                diff_of(&[tombstone(1), tombstone(2), tombstone(4)], &[
+                    (tombstone(3).0, 4),
+                    (tombstone(1).0, 0),
+                ]),
+                transaction_id,
+                &verified_receipt,
+            ),
         ),
-        ("a missing up", diff_of(&[], &[(tombstone(3).0, 4)])),
+        (
+            "a missing up",
+            with_receipt(
+                diff_of(&[tombstone(1)], &[(tombstone(3).0, 4), (tombstone(1).0, 0)]),
+                transaction_id,
+                &verified_receipt,
+            ),
+        ),
         (
             "another value",
-            diff_of(&[(tombstone(1).0, tombstone(2).1)], &[(tombstone(3).0, 4)]),
+            with_receipt(
+                diff_of(&[(tombstone(1).0, tombstone(2).1), tombstone(2)], &[
+                    (tombstone(3).0, 4),
+                    (tombstone(1).0, 0),
+                ]),
+                transaction_id,
+                &verified_receipt,
+            ),
         ),
-        ("a missing down", diff_of(&[tombstone(1)], &[])),
-        ("another down version", diff_of(&[tombstone(1)], &[(tombstone(3).0, 5)])),
+        (
+            "a missing down",
+            with_receipt(
+                diff_of(&[tombstone(1), tombstone(2)], &[(tombstone(1).0, 0)]),
+                transaction_id,
+                &verified_receipt,
+            ),
+        ),
+        (
+            "another down version",
+            with_receipt(
+                diff_of(&[tombstone(1), tombstone(2)], &[
+                    (tombstone(3).0, 5),
+                    (tombstone(1).0, 0),
+                ]),
+                transaction_id,
+                &verified_receipt,
+            ),
+        ),
+        ("a missing receipt substate in ups", raw_diff),
+        ("a forged down of a newly created substate", forged_v0_down),
+        ("a missing implied down for an updated substate", missing_implied_down),
+        (
+            "a wrong implied down version for an updated substate",
+            wrong_implied_down,
+        ),
+        ("a forged down of the receipt substate", forged_receipt_down),
+        ("a tampered receipt substate in ups", tampered_receipt_up),
+        ("a non-zero receipt substate version in ups", non_zero_receipt_up),
+        ("a duplicate up", duplicate_up),
+        ("a duplicate down", duplicate_down),
+        ("mismatched validator fee withdrawals", mismatched_withdrawals),
     ];
     for (case, diff) in cases {
-        let err = check_diff_matches_receipt(NETWORK, transaction_id, &receipt, &diff).unwrap_err();
+        let err = check_diff_matches_receipt(NETWORK, transaction_id, &verified_receipt, &diff).unwrap_err();
         assert!(
             matches!(err, LightClientError::DiffDoesNotMatchReceipt { .. }),
             "{case}: {err}"
@@ -283,15 +395,20 @@ fn a_diff_that_differs_from_the_receipt_is_rejected() {
     }
 }
 
-/// A committed transaction's diff, the receipt it committed and its result, with an event and fees in both.
-fn committed(transaction_id: TransactionId) -> (SubstateDiff, TransactionReceipt, FinalizeResult) {
-    let diff = diff_of(&[tombstone(1)], &[(tombstone(3).0, 4)]);
-    let mut receipt = receipt(DiffSummary::from_diff(NETWORK, &diff, EPOCH));
+/// A transaction's diff, the receipt it committed with `outcome` and its result, with an event and fees in both.
+fn committed(
+    transaction_id: TransactionId,
+    outcome: FinalizeOutcome,
+) -> (SubstateDiff, TransactionReceipt, FinalizeResult) {
+    let raw_diff = diff_of(&[tombstone(1)], &[(tombstone(3).0, 4)]);
+    let mut receipt = receipt(DiffSummary::from_diff(NETWORK, &raw_diff, EPOCH));
+    receipt.outcome = outcome;
     receipt.events = Box::new([event("std.vault.deposit")]);
     receipt.fee_receipt = FeeReceipt::builder()
         .with_total_fee_payment(800)
         .with_total_fees_paid(500)
         .build();
+    let diff = with_receipt(raw_diff, transaction_id, &receipt);
     let result = FinalizeResult::new(
         Hash32::from_array(transaction_id.into_array()),
         vec![],
@@ -321,10 +438,10 @@ fn rejection() -> RejectReason {
 #[test]
 fn a_result_matches_the_receipt_committed_with_it() {
     let transaction_id = TransactionId::new([9; 32]);
-    let (diff, mut receipt, mut result) = committed(transaction_id);
+    let (_, receipt, result) = committed(transaction_id, FinalizeOutcome::Commit);
     check_result_matches_receipt(NETWORK, transaction_id, &receipt, &result).unwrap();
 
-    receipt.outcome = FinalizeOutcome::FeeIntentCommit;
+    let (diff, receipt, mut result) = committed(transaction_id, FinalizeOutcome::FeeIntentCommit);
     result.result = TransactionResult::AcceptFeeRejectRest(diff, rejection());
     check_result_matches_receipt(NETWORK, transaction_id, &receipt, &result).unwrap();
 }
@@ -332,7 +449,7 @@ fn a_result_matches_the_receipt_committed_with_it() {
 #[test]
 fn a_result_that_differs_from_the_receipt_is_rejected() {
     let transaction_id = TransactionId::new([9; 32]);
-    let (diff, receipt, result) = committed(transaction_id);
+    let (diff, receipt, result) = committed(transaction_id, FinalizeOutcome::Commit);
 
     type Change = fn(&mut FinalizeResult, &SubstateDiff);
     let cases: [(&str, Change); 6] = [
@@ -552,6 +669,7 @@ fn committed_with_values_json_does_not_carry_exactly(
         "topic".to_string(),
         metadata,
     )]);
+    let diff = with_receipt(diff, transaction_id, &receipt);
     let result = FinalizeResult::new(
         Hash32::from_array(transaction_id.into_array()),
         vec![],

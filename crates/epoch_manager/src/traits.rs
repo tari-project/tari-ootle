@@ -43,7 +43,7 @@ use tari_state_tree::ValidatorSetCommitteeProof;
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use tokio::sync::broadcast;
 
-use crate::{EpochManagerError, EpochManagerEvent, epoch_event_oracle::EpochEventOracle};
+use crate::{EpochManagerError, EpochManagerEvent, PendingActivation, epoch_event_oracle::EpochEventOracle};
 
 pub trait EpochManagerSpec: Send + 'static {
     type Addr: NodeAddressable + DerivableFromPublicKey + 'static;
@@ -248,6 +248,12 @@ pub trait EpochManagerReader: Send + Sync {
 
     /// The first epoch for which the network has validators.
     fn get_birthday_epoch(&self) -> impl Future<Output = Result<Option<Epoch>, EpochManagerError>> + Send;
+
+    /// The local validator's registration that activates after the current epoch, if the epoch event oracle has
+    /// announced one.
+    fn get_pending_activation(
+        &self,
+    ) -> impl Future<Output = Result<Option<PendingActivation>, EpochManagerError>> + Send;
 }
 
 pub trait LayerOneTransactionSubmitter {

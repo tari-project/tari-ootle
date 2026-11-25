@@ -24,12 +24,13 @@
 use serde::{Deserialize, Serialize};
 use tari_consensus_types::Decision;
 use tari_crypto::ristretto::RistrettoSecretKey;
-use tari_engine_types::substate::SubstateId;
-use tari_ootle_common_types::{NumPreshards, SubstateVersion, VersionedSubstateId};
-use tari_ootle_storage::consensus_models::{Command, Evidence, LeaderFee, MultiShardAtom};
+use tari_engine_types::{fees::ExhaustBurnRate, substate::SubstateId};
+use tari_ootle_common_types::{Epoch, NumPreshards, SubstateVersion, VersionedSubstateId};
+use tari_ootle_storage::consensus_models::{Command, Evidence, LeaderFee, LockedEpoch, MultiShardAtom};
 use tari_ootle_transaction::{Transaction, args};
 use tari_template_lib::types::{
     ComponentAddress,
+    Hash32,
     ObjectKey,
     TransactionReceiptAddress,
     VaultId,
@@ -156,6 +157,11 @@ fn command_for(transaction: &Transaction, num_committees: u32) -> Command {
             exhaust_burn: 5,
         }),
         fee_intent_only: false,
+        locked_epoch: LockedEpoch::new(
+            Epoch(1),
+            Hash32::from_array([0x33; 32]),
+            ExhaustBurnRate::try_new(500).expect("500 bps is below the ceiling"),
+        ),
     })
 }
 

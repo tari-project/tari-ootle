@@ -29,7 +29,9 @@ use tari_template_lib::{
         ComponentAddress,
         Metadata,
         NonFungibleId,
+        OwnerRule,
         TemplateAddress,
+        access_rules::{AccessRule, ComponentAccessRules},
         bytes::Bytes,
         constants::{NFT_FAUCET_COMPONENT_ADDRESS, NFT_FAUCET_RESOURCE_ADDRESS},
     },
@@ -320,6 +322,76 @@ fn max_transaction_output_bytes_limit_applies_to_the_fee_intent() {
     assert_reject_reason(result.expect_failure(), &expected_reason);
 }
 
+/// A ticket seller, whose `mint_more_tickets` mints one non-fungible substate per ticket.
+fn ticket_seller(test: &mut TemplateTest) -> ComponentAddress {
+    let template = test.get_template_address("TicketSeller");
+    test.execute_expect_success(
+        Transaction::builder_localnet(Epoch(1))
+            .call_function(template, "new", args![1u32, Amount::from(1u64), "event".to_string()])
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
+    test.return_values()[0].decoded().unwrap()
+}
+
+/// A minted non-fungible is a substate that draws no id from the object counter, so the cap on the substates a
+/// transaction persists is applied to what it persists rather than to the ids it allocates.
+#[test]
+fn max_substate_outputs_limit_applies_to_minted_non_fungibles() {
+    let mut test = TemplateTest::new(CRATE_PATH, vec!["tests/templates/nft/tickets"]);
+    let seller = ticket_seller(&mut test);
+    let max = limits::ENGINE_LIMITS.max_substate_outputs as u32;
+    let key = test.secret_key().clone();
+    let mint = |tickets: [u32; 2]| {
+        tickets
+            .into_iter()
+            .fold(Transaction::builder_localnet(Epoch(1)), |builder, count| {
+                builder.call_method(seller, "mint_more_tickets", args![count])
+            })
+            .build_and_seal(&key)
+    };
+
+    // The seller and its vault are written too.
+    test.execute_expect_success(mint([max / 2, max / 2 - 2]), vec![]);
+
+    let reason = test.execute_expect_failure(mint([max / 2, max / 2 + 1]), vec![]);
+    assert_reject_reason(
+        reason,
+        format!(
+            "exceeding the maximum of {} per transaction",
+            limits::ENGINE_LIMITS.max_substate_outputs
+        ),
+    );
+}
+
+/// The fee checkpoint is what commits when the main intent fails, so it is held to the same substate count.
+#[test]
+fn max_substate_outputs_limit_applies_to_the_fee_intent() {
+    let mut test = TemplateTest::new(CRATE_PATH, vec!["tests/templates/nft/tickets"]);
+    let seller = ticket_seller(&mut test);
+    let max = limits::ENGINE_LIMITS.max_substate_outputs as u32;
+
+    let transaction = Transaction::builder_localnet(Epoch(1))
+        .with_fee_instructions_builder(|builder| {
+            builder
+                .call_method(seller, "mint_more_tickets", args![max / 2])
+                .call_method(seller, "mint_more_tickets", args![max / 2 + 1])
+        })
+        .build_and_seal(test.secret_key());
+    let result = test.try_execute(transaction, vec![]).unwrap();
+    assert!(
+        result.finalize.result.is_reject(),
+        "an over-cap fee intent must commit nothing"
+    );
+    assert_reject_reason(
+        result.expect_failure(),
+        format!(
+            "exceeding the maximum of {} per transaction",
+            limits::ENGINE_LIMITS.max_substate_outputs
+        ),
+    );
+}
+
 /// The bytes `PushItToTheLimit::return_items` returns for `len`, and the CBOR items they hold.
 fn returned_items(len: u32) -> (u64, u64) {
     let raw = tari_bor::encode(&vec![0u32; len as usize]).unwrap();
@@ -329,6 +401,11 @@ fn returned_items(len: u32) -> (u64, u64) {
 fn return_value_charge(len: u32) -> u64 {
     let (bytes, items) = returned_items(len);
     limits::return_value_points(bytes, items)
+}
+
+/// The charge for decoding a `u32` instruction argument of `value`, whose encoding widens with it.
+fn literal_arg_charge(value: u32) -> u64 {
+    limits::engine_arg_points(tari_bor::encode(&value).unwrap().len() as u64, 1)
 }
 
 fn native_points_for(test: &mut TemplateTest, function: &str, args: Vec<NamedArg>) -> u64 {
@@ -355,7 +432,7 @@ fn a_return_value_is_charged_per_item() {
 
     assert_eq!(
         large_points - small_points,
-        return_value_charge(large) - return_value_charge(small),
+        return_value_charge(large) + literal_arg_charge(large) - return_value_charge(small) - literal_arg_charge(small),
         "returning {large} items rather than {small} must cost exactly the difference in return-value charges"
     );
 }
@@ -372,12 +449,12 @@ fn a_nested_return_value_is_charged_per_item() {
     let large_points = native_points_for(&mut test, "return_items_nested", args![template, large]);
 
     // The outer call passes `len` to the engine and returns the count, and both encodings widen
-    // with it. The engine reads `len` three times: in the engine call's argument, in the call's
-    // arguments nested in it, and as the callee's argument nested in those. The callee's value then
-    // reaches the caller as the engine call's response.
+    // with it. The engine reads `len` four times: as the instruction's argument, in the engine
+    // call's argument, in the call's arguments nested in it, and as the callee's argument nested in
+    // those. The callee's value then reaches the caller as the engine call's response.
     let width = |len: u32| tari_bor::encode(&len).unwrap().len() as u64;
     let count_charge = |len: u32| limits::return_value_points(width(len), 1);
-    let call_arg_charge = |len: u32| 3 * limits::engine_arg_points(width(len), 0);
+    let call_arg_charge = |len: u32| 4 * limits::engine_arg_points(width(len), 0);
     let response_charge = |len: u32| {
         let (bytes, items) = returned_items(len);
         limits::engine_response_points(bytes, items)
@@ -394,8 +471,9 @@ fn a_nested_return_value_is_charged_per_item() {
     );
 }
 
-/// A return value priced above what the transaction can cover fails it out of compute, with the
-/// return-value charge as the points it required. Run in the fee intent, whose flat credit is the
+/// A return value holding more items than the transaction can pay for fails it out of compute. The
+/// engine reads no more of it than the transaction can pay for, and is paid for what it read: the
+/// credit is spent to within an item's price. Run in the fee intent, whose flat credit is the
 /// allowance.
 #[test]
 fn an_unaffordable_return_value_fails_out_of_compute() {
@@ -407,9 +485,8 @@ fn an_unaffordable_return_value_fails_out_of_compute() {
     test.set_fee_table(fee_table);
     test.enable_fees();
 
-    let mut len =
-        u32::try_from(limits::FREE_COMPUTE_GRACE_POINTS / limits::NativeExecutionPoints::PER_RETURN_VALUE_ITEM)
-            .unwrap();
+    let per_item = limits::NativeExecutionPoints::PER_RETURN_VALUE_ITEM;
+    let mut len = u32::try_from(limits::FREE_COMPUTE_GRACE_POINTS / per_item).unwrap();
     while return_value_charge(len) <= limits::FREE_COMPUTE_GRACE_POINTS {
         len += 1;
     }
@@ -427,8 +504,23 @@ fn an_unaffordable_return_value_fails_out_of_compute() {
     );
 
     assert_reject_reason(
-        reason,
-        format!("requiring {} points exceeds the fee intent's", return_value_charge(len)),
+        reason.clone(),
+        format!(
+            "requiring {} points exceeds the fee intent's",
+            limits::return_value_points(0, 1)
+        ),
+    );
+    let message = reason.to_string();
+    let consumed: u64 = message
+        .split("compute credit: ")
+        .nth(1)
+        .and_then(|rest| rest.split(' ').next())
+        .and_then(|consumed| consumed.parse().ok())
+        .unwrap_or_else(|| panic!("no consumed points in {message}"));
+    assert!(
+        consumed > limits::FREE_COMPUTE_GRACE_POINTS - per_item,
+        "the items read must be paid for: {consumed} of {} consumed",
+        limits::FREE_COMPUTE_GRACE_POINTS
     );
 }
 
@@ -474,7 +566,7 @@ fn an_engine_call_argument_is_charged_per_byte_and_item() {
     };
     assert_eq!(
         large_points - small_points,
-        charge(large) - charge(small),
+        charge(large) + literal_arg_charge(large) - charge(small) - literal_arg_charge(small),
         "an argument of {large} items rather than {small} must cost exactly the difference in engine argument charges"
     );
 }
@@ -671,7 +763,7 @@ fn open_component_with_items(test: &mut TemplateTest, items: u32) -> ComponentAd
     let component = component_with_state(test, 4, items);
     test.execute_expect_success(
         Transaction::builder_localnet(Epoch(1))
-            .call_method(component, "allow_all_methods", args![])
+            .set_component_access_rules(component, ComponentAccessRules::new().default(AccessRule::AllowAll))
             .build_and_seal(test.secret_key()),
         vec![],
     );
@@ -821,7 +913,7 @@ fn an_engine_call_is_charged_a_flat_cost() {
         limits::engine_response_points(response.len() as u64, tari_bor::count_data_items(&response).unwrap());
     assert_eq!(
         extra_points,
-        u64::from(calls) * per_call,
+        u64::from(calls) * per_call + literal_arg_charge(1 + calls) - literal_arg_charge(1),
         "{calls} engine calls must each be charged the flat cost, their argument and their response"
     );
 }
@@ -882,21 +974,41 @@ fn seed_state_failing_validation(test: &mut TemplateTest, component: ComponentAd
 
 /// Access rules and the owner rule live outside a component's state, so changing them leaves the
 /// state as it is: it is neither indexed nor validated again, however large it is. Shown on a state
-/// that would fail validation.
+/// that would fail validation, through the instructions and through the component's own code.
 #[test]
 fn changing_access_or_owner_rules_leaves_the_state_alone() {
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
     let component = component_with_state(&mut test, 4, 0);
     seed_state_failing_validation(&mut test, component);
 
-    for method in ["allow_all_methods", "disown"] {
+    let builder = || Transaction::builder_localnet(Epoch(1));
+    for transaction in [
+        builder().set_component_access_rules(component, ComponentAccessRules::new().default(AccessRule::AllowAll)),
+        builder().set_component_owner_rule(component, OwnerRule::OwnedBySigner),
+        builder().call_method(component, "allow_all_methods", args![]),
+        builder().call_method(component, "disown", args![]),
+    ] {
+        test.execute_expect_success(transaction.build_and_seal(test.secret_key()), vec![]);
+    }
+}
+
+/// A rule-change instruction never reads the component's state, so it costs the same whatever the state holds.
+#[test]
+fn a_rule_change_instruction_is_not_charged_for_the_state() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let small = component_with_state(&mut test, 4, 0);
+    let large = component_with_state(&mut test, 4, 10_000);
+
+    let mut native_points = |component: ComponentAddress| {
         test.execute_expect_success(
             Transaction::builder_localnet(Epoch(1))
-                .call_method(component, method, args![])
+                .set_component_access_rules(component, ComponentAccessRules::new().default(AccessRule::AllowAll))
                 .build_and_seal(test.secret_key()),
             vec![],
-        );
-    }
+        )
+        .native_execution_points
+    };
+    assert_eq!(native_points(small), native_points(large));
 }
 
 /// Withdraws all `count` NFT faucet tokens `account` holds and deposits them back.

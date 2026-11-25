@@ -12,14 +12,15 @@ import { shortenString } from "../VN/Components/helpers";
 import ShardCell from "./ShardCell";
 import Sparkline from "./Sparkline";
 import {
-  MapMode,
   formatAge,
   formatDuration,
   formatRate,
   formatShardGroup,
+  MapMode,
   phaseColour,
   phaseLabel,
   recentRate,
+  VersionSpread,
 } from "./model";
 
 interface Props {
@@ -31,6 +32,7 @@ interface Props {
   bucketSecs: number;
   mode: MapMode;
   maxActivity: number;
+  spread: VersionSpread | null;
   nowSec: number;
   selected: number | null;
   onSelect: (shard: number) => void;
@@ -46,6 +48,7 @@ export default function GroupLane({
   bucketSecs,
   mode,
   maxActivity,
+  spread,
   nowSec,
   selected,
   onSelect,
@@ -64,6 +67,7 @@ export default function GroupLane({
       shard={shard}
       mode={mode}
       maxActivity={maxActivity}
+      spread={spread}
       nowSec={nowSec}
       selected={selected === shard.shard}
       onSelect={onSelect}

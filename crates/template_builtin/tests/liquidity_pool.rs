@@ -55,7 +55,7 @@ fn initial_contribution_and_redeem() {
             .call_method(user1, "deposit", args![Workspace("contribution.1")])
             .call_method(user1, "deposit", args![Workspace("contribution.2")])
             .finish()
-            .add_signer(&test.to_public_key_bytes(), &user1_secret)
+            .authorize(&test.to_public_key_bytes(), [&user1_secret])
             .seal(test.secret_key()),
         vec![],
     );
@@ -109,6 +109,80 @@ fn initial_contribution_and_redeem() {
     let stablecoin_vault = user_account.get_vault_by_resource(&faucet_resource).unwrap();
     let stablecoin_coins = store.get_vault(&stablecoin_vault.vault_id()).unwrap();
     assert!(stablecoin_coins.balance() >= 2000);
+}
+
+#[test]
+fn contribute_accepts_buckets_in_reverse_order() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let template_address = test.get_template_address(TEMPLATE_NAME);
+
+    let (faucet_component, faucet_resource) = create_test_faucet_component(&mut test, 1_000_000_000_000u64);
+    let (user1, _user1_proof, user1_secret) = test.create_funded_account();
+
+    // Pool is created with resource_a = TARI_TOKEN and resource_b = faucet_resource,
+    // while `contribute` is called with `(faucet_coins, xtr_coins)` in reverse order.
+    test.execute_expect_success(
+        Transaction::builder_localnet(Epoch(1))
+            .allocate_component_address("pool")
+            .call_function(template_address, "create", args![
+                OwnerRule::OwnedBySigner,
+                AccessRule::AllowAll,
+                TARI_TOKEN,
+                faucet_resource,
+                metadata!["name" => "XTR-Stablecoin Liquidity Pool"],
+                Workspace("pool"),
+            ])
+            .call_method(faucet_component, "take_free_coins_custom", args![2000])
+            .put_last_instruction_output_on_workspace("faucet_coins")
+            .call_method(user1, "withdraw", args![TARI_TOKEN, 1000])
+            .put_last_instruction_output_on_workspace("xtr_coins")
+            .call_method("pool", "contribute", args![
+                Workspace("faucet_coins"),
+                Workspace("xtr_coins")
+            ])
+            .put_last_instruction_output_on_workspace("contribution")
+            .call_method(user1, "deposit", args![Workspace("contribution.0")])
+            .call_method(user1, "deposit", args![Workspace("contribution.1")])
+            .call_method(user1, "deposit", args![Workspace("contribution.2")])
+            .finish()
+            .authorize(&test.to_public_key_bytes(), [&user1_secret])
+            .seal(test.secret_key()),
+        vec![],
+    );
+
+    let (pool_addr, _) = test
+        .read_only_state_store()
+        .get_components_by_template_address(template_address)
+        .unwrap()
+        .pop()
+        .unwrap();
+    let state = read_pool_state(&test, pool_addr, faucet_resource);
+    assert_eq!(state.reserve_tari, 1000);
+    assert_eq!(state.reserve_other, 2000);
+
+    // Second contribution also in reverse order `(faucet_coins, xtr_coins)`.
+    test.execute_expect_success(
+        Transaction::builder_localnet(Epoch(1))
+            .call_method(faucet_component, "take_free_coins_custom", args![1000])
+            .put_last_instruction_output_on_workspace("faucet_coins")
+            .call_method(user1, "withdraw", args![TARI_TOKEN, 500])
+            .put_last_instruction_output_on_workspace("xtr_coins")
+            .call_method(pool_addr, "contribute", args![
+                Workspace("faucet_coins"),
+                Workspace("xtr_coins")
+            ])
+            .put_last_instruction_output_on_workspace("contribution")
+            .call_method(user1, "deposit", args![Workspace("contribution.0")])
+            .call_method(user1, "deposit", args![Workspace("contribution.1")])
+            .call_method(user1, "deposit", args![Workspace("contribution.2")])
+            .finish()
+            .seal(&user1_secret),
+        vec![],
+    );
+
+    let after = read_pool_state(&test, pool_addr, faucet_resource);
+    assert_eq!(after.reserve_tari, 1500);
+    assert_eq!(after.reserve_other, 3000);
 }
 
 #[test]
@@ -250,7 +324,7 @@ fn second_contribution_and_partial_redeem() {
             .call_method(user1, "deposit", args![Workspace("contribution.1")])
             .call_method(user1, "deposit", args![Workspace("contribution.2")])
             .finish()
-            .add_signer(&test.to_public_key_bytes(), &user1_secret)
+            .authorize(&test.to_public_key_bytes(), [&user1_secret])
             .seal(test.secret_key()),
         vec![],
     );
@@ -400,7 +474,7 @@ fn contribute_to_thin_pool(tari: u64, other: u64) -> (PoolState, PoolState) {
             .call_method(user1, "deposit", args![Workspace("contribution.1")])
             .call_method(user1, "deposit", args![Workspace("contribution.2")])
             .finish()
-            .add_signer(&test.to_public_key_bytes(), &user1_secret)
+            .authorize(&test.to_public_key_bytes(), [&user1_secret])
             .seal(test.secret_key()),
         vec![],
     );
@@ -710,7 +784,7 @@ fn basic_constant_product_swap() {
             .put_last_instruction_output_on_workspace("user2_stablecoin")
             .call_method(user2, "deposit", args![Workspace("user2_stablecoin")])
             .finish()
-            .add_signer(&test.to_public_key_bytes(), &user1_secret)
+            .authorize(&test.to_public_key_bytes(), [&user1_secret])
             .seal(test.secret_key()),
         vec![],
     );

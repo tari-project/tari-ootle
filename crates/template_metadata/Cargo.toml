@@ -1,7 +1,7 @@
 [package]
 name = "tari_ootle_template_metadata"
 description = "Template metadata types, serialization, and hashing for Tari Ootle templates"
-version = "0.17.0"
+version = "0.21.0"
 edition.workspace = true
 authors.workspace = true
 repository.workspace = true
@@ -10,11 +10,10 @@ license.workspace = true
 [dependencies]
 tari_bor = { workspace = true, features = ["std"] }
 tari_template_lib_types = { workspace = true, features = ["serde"] }
-minicbor = { workspace = true, default-features = false, features = ["alloc", "derive"] }
+minicbor = { workspace = true, default-features = false, features = ["std", "derive"] }
 
-borsh = { workspace = true, optional = true }
+borsh = { workspace = true, optional = true, features = ["std"] }
 cargo_toml = "0.22"
-gix-hash = { workspace = true }
 hex = { workspace = true }
 multihash = { version = "0.19.4" }
 serde = { workspace = true, features = ["derive"] }
@@ -28,7 +27,7 @@ ts-rs = { workspace = true, optional = true }
 default = []
 borsh = ["dep:borsh"]
 json = ["dep:serde_json"]
-ts = ["ts-rs"]
+ts = ["ts-rs", "tari_template_lib_types/ts"]
 
 [dev-dependencies]
 serde_json = { workspace = true }

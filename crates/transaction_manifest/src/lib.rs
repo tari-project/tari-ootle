@@ -24,7 +24,7 @@ use std::{collections::HashMap, str::FromStr};
 
 use proc_macro2::{TokenStream, TokenTree};
 use syn::parse2;
-use tari_ootle_transaction::{Blob, Blobs, Instruction, InstructionLimitTracker};
+use tari_ootle_transaction::{Blob, Blobs, Instruction, InstructionLimitTracker, MAX_TRANSACTION_INSTRUCTIONS};
 use tari_template_lib_types::TemplateAddress;
 
 use self::ast::ManifestAst;
@@ -66,14 +66,21 @@ pub fn parse_manifest(
     check_group_depth(&tokens)?;
     let ast = parse2::<ManifestAst>(tokens)?;
     let instructions = ManifestInstructionGenerator::new(globals, templates, blob_inputs).generate_instructions(ast)?;
-    check_instruction_limits(&instructions.instructions)?;
-    check_instruction_limits(&instructions.fee_instructions)?;
+    check_instruction_limits(&instructions)?;
     Ok(instructions)
 }
 
-fn check_instruction_limits(instructions: &[Instruction]) -> Result<(), ManifestError> {
+fn check_instruction_limits(instructions: &ManifestInstructions) -> Result<(), ManifestError> {
+    let count = instructions.fee_instructions.len() + instructions.instructions.len();
+    if count > MAX_TRANSACTION_INSTRUCTIONS {
+        return Err(ManifestError::InvalidInstruction {
+            reason: format!(
+                "manifest generates {count} instructions, but the maximum allowed is {MAX_TRANSACTION_INSTRUCTIONS}"
+            ),
+        });
+    }
     let mut limits = InstructionLimitTracker::new();
-    for instruction in instructions {
+    for instruction in instructions.fee_instructions.iter().chain(&instructions.instructions) {
         limits
             .add(instruction)
             .map_err(|e| ManifestError::InvalidInstruction { reason: e.to_string() })?;
@@ -144,14 +151,17 @@ mod size_cap_tests {
             .map(|i| format!("m{i} = {per_method}"))
             .collect::<Vec<_>>()
             .join(", ");
-        let one = format!("fn main() {{ let c = new_component_addr!(); set_access_rules!(c, {methods}); }}");
-        assert!(parse_manifest(&one, HashMap::new(), Default::default(), Default::default()).is_ok());
-
-        let two = format!(
-            "fn main() {{ let c = new_component_addr!(); set_access_rules!(c, {methods}); set_access_rules!(c, \
-             {methods}); }}"
+        let at_limit = format!(
+            "fn fee_main() {{ let c = new_component_addr!(); set_access_rules!(c, {methods}); }} \
+             fn main() {{ let c = new_component_addr!(); set_access_rules!(c, {methods}); }}"
         );
-        let res = parse_manifest(&two, HashMap::new(), Default::default(), Default::default());
+        assert!(parse_manifest(&at_limit, HashMap::new(), Default::default(), Default::default()).is_ok());
+
+        let over_limit = format!(
+            "fn fee_main() {{ let c = new_component_addr!(); set_access_rules!(c, {methods}); }} \
+             fn main() {{ let c = new_component_addr!(); set_access_rules!(c, {methods}, extra = allow_all); }}"
+        );
+        let res = parse_manifest(&over_limit, HashMap::new(), Default::default(), Default::default());
         assert!(matches!(res, Err(ManifestError::InvalidInstruction { reason })
             if reason.contains("nodes in total")));
     }

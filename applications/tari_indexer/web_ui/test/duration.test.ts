@@ -25,4 +25,11 @@ describe("displayDuration", () => {
     assert.equal(displayDuration({ secs: 0, nanos: 2_500 }), "2.50µs");
     assert.equal(displayDuration({ secs: 0, nanos: 40 }), "40ns");
   });
+
+  it("switches sub-second units at the boundary instead of rounding up to 1000.00", () => {
+    assert.equal(displayDuration({ secs: 0, nanos: 1_000 }), "1.00µs");
+    assert.equal(displayDuration({ secs: 0, nanos: 999_999 }), "999.99µs");
+    assert.equal(displayDuration({ secs: 0, nanos: 1_000_000 }), "1.00ms");
+    assert.equal(displayDuration({ secs: 0, nanos: 999_995_000 }), "999.99ms");
+  });
 });

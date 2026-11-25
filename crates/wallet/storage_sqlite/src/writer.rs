@@ -177,6 +177,62 @@ impl<'a> WriteTransaction<'a> {
         Ok(())
     }
 
+    /// Confirms the unconfirmed stealth outputs in `ids` minted under `lock_id`, including those later locked for
+    /// spend within the same lock (e.g. a fee-intent change output whose main-intent spend did not commit).
+    fn stealth_outputs_confirm_by_lock_id(
+        &mut self,
+        lock_id: WalletLockId,
+        ids: &[i32],
+    ) -> Result<(), WalletStorageError> {
+        use crate::schema::stealth_outputs;
+
+        if ids.is_empty() {
+            return Ok(());
+        }
+        diesel::update(stealth_outputs::table)
+            .filter(stealth_outputs::lock_id.eq(lock_id))
+            .filter(stealth_outputs::is_on_chain.eq(false))
+            .filter(stealth_outputs::status.eq_any([
+                OutputStatus::LockedUnconfirmed.as_key_str(),
+                OutputStatus::LockedForSpend.as_key_str(),
+            ]))
+            .filter(stealth_outputs::id.eq_any(ids))
+            .set((
+                stealth_outputs::status.eq(OutputStatus::Unspent.as_key_str()),
+                stealth_outputs::lock_id.eq::<Option<i32>>(None),
+                stealth_outputs::locked_at.eq::<Option<PrimitiveDateTime>>(None),
+                stealth_outputs::is_on_chain.eq(true),
+            ))
+            .execute(self.connection())
+            .map_err(|e| WalletStorageError::general("stealth_outputs_confirm_by_lock_id", e))?;
+        Ok(())
+    }
+
+    /// Marks the stealth outputs in `ids` locked for spend by `lock_id` as spent.
+    fn stealth_outputs_spend_by_lock_id(
+        &mut self,
+        lock_id: WalletLockId,
+        ids: &[i32],
+    ) -> Result<(), WalletStorageError> {
+        use crate::schema::stealth_outputs;
+
+        if ids.is_empty() {
+            return Ok(());
+        }
+        diesel::update(stealth_outputs::table)
+            .filter(stealth_outputs::lock_id.eq(lock_id))
+            .filter(stealth_outputs::status.eq(OutputStatus::LockedForSpend.as_key_str()))
+            .filter(stealth_outputs::id.eq_any(ids))
+            .set((
+                stealth_outputs::status.eq(OutputStatus::Spent.as_key_str()),
+                stealth_outputs::lock_id.eq::<Option<i32>>(None),
+                stealth_outputs::locked_at.eq::<Option<PrimitiveDateTime>>(None),
+            ))
+            .execute(self.connection())
+            .map_err(|e| WalletStorageError::general("stealth_outputs_spend_by_lock_id", e))?;
+        Ok(())
+    }
+
     /// Finalizes the stealth outputs held by `lock_id` against the transaction's diff and returns the
     /// `(account_id, resource_address)` pairs whose unspent balance the finalize changed.
     fn stealth_outputs_finalize_by_lock_id(
@@ -245,41 +301,8 @@ impl<'a> WriteTransaction<'a> {
             }
         }
 
-        if !to_confirm.is_empty() {
-            // Confirm unconfirmed stealth outputs minted under this lock, including those later locked for spend
-            // within the same lock (e.g. a fee-intent change output whose main-intent spend did not commit).
-            diesel::update(stealth_outputs::table)
-                .filter(stealth_outputs::lock_id.eq(lock_id))
-                .filter(stealth_outputs::is_on_chain.eq(false))
-                .filter(stealth_outputs::status.eq_any([
-                    OutputStatus::LockedUnconfirmed.as_key_str(),
-                    OutputStatus::LockedForSpend.as_key_str(),
-                ]))
-                .filter(stealth_outputs::id.eq_any(to_confirm))
-                .set((
-                    stealth_outputs::status.eq(OutputStatus::Unspent.as_key_str()),
-                    stealth_outputs::lock_id.eq::<Option<i32>>(None),
-                    stealth_outputs::locked_at.eq::<Option<PrimitiveDateTime>>(None),
-                    stealth_outputs::is_on_chain.eq(true),
-                ))
-                .execute(self.connection())
-                .map_err(|e| WalletStorageError::general(OPERATION, e))?;
-        }
-
-        if !to_spend.is_empty() {
-            // Mark locked outputs as spent
-            diesel::update(stealth_outputs::table)
-                .filter(stealth_outputs::lock_id.eq(lock_id))
-                .filter(stealth_outputs::status.eq(OutputStatus::LockedForSpend.as_key_str()))
-                .filter(stealth_outputs::id.eq_any(to_spend))
-                .set((
-                    stealth_outputs::status.eq(OutputStatus::Spent.as_key_str()),
-                    stealth_outputs::lock_id.eq::<Option<i32>>(None),
-                    stealth_outputs::locked_at.eq::<Option<PrimitiveDateTime>>(None),
-                ))
-                .execute(self.connection())
-                .map_err(|e| WalletStorageError::general(OPERATION, e))?;
-        }
+        self.stealth_outputs_confirm_by_lock_id(lock_id, &to_confirm)?;
+        self.stealth_outputs_spend_by_lock_id(lock_id, &to_spend)?;
 
         for address in &to_burn {
             self.stealth_outputs_mark_as_burnt(address)?;

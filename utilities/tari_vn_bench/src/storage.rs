@@ -176,9 +176,6 @@ fn filesystem_for_in_mounts(target: &Path, mounts: &str) -> Option<String> {
         let (Some(_device), Some(mount_point), Some(fs_type)) = (fields.next(), fields.next(), fields.next()) else {
             continue;
         };
-        if fs_type == "rootfs" {
-            continue;
-        }
         let mount_path = PathBuf::from(unescape_mount_path(mount_point));
         if target.starts_with(&mount_path) {
             let depth = mount_path.components().count();
@@ -224,6 +221,15 @@ tmpfs /var/lib/tari tmpfs rw,nosuid 0 0
         assert_eq!(
             filesystem_for_in_mounts(Path::new("/mnt/tari data/vn"), mounts).as_deref(),
             Some("ext4")
+        );
+    }
+
+    #[test]
+    fn filesystem_for_in_mounts_reports_rootfs_when_it_is_the_only_root() {
+        let mounts = "rootfs / rootfs rw 0 0\n";
+        assert_eq!(
+            filesystem_for_in_mounts(Path::new("/var/lib/tari"), mounts).as_deref(),
+            Some("rootfs")
         );
     }
 }

@@ -179,22 +179,19 @@ mod tests {
     #[test]
     fn parse_physical_cpus_counts_across_sockets_and_smt_siblings() {
         let single_socket_smt = "\
-processor\t: 0\nphysical id\t: 0\ncore id\t\t: 0\ncpu cores\t: 2\n\n\
-processor\t: 1\nphysical id\t: 0\ncore id\t\t: 1\ncpu cores\t: 2\n\n\
-processor\t: 2\nphysical id\t: 0\ncore id\t\t: 0\ncpu cores\t: 2\n\n\
-processor\t: 3\nphysical id\t: 0\ncore id\t\t: 1\ncpu cores\t: 2\n";
+processor\t: 0\nphysical id\t: 0\ncore id\t\t: 0\ncpu cores\t: 2\n\nprocessor\t: 1\nphysical id\t: 0\ncore id\t\t: \
+                                 1\ncpu cores\t: 2\n\nprocessor\t: 2\nphysical id\t: 0\ncore id\t\t: 0\ncpu cores\t: \
+                                 2\n\nprocessor\t: 3\nphysical id\t: 0\ncore id\t\t: 1\ncpu cores\t: 2\n";
         assert_eq!(parse_physical_cpus(single_socket_smt), Some(2));
 
         let multi_socket_vm = "\
-processor\t: 0\nphysical id\t: 0\ncore id\t\t: 0\ncpu cores\t: 1\n\n\
-processor\t: 1\nphysical id\t: 1\ncore id\t\t: 0\ncpu cores\t: 1\n\n\
-processor\t: 2\nphysical id\t: 2\ncore id\t\t: 0\ncpu cores\t: 1\n\n\
-processor\t: 3\nphysical id\t: 3\ncore id\t\t: 0\ncpu cores\t: 1\n";
+processor\t: 0\nphysical id\t: 0\ncore id\t\t: 0\ncpu cores\t: 1\n\nprocessor\t: 1\nphysical id\t: 1\ncore id\t\t: \
+                               0\ncpu cores\t: 1\n\nprocessor\t: 2\nphysical id\t: 2\ncore id\t\t: 0\ncpu cores\t: \
+                               1\n\nprocessor\t: 3\nphysical id\t: 3\ncore id\t\t: 0\ncpu cores\t: 1\n";
         assert_eq!(parse_physical_cpus(multi_socket_vm), Some(4));
 
         let dual_socket_without_core_id = "\
-processor\t: 0\nphysical id\t: 0\ncpu cores\t: 8\n\n\
-processor\t: 8\nphysical id\t: 1\ncpu cores\t: 8\n";
+processor\t: 0\nphysical id\t: 0\ncpu cores\t: 8\n\nprocessor\t: 8\nphysical id\t: 1\ncpu cores\t: 8\n";
         assert_eq!(parse_physical_cpus(dual_socket_without_core_id), Some(16));
     }
 }

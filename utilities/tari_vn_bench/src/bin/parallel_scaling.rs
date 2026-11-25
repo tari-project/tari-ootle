@@ -148,7 +148,7 @@ fn run_workload(
     );
 
     let mut base_tx_per_sec = 0.0;
-    for &k in thread_counts {
+    for (i, &k) in thread_counts.iter().enumerate() {
         let load_before = loadavg();
         let mut best_secs = f64::MAX;
         for _ in 0..REPEATS {
@@ -156,7 +156,7 @@ fn run_workload(
             best_secs = best_secs.min(secs);
         }
         let tx_per_sec = transactions.len() as f64 / best_secs;
-        if k == thread_counts[0] {
+        if i == 0 {
             base_tx_per_sec = tx_per_sec;
         }
         let speedup = tx_per_sec / base_tx_per_sec;
@@ -215,7 +215,7 @@ fn run_instantiate_scaling(test: &TemplateTest, thread_counts: &[usize]) -> anyh
     );
 
     let mut base_per_sec = 0.0;
-    for &k in thread_counts {
+    for (i, &k) in thread_counts.iter().enumerate() {
         let load_before = loadavg();
         let mut best_secs = f64::MAX;
         for _ in 0..REPEATS {
@@ -242,7 +242,7 @@ fn run_instantiate_scaling(test: &TemplateTest, thread_counts: &[usize]) -> anyh
             best_secs = best_secs.min(started.elapsed().as_secs_f64());
         }
         let per_sec = COUNT as f64 / best_secs;
-        if k == thread_counts[0] {
+        if i == 0 {
             base_per_sec = per_sec;
         }
         let speedup = per_sec / base_per_sec;

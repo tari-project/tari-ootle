@@ -51,21 +51,26 @@ pub fn read_chunk(path: &Path, end: Option<u64>, max_bytes: Option<u64>) -> io::
         });
     }
 
-    let window = map_window(&file, start, end)?;
-    let mut bytes = &window[..];
+    let map_start = start.saturating_sub(3);
+    let window = map_window(&file, map_start, end)?;
+    let lookback = (start - map_start) as usize;
+    let mut bytes = &window[lookback..];
 
     // A window that does not begin at the start of the file almost certainly begins mid-line. Trimming that
     // fragment is only worth doing while it leaves a line behind: a line longer than the window has no interior
     // boundary, and returning nothing there would leave `start` at `end`, so the caller would ask for the same
     // empty window forever. One rendered partial line is the cheaper end of that trade.
-    let boundary = if start > 0 {
-        bytes.iter().position(|b| *b == b'\n').filter(|nl| nl + 1 < bytes.len())
-    } else {
-        None
-    };
-    if let Some(nl) = boundary {
-        bytes = &bytes[nl + 1..];
-        start += nl as u64 + 1;
+    if start > 0 {
+        if let Some(nl) = bytes.iter().position(|b| *b == b'\n').filter(|nl| nl + 1 < bytes.len()) {
+            bytes = &bytes[nl + 1..];
+            start += nl as u64 + 1;
+        } else if let Some(char_start) = bytes.iter().position(|b| !is_utf8_continuation(*b)) {
+            bytes = &bytes[char_start..];
+            start += char_start as u64;
+        } else if let Some(back) = window[..lookback].iter().rposition(|b| !is_utf8_continuation(*b)) {
+            bytes = &window[back..];
+            start = map_start + back as u64;
+        }
     }
 
     Ok(LogChunk {
@@ -90,18 +95,18 @@ fn tail_lines_within(path: &Path, n: usize, scan_bytes: u64) -> io::Result<Vec<S
     }
 
     let window = map_window(&file, start, file_size)?;
-    let text = String::from_utf8_lossy(&window);
+    let mut bytes = &window[..];
     // A window that began mid-file opens on a fragment. It must go before the last `n` lines are taken, or the
     // fragment survives whenever the window holds more than `n` lines and a whole line is dropped in its place.
     // A window with no boundary at all is one long line, and the fragment is all there is to show.
-    let body = if start > 0 {
-        match text.find('\n') {
-            Some(nl) if nl + 1 < text.len() => &text[nl + 1..],
-            _ => &text[..],
+    if start > 0 {
+        if let Some(nl) = bytes.iter().position(|b| *b == b'\n').filter(|nl| nl + 1 < bytes.len()) {
+            bytes = &bytes[nl + 1..];
+        } else if let Some(char_start) = bytes.iter().position(|b| !is_utf8_continuation(*b)) {
+            bytes = &bytes[char_start..];
         }
-    } else {
-        &text[..]
-    };
+    }
+    let body = String::from_utf8_lossy(bytes);
 
     let mut lines = body
         .lines()
@@ -112,6 +117,10 @@ fn tail_lines_within(path: &Path, n: usize, scan_bytes: u64) -> io::Result<Vec<S
     lines.reverse();
 
     Ok(lines)
+}
+
+fn is_utf8_continuation(byte: u8) -> bool {
+    (byte & 0b1100_0000) == 0b1000_0000
 }
 
 fn map_window(file: &File, start: u64, end: u64) -> io::Result<Mmap> {
@@ -202,17 +211,60 @@ mod tests {
     #[test]
     fn a_window_never_splits_a_multibyte_character() {
         // Chosen so that the window boundary lands inside the four-byte emoji rather than between lines.
-        let body = "aaaa\n🌐🌐🌐\nbbbb\n";
-        let path = write_temp("utf8", body);
-        for max in 1..=body.len() as u64 {
-            let chunk = read_chunk(&path, None, Some(max)).unwrap();
-            assert!(chunk.start < chunk.end, "max={max} returned an empty window");
-            assert!(
-                body.ends_with(&chunk.contents),
-                "max={max} returned {:?}, which is not a suffix of the file",
-                chunk.contents
-            );
+        for (name, body) in [
+            ("utf8", "aaaa\n🌐🌐🌐\nbbbb\n"),
+            ("utf8-last-line", "aaaa\n🌐🌐🌐\n"),
+            ("utf8-no-newline", "aaaa\n🌐🌐🌐"),
+        ] {
+            let path = write_temp(name, body);
+            for max in 1..=body.len() as u64 {
+                let chunk = read_chunk(&path, None, Some(max)).unwrap();
+                assert!(chunk.start < chunk.end, "max={max} returned an empty window");
+                assert!(
+                    !chunk.contents.contains('\u{FFFD}'),
+                    "max={max} produced replacement character in {:?}",
+                    chunk.contents
+                );
+                assert!(
+                    body.ends_with(&chunk.contents),
+                    "max={max} returned {:?}, which is not a suffix of the file",
+                    chunk.contents
+                );
+            }
         }
+    }
+
+    #[test]
+    fn paging_a_long_multibyte_line_never_splits_a_character() {
+        let body = format!("{}\n", "🌐".repeat(250));
+        let path = write_temp("oversized-utf8", &body);
+
+        let mut pages = Vec::new();
+        let mut end = None;
+        for _ in 0..32 {
+            // 101 is not a multiple of 4, so every raw subtraction lands mid-codepoint.
+            let chunk = read_chunk(&path, end, Some(101)).unwrap();
+            assert!(chunk.start < chunk.end);
+            assert!(!chunk.contents.contains('\u{FFFD}'));
+            pages.push(chunk.contents);
+            if chunk.start == 0 {
+                break;
+            }
+            end = Some(chunk.start);
+        }
+
+        pages.reverse();
+        assert_eq!(pages.concat(), body);
+    }
+
+    #[test]
+    fn tail_lines_never_starts_with_a_split_multibyte_character() {
+        let body = format!("{}\n", "🌐".repeat(150));
+        let path = write_temp("tail-fragment-utf8", &body);
+
+        // 100 bytes back from 601 lands at byte 501 (1 byte into a 4-byte codepoint).
+        let lines = tail_lines_within(&path, 5, 100).unwrap();
+        assert_eq!(lines, vec!["🌐".repeat(24)]);
     }
 
     #[test]

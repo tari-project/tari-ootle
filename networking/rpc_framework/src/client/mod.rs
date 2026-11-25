@@ -1087,10 +1087,9 @@ where TSubstream: AsyncRead + AsyncWrite + Unpin + Send
             Err(e) => return Err(RpcError::ServerError(RpcServerError::ProtocolError(e)).into()),
         };
 
-        Ok(Response {
-            flags,
-            payload: resp.payload.into(),
-        })
+        let mut response = Response::new(resp.payload.into());
+        response.flags = flags;
+        Ok(response)
     }
 }
 

@@ -516,10 +516,24 @@ pub fn apply_leader_fee_to_substate_store<TTx: StateStoreReadTransaction>(
     Ok(())
 }
 
-pub(crate) fn get_highest_seen_justified_view<TTx: StateStoreReadTransaction>(
+/// The heights of the highest proposal and timeout certificates seen in an epoch. Zero for a certificate not yet seen.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct JustifiedHeights {
+    pub high_pc: NodeHeight,
+    pub high_tc: NodeHeight,
+}
+
+impl JustifiedHeights {
+    /// The highest view either certificate justifies.
+    pub fn highest(&self) -> NodeHeight {
+        self.high_pc.max(self.high_tc)
+    }
+}
+
+pub(crate) fn get_justified_heights<TTx: StateStoreReadTransaction>(
     tx: &TTx,
     epoch: Epoch,
-) -> Result<NodeHeight, HotStuffError> {
+) -> Result<JustifiedHeights, HotStuffError> {
     let high_pc = HighPc::get(tx, epoch)
         .optional()?
         .map(|high_pc| high_pc.height())
@@ -528,7 +542,14 @@ pub(crate) fn get_highest_seen_justified_view<TTx: StateStoreReadTransaction>(
         .optional()?
         .map(|high_tc| high_tc.height())
         .unwrap_or_default();
-    Ok(high_pc.max(high_tc))
+    Ok(JustifiedHeights { high_pc, high_tc })
+}
+
+pub(crate) fn get_highest_seen_justified_view<TTx: StateStoreReadTransaction>(
+    tx: &TTx,
+    epoch: Epoch,
+) -> Result<NodeHeight, HotStuffError> {
+    Ok(get_justified_heights(tx, epoch)?.highest())
 }
 
 /// Moves `tx_rec` to ABORT if, for a block in `epoch`, it has outlived its validity window in `LocalPrepared` (see
@@ -559,7 +580,8 @@ pub fn abort_if_local_prepared_expired(
 /// block must record.
 ///
 /// CONSENSUS RULE: a replica accepts this abort, when the leader proposes it, in a block it evaluates while its own
-/// oracle reports such a next epoch. The abort is safe for the reason given at
+/// oracle reports such a next epoch, and only for a transaction still waiting on foreign shard groups. A transaction
+/// that is ready for LocalAccept is executed instead, as the leader does. The abort is safe for the reason given at
 /// [`TransactionPoolRecord::is_local_prepared_expired_at`]: the local shard group has not sent its LocalAccept.
 pub fn abort_local_prepared_for_epoch_end(tx_rec: &mut TransactionPoolRecord) -> Option<TransactionExecution> {
     if !tx_rec.current_stage().is_local_prepared() || !tx_rec.current_decision().is_commit() {
@@ -740,4 +762,106 @@ pub fn process_newly_justified_block<TTx: StateStoreReadTransaction>(
     }
 
     Ok(blocks_to_process)
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use std::fmt::Debug;
+
+    use tari_consensus_types::ShardGroupAccumulatedData;
+    use tari_engine_types::substate::{Substate, SubstateId};
+    use tari_ootle_common_types::{ExtraData, SubstateVersion, VersionedSubstateId};
+    use tari_ootle_storage::{
+        StateStore,
+        StorageError,
+        consensus_models::{BlockDiff, VersionedSubstateIdLockIntent},
+    };
+    use tari_ootle_transaction::TransactionId;
+    use tari_state_store_rocksdb::RocksDbStateStore;
+    use tari_template_lib_types::{ValidatorFeePoolAddress, crypto::SchnorrSignatureBytes};
+
+    use super::*;
+
+    /// The claim key of the validator fee pool [`with_fee_pool_in_parent`] puts UP.
+    fn claim_public_key() -> RistrettoPublicKeyBytes {
+        RistrettoPublicKeyBytes::from([7u8; 32])
+    }
+
+    /// Runs `f` over a store building on a child of the zero block whose diff puts the validator fee pool of
+    /// [`claim_public_key`] UP at version 0, holding 1000. The block being built has made no change to the pool.
+    pub(crate) fn with_fee_pool_in_parent<F, E>(f: F)
+    where
+        F: FnOnce(
+            &mut PendingSubstateStore<'_, <RocksDbStateStore<String> as StateStore>::ReadTransaction<'_>>,
+            ValidatorFeePoolAddress,
+        ) -> Result<(), E>,
+        E: From<StorageError> + Debug,
+    {
+        let pool_address = derive_fee_pool_address(&claim_public_key(), NumPreshards::P256, Shard::first()).unwrap();
+        let pool_v0 = VersionedSubstateId::new(SubstateId::ValidatorFeePool(pool_address), SubstateVersion::ZERO);
+
+        let zero = Block::zero_block(Network::LocalNet, NumPreshards::P256);
+        let parent = Block::create(
+            Network::LocalNet,
+            ProtocolVersion::V0,
+            *zero.id(),
+            zero.justify().clone(),
+            None,
+            NodeHeight(1),
+            zero.epoch(),
+            ShardGroup::all_shards(NumPreshards::P256),
+            Default::default(),
+            Default::default(),
+            FixedHash::zero(),
+            0,
+            SchnorrSignatureBytes::zero(),
+            0,
+            FixedHash::zero(),
+            ShardGroupAccumulatedData::default(),
+            ExtraData::new(),
+        )
+        .unwrap();
+
+        let dir = tempfile::tempdir().unwrap();
+        let db = RocksDbStateStore::<String>::open(dir.path().join("db"), Default::default()).unwrap();
+        db.with_write_tx(|tx| {
+            zero.insert(tx)?;
+            parent.insert(tx)?;
+            BlockDiff::insert(tx, parent.id(), &[SubstateChange::Up {
+                shard: pool_v0.to_shard(NumPreshards::P256),
+                id: pool_v0.substate_id().clone(),
+                substate: Box::new(Substate::new(0, ValidatorFeePool::new(claim_public_key(), 1_000))),
+            }])
+        })
+        .unwrap();
+        db.with_read_tx(|tx| {
+            let mut store = PendingSubstateStore::init(tx, parent.as_leaf(), NumPreshards::P256)?;
+            f(&mut store, pool_address)
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn a_leader_fee_is_deposited_into_a_pool_a_multishard_claim_holds_write_locked() {
+        with_fee_pool_in_parent(|store, pool_address| {
+            let pool_id = SubstateId::ValidatorFeePool(pool_address);
+            let lock_status = store.try_lock_all(
+                TransactionId::new([3; 32]),
+                [VersionedSubstateIdLockIntent::write(
+                    VersionedSubstateId::new(pool_id.clone(), SubstateVersion::ZERO),
+                    true,
+                )],
+                false,
+            )?;
+            assert!(!lock_status.is_any_failed(), "{lock_status:?}");
+
+            apply_leader_fee_to_substate_store(store, &claim_public_key(), NumPreshards::P256, Shard::first(), 250)?;
+
+            let latest = store.get_latest_change(&pool_id)?;
+            assert_eq!(latest.versioned_substate_id().version(), SubstateVersion::new(1));
+            let pool = latest.into_up().unwrap();
+            assert_eq!(pool.substate_value().as_validator_fee_pool().unwrap().amount(), 1_250);
+            Ok::<_, HotStuffError>(())
+        });
+    }
 }

@@ -55,6 +55,22 @@ impl LockedEpoch {
     }
 }
 
+#[cfg(test)]
+impl LockedEpoch {
+    pub(crate) fn zero() -> Self {
+        Self::new(Epoch::zero(), Hash32::default(), ExhaustBurnRate::default())
+    }
+}
+
+/// The pin is part of every multi-shard command, so this encoding is part of the command hash.
+impl borsh::BorshSerialize for LockedEpoch {
+    fn serialize<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
+        borsh::BorshSerialize::serialize(&self.epoch.as_u64(), writer)?;
+        borsh::BorshSerialize::serialize(&self.hash, writer)?;
+        borsh::BorshSerialize::serialize(&self.exhaust_burn_rate.as_bps(), writer)
+    }
+}
+
 impl Display for LockedEpoch {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(

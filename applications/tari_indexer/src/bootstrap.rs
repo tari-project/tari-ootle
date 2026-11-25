@@ -48,7 +48,7 @@ use tari_epoch_oracles::{
         BaseLayerEpochOracleFeatures,
         BaseLayerOracle,
     },
-    configured::{ConfiguredEpochOracle, RealTimeEpochTicker},
+    configured::{self, ConfiguredEpochOracle, EpochTicker},
     hybrid::{HybridEpochOracle, mpsc_ticker},
     store::EpochOracleStore,
 };
@@ -65,7 +65,7 @@ use tari_networking::{
 use tari_ootle_app_utilities::{
     claim_burn_proof_verifier::HeaderlessClaimBurnProofVerifier,
     configuration::convert_network_to_l1_network,
-    epoch_oracle_config::EpochOracleType,
+    epoch_oracle_config::{EpochOracleConfig, EpochOracleType},
     fee_tables::get_fee_table_by_network,
     identity_management,
     keypair::RistrettoKeypair,
@@ -83,6 +83,7 @@ use tari_shutdown::ShutdownSignal;
 use tari_template_builtin::all_builtin_templates;
 use tari_template_lib_types::{Amount, TemplateAddress, crypto::RistrettoPublicKeyBytes};
 use tari_validator_node_rpc::client::TariValidatorNodeRpcClientFactory;
+use tokio::sync::mpsc;
 
 use crate::{
     ApplicationConfig,
@@ -101,6 +102,7 @@ use crate::{
     substate_manager::SubstateManager,
     transaction_gossip::TransactionGossipService,
     transaction_manager::TransactionManager,
+    validator_oracle_config::ValidatorOracleConfigFollower,
 };
 
 const LOG_TARGET: &str = "tari::indexer::bootstrap";
@@ -237,7 +239,8 @@ pub async fn spawn_services(
     )?;
 
     // Epoch event oracle
-    let epoch_event_oracle = create_epoch_oracle(config, global_db.clone(), &consensus_constants).await?;
+    let (epoch_event_oracle, oracle_config_follower) =
+        create_epoch_oracle(config, global_db.clone(), &consensus_constants).await?;
 
     // Epoch manager
     let (epoch_manager, _) = tari_epoch_manager::service::spawn_service::<IndexerEpochManagerSpec>(
@@ -260,12 +263,19 @@ pub async fn spawn_services(
         shutdown.clone(),
     );
 
+    if let Some(FollowedOracleConfig { updates, started_with }) = oracle_config_follower {
+        let follower =
+            ValidatorOracleConfigFollower::new(epoch_manager.clone(), networking.clone(), updates, &started_with);
+        tokio::spawn(follower.run(shutdown.clone()));
+    }
+
     // Client factory
     let validator_node_client_factory = TariValidatorNodeRpcClientFactory::new(networking.clone());
     let network_client = TariNetworkClient::new(
         epoch_manager.clone(),
         validator_node_client_factory.clone(),
         consensus_constants.num_preshards,
+        config.network,
     );
 
     let watched_templates: Arc<HashSet<TemplateAddress>> =
@@ -532,61 +542,99 @@ fn save_identities(config: &ApplicationConfig, identity: &RistrettoKeypair) -> a
     Ok(())
 }
 
-async fn create_base_layer_client(config: &ApplicationConfig) -> anyhow::Result<GrpcBaseNodeClient> {
-    let url = config
-        .epoch_oracle
-        .base_layer
-        .base_node_grpc_url
-        .clone()
-        .unwrap_or_else(|| {
-            let port = grpc_default_port(
-                ApplicationType::BaseNode,
-                convert_network_to_l1_network(&config.network),
-            );
-            format!("http://127.0.0.1:{port}")
-                .parse()
-                .expect("Default base node GRPC URL is malformed")
-        });
+async fn create_base_layer_client(
+    config: &ApplicationConfig,
+    oracle_config: &EpochOracleConfig,
+) -> anyhow::Result<GrpcBaseNodeClient> {
+    let url = oracle_config.base_layer.base_node_grpc_url.clone().unwrap_or_else(|| {
+        let port = grpc_default_port(
+            ApplicationType::BaseNode,
+            convert_network_to_l1_network(&config.network),
+        );
+        format!("http://127.0.0.1:{port}")
+            .parse()
+            .expect("Default base node GRPC URL is malformed")
+    });
     GrpcBaseNodeClient::connect(url)
         .await
         .context("Failed to create gRPC base node client")
+}
+
+/// The channel a configured epoch oracle follows validators' config updates on, with the config it started with.
+struct FollowedOracleConfig {
+    updates: mpsc::UnboundedSender<Option<configured::Config>>,
+    started_with: configured::Config,
 }
 
 async fn create_epoch_oracle<TStore: EpochOracleStore + BaseLayerBlockHeaderStore + Clone + Send + 'static>(
     config: &ApplicationConfig,
     store: TStore,
     consensus_constants: &ConsensusConstants,
-) -> anyhow::Result<EpochOracle<TStore>> {
-    match config.epoch_oracle.oracle_type {
+) -> anyhow::Result<(EpochOracle<TStore>, Option<FollowedOracleConfig>)> {
+    let oracle_config = config.epoch_oracle.for_network(config.network);
+    match oracle_config.oracle_type {
         EpochOracleType::BaseLayer => {
-            let oracle = create_base_layer_epoch_oracle(config, store, consensus_constants).await?;
-            Ok(EpochOracle::BaseLayer(oracle))
+            let oracle = create_base_layer_epoch_oracle(config, &oracle_config, store, consensus_constants).await?;
+            Ok((EpochOracle::BaseLayer(oracle), None))
         },
         EpochOracleType::Configured => {
-            let oracle = create_configured_epoch_oracle(config, store).await?;
-            Ok(EpochOracle::Configured(oracle))
+            let configured = oracle_config.configured.load().await?;
+            let (oracle, follower) = follow_validator_config(
+                config,
+                ConfiguredEpochOracle::create(configured.clone(), store)?,
+                configured,
+            );
+            Ok((EpochOracle::Configured(oracle), follower))
         },
         EpochOracleType::Hybrid => {
-            let oracle = create_hybrid_epoch_oracle(config, store, consensus_constants).await?;
-            Ok(EpochOracle::Hybrid(oracle))
+            let base_layer_oracle =
+                create_base_layer_epoch_oracle(config, &oracle_config, store.clone(), consensus_constants).await?;
+            let configured = oracle_config.configured.load().await?;
+            let (ticker, trigger) = mpsc_ticker();
+            let (configured_oracle, follower) = follow_validator_config(
+                config,
+                ConfiguredEpochOracle::with_custom_ticker(configured.clone(), store, ticker),
+                configured,
+            );
+            Ok((
+                EpochOracle::Hybrid(HybridEpochOracle::new(configured_oracle, base_layer_oracle, trigger)),
+                follower,
+            ))
         },
     }
 }
 
+/// Makes `oracle` follow the validators' config if this indexer is configured to.
+fn follow_validator_config<TStore: EpochOracleStore + Send, TTicker: EpochTicker>(
+    config: &ApplicationConfig,
+    oracle: ConfiguredEpochOracle<TStore, TTicker>,
+    started_with: configured::Config,
+) -> (ConfiguredEpochOracle<TStore, TTicker>, Option<FollowedOracleConfig>) {
+    if !config.indexer.follow_validator_oracle_config {
+        return (oracle, None);
+    }
+    let (updates, receiver) = mpsc::unbounded_channel();
+    (
+        oracle.with_config_updates(receiver),
+        Some(FollowedOracleConfig { updates, started_with }),
+    )
+}
+
 async fn create_base_layer_epoch_oracle<TStore: EpochOracleStore + BaseLayerBlockHeaderStore + Clone + 'static>(
     config: &ApplicationConfig,
+    oracle_config: &EpochOracleConfig,
     store: TStore,
     consensus_constants: &ConsensusConstants,
 ) -> anyhow::Result<BaseLayerOracle<TStore>> {
-    let mut base_node_client = create_base_layer_client(config).await?;
+    let mut base_node_client = create_base_layer_client(config, oracle_config).await?;
     verify_correct_network(&mut base_node_client, config.network).await?;
     Ok(BaseLayerOracle::new(
         store,
         base_node_client,
         BaseLayerEpochOracleConfig {
-            start_height: config.epoch_oracle.base_layer.start_height,
+            start_height: oracle_config.base_layer.start_height,
             height_lag: consensus_constants.base_layer_confirmations,
-            scanning_interval: config.epoch_oracle.base_layer.scanning_interval,
+            scanning_interval: oracle_config.base_layer.scanning_interval,
             sidechain_id: config.indexer.sidechain_id.as_ref().map(|p| p.to_byte_type()),
             features: BaseLayerEpochOracleFeatures {
                 sync_headers: false,
@@ -595,27 +643,6 @@ async fn create_base_layer_epoch_oracle<TStore: EpochOracleStore + BaseLayerBloc
         },
         config.network,
     ))
-}
-
-async fn create_configured_epoch_oracle<TStore: EpochOracleStore + Send>(
-    config: &ApplicationConfig,
-    store: TStore,
-) -> anyhow::Result<ConfiguredEpochOracle<TStore, RealTimeEpochTicker>> {
-    let oracle_config = config.epoch_oracle.configured.load().await?;
-    let oracle = ConfiguredEpochOracle::create(oracle_config, store)?;
-    Ok(oracle)
-}
-
-async fn create_hybrid_epoch_oracle<TStore: EpochOracleStore + BaseLayerBlockHeaderStore + Clone + Send + 'static>(
-    config: &ApplicationConfig,
-    store: TStore,
-    consensus_constants: &ConsensusConstants,
-) -> anyhow::Result<HybridEpochOracle<TStore>> {
-    let base_layer_oracle = create_base_layer_epoch_oracle(config, store.clone(), consensus_constants).await?;
-    let oracle_config = config.epoch_oracle.configured.load().await?;
-    let (ticker, trigger) = mpsc_ticker();
-    let configured_oracle = ConfiguredEpochOracle::with_custom_ticker(oracle_config, store, ticker);
-    Ok(HybridEpochOracle::new(configured_oracle, base_layer_oracle, trigger))
 }
 
 async fn check_store<TStore: IndexerStore>(config: &ApplicationConfig, store: &TStore) -> anyhow::Result<()> {

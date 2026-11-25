@@ -140,6 +140,13 @@ message GetTransactionResultResponse {
   string abort_details = 4;
   int64 finalized_timestamp = 5;
   uint64 execution_time_us = 6;
+  // CBOR-encoded SparseMerkleProofExt of the transaction's leaf, H(transaction id, final decision), in the
+  // transaction merkle root of the block that finalized it. Set for an abort. A commit is proven by its receipt and is
+  // normally sent without one. Empty when the responder holds no inclusion for it.
+  bytes transaction_proof = 7;
+  // CBOR-encoded CommittedBlockProof of the block `transaction_proof` is against. Set exactly when
+  // `transaction_proof` is.
+  bytes commit_proof = 8;
 }
 
 enum PayloadResultStatus {
@@ -384,6 +391,8 @@ enum ConsensusState {
   Shutdown = 5;
   // The node has not scanned the base layer far enough to know its own registration or committee.
   Initialising = 6;
+  // The node is syncing the state of a committee it joins at a later epoch, outside consensus.
+  Presyncing = 7;
 }
 
 message GetHighQcRequest {
@@ -424,6 +433,14 @@ message ShardStateLeaf {
   bytes transition_acc = 4;
   // CBOR-encoded SparseMerkleProofExt of the shard's leaf in the block's state merkle root.
   bytes shard_root_proof = 5;
+}
+
+message GetEpochOracleConfigRequest {}
+
+message GetEpochOracleConfigResponse {
+  // The JSON of the configured epoch oracle's validator set config this node runs. Empty when the node runs no
+  // configured oracle.
+  string config_json = 1;
 }
 
 message GetShardSnapshotRequest {

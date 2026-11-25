@@ -79,17 +79,18 @@ fn committee_named_by_proof<T>(
     })
 }
 
-/// The first state version at or after `version` that a stream must prove.
-fn proof_point_at_or_after(version: Version) -> Version {
-    version.max(1).next_multiple_of(STATE_VERSION_PROOF_INTERVAL)
+/// The first state version at or after `version` that a stream must prove, or `None` if no multiple of
+/// [`STATE_VERSION_PROOF_INTERVAL`] is representable at or above `version`.
+fn proof_point_at_or_after(version: Version) -> Option<Version> {
+    version.max(1).checked_next_multiple_of(STATE_VERSION_PROOF_INTERVAL)
 }
 
 /// Tracks which proof points a shard's stream still owes, and rejects the stream once it moves past one without
 /// proving it.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct ProofSchedule {
-    /// The next proof point the stream owes.
-    next_point: Version,
+    /// The next proof point the stream owes, if any representable multiple remains.
+    next_point: Option<Version>,
     /// The last version the stream covers.
     last: Version,
 }
@@ -104,10 +105,23 @@ impl ProofSchedule {
 
     /// Rejects a batch at `state_version` if the stream owes a proof for an earlier version.
     pub fn check_batch(&self, state_version: Version) -> Result<(), RpcStateSyncError> {
-        if self.next_point < state_version && self.next_point <= self.last {
+        self.check_owed_before(state_version, "streamed")
+    }
+
+    /// Rejects a proof of `state_version` if the stream still owes a proof for an earlier version.
+    pub fn check_proof(&self, state_version: Version) -> Result<(), RpcStateSyncError> {
+        self.check_owed_before(state_version, "proved")
+    }
+
+    /// Rejects a message at `state_version` if the stream owes a proof for an earlier version. `verb` names what the
+    /// peer did at `state_version`.
+    fn check_owed_before(&self, state_version: Version, verb: &str) -> Result<(), RpcStateSyncError> {
+        if let Some(next_point) = self.next_point &&
+            next_point < state_version &&
+            next_point <= self.last
+        {
             return Err(RpcStateSyncError::InvalidResponse(anyhow!(
-                "Peer streamed v{state_version} without proving v{}",
-                self.next_point
+                "Peer {verb} v{state_version} without proving v{next_point}"
             )));
         }
         Ok(())
@@ -115,17 +129,20 @@ impl ProofSchedule {
 
     /// Records a verified proof of `state_version`.
     pub fn proven(&mut self, state_version: Version) {
-        if state_version >= self.next_point {
-            self.next_point = proof_point_at_or_after(state_version.saturating_add(1));
+        if let Some(next_point) = self.next_point &&
+            state_version >= next_point
+        {
+            self.next_point = state_version.checked_add(1).and_then(proof_point_at_or_after);
         }
     }
 
     /// Rejects a completed stream that still owes a proof.
     pub fn check_complete(&self) -> Result<(), RpcStateSyncError> {
-        if self.next_point <= self.last {
+        if let Some(next_point) = self.next_point &&
+            next_point <= self.last
+        {
             return Err(RpcStateSyncError::InvalidResponse(anyhow!(
-                "Peer completed the stream without proving v{}",
-                self.next_point
+                "Peer completed the stream without proving v{next_point}"
             )));
         }
         Ok(())
@@ -163,10 +180,14 @@ mod tests {
 
     #[test]
     fn proof_points_are_multiples_of_the_interval() {
-        assert_eq!(proof_point_at_or_after(0), N);
-        assert_eq!(proof_point_at_or_after(1), N);
-        assert_eq!(proof_point_at_or_after(N), N);
-        assert_eq!(proof_point_at_or_after(N + 1), 2 * N);
+        assert_eq!(proof_point_at_or_after(0), Some(N));
+        assert_eq!(proof_point_at_or_after(1), Some(N));
+        assert_eq!(proof_point_at_or_after(N), Some(N));
+        assert_eq!(proof_point_at_or_after(N + 1), Some(2 * N));
+        let last_multiple = (Version::MAX / N) * N;
+        assert_eq!(proof_point_at_or_after(last_multiple), Some(last_multiple));
+        assert_eq!(proof_point_at_or_after(last_multiple + 1), None);
+        assert_eq!(proof_point_at_or_after(Version::MAX), None);
     }
 
     #[test]
@@ -174,6 +195,14 @@ mod tests {
         let schedule = ProofSchedule::new(1, 3 * N);
         schedule.check_batch(N).unwrap();
         assert!(schedule.check_batch(N + 1).is_err());
+    }
+
+    #[test]
+    fn a_proof_past_an_owed_proof_point_is_rejected() {
+        let schedule = ProofSchedule::new(1, 3 * N);
+        schedule.check_proof(N).unwrap();
+        assert!(schedule.check_proof(N + 1).is_err());
+        assert!(schedule.check_proof(2 * N).is_err());
     }
 
     #[test]
@@ -192,6 +221,16 @@ mod tests {
     fn points_beyond_the_stream_are_not_owed() {
         let schedule = ProofSchedule::new(1, N - 1);
         schedule.check_batch(N - 1).unwrap();
+        schedule.check_complete().unwrap();
+    }
+
+    #[test]
+    fn versions_past_the_last_representable_proof_point_do_not_overflow() {
+        let last_multiple = (Version::MAX / N) * N;
+        let mut schedule = ProofSchedule::new(last_multiple, Version::MAX);
+        schedule.check_proof(last_multiple).unwrap();
+        schedule.proven(last_multiple);
+        schedule.check_batch(Version::MAX).unwrap();
         schedule.check_complete().unwrap();
     }
 }

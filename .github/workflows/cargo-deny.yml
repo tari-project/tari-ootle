@@ -21,13 +21,17 @@ name: Dependency policy
   # pending, so a required `cargo_deny` context has to report on all of them or the ones it skips
   # cannot merge. The run costs under a minute.
   pull_request:
+  # The merge queue waits for every required check on its own merge commit, so `cargo_deny` must
+  # report there too.
+  merge_group:
   # Run manually
   workflow_dispatch:
 
 permissions: {}
 
 jobs:
-  # Every policy in `deny.toml`: advisories, bans, licences and sources.
+  # The required gate: bans, licences and sources. Their result depends only on `Cargo.lock` and
+  # `deny.toml`, so a red run is caused by the change under test.
   cargo_deny:
     runs-on: ubuntu-latest
     permissions:
@@ -36,9 +40,25 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+      - uses: EmbarkStudios/cargo-deny-action@17aeb3c839e42274e2b8adf721c8c65edfdc74dd # v2.1.3
         with:
-          command: check advisories bans licenses sources
+          command: check bans licenses sources
           # The action's default is `--all-features`. Naming it here keeps the graph CI resolves
           # the same one `deny.toml` describes and a reviewer reproduces from the command line.
+          arguments: --all-features
+
+  # Advisories report on every change but are not a required check: the RustSec database moves
+  # daily, so a newly published advisory turns this red on changes that did not introduce it.
+  # `.github/workflows/audit.yml` tracks them nightly.
+  cargo_deny_advisories:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: EmbarkStudios/cargo-deny-action@17aeb3c839e42274e2b8adf721c8c65edfdc74dd # v2.1.3
+        with:
+          command: check advisories
           arguments: --all-features

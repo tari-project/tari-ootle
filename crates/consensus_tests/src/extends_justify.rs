@@ -41,7 +41,7 @@ use tari_ootle_transaction::Network;
 use tari_sidechain::{FixedHash, QuorumDecision, SignerBitmap};
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
-use crate::support::{RoundRobinLeaderStrategy, TestAddress};
+use crate::support::{SmoothWeightedRoundRobin, TestAddress};
 
 const NUM_PRESHARDS: NumPreshards = NumPreshards::P256;
 const NETWORK: Network = Network::LocalNet;
@@ -131,7 +131,7 @@ fn dummy_chain(justify_block: &Block, candidate_height: NodeHeight) -> Vec<Block
     calculate_dummy_blocks_from_justify(
         &provisional,
         justify_block,
-        &RoundRobinLeaderStrategy::new(),
+        &SmoothWeightedRoundRobin::new(),
         &committee(),
         &LeaderSkipSet::none(),
     )
@@ -157,7 +157,7 @@ fn extends_justify_when_parent_is_the_justify_block() {
     let dummy_blocks = check_extends_justify(
         &candidate,
         &justify_block,
-        &RoundRobinLeaderStrategy::new(),
+        &SmoothWeightedRoundRobin::new(),
         &committee(),
         &LeaderSkipSet::none(),
     )
@@ -175,7 +175,7 @@ fn rejects_parent_that_is_not_the_justify_block() {
     let err = check_extends_justify(
         &candidate,
         &justify_block,
-        &RoundRobinLeaderStrategy::new(),
+        &SmoothWeightedRoundRobin::new(),
         &committee(),
         &LeaderSkipSet::none(),
     )
@@ -202,7 +202,7 @@ fn extends_justify_through_a_full_dummy_chain() {
     let dummy_blocks = check_extends_justify(
         &candidate,
         &justify_block,
-        &RoundRobinLeaderStrategy::new(),
+        &SmoothWeightedRoundRobin::new(),
         &committee(),
         &LeaderSkipSet::none(),
     )
@@ -233,7 +233,7 @@ fn rejects_truncated_dummy_chain() {
     let err = check_extends_justify(
         &candidate,
         &justify_block,
-        &RoundRobinLeaderStrategy::new(),
+        &SmoothWeightedRoundRobin::new(),
         &committee(),
         &LeaderSkipSet::none(),
     )
@@ -261,7 +261,7 @@ fn rejects_view_gap_without_a_timeout_certificate() {
     let err = check_extends_justify(
         &candidate,
         &justify_block,
-        &RoundRobinLeaderStrategy::new(),
+        &SmoothWeightedRoundRobin::new(),
         &committee(),
         &LeaderSkipSet::none(),
     )
@@ -288,7 +288,7 @@ fn rejects_parent_that_is_not_the_last_dummy_block() {
     let err = check_extends_justify(
         &candidate,
         &justify_block,
-        &RoundRobinLeaderStrategy::new(),
+        &SmoothWeightedRoundRobin::new(),
         &committee(),
         &LeaderSkipSet::none(),
     )

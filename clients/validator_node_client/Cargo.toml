@@ -28,5 +28,8 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 ts-rs = { workspace = true, optional = true }
 
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt", "net", "io-util"] }
+
 [features]
 ts = ["ts-rs", "tari_ootle_p2p/ts", "tari_ootle_transaction/ts", "tari_ootle_storage/ts", "tari_template_lib_types/ts", "tari_consensus_types/ts", "tari_template_abi/ts"]

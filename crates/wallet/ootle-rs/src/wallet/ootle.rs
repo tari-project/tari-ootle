@@ -5,17 +5,20 @@ use std::{collections::HashMap, sync::Arc};
 
 use async_trait::async_trait;
 use tari_crypto::ristretto::{RistrettoPublicKey, RistrettoSecretKey};
-use tari_ootle_transaction::{IntoSigned, Transaction, TransactionSignature, UnsealedTransaction, UnsignedTransaction};
-use tari_ootle_wallet_crypto::DecryptedData;
-use tari_template_lib_types::{
-    EncryptedData,
-    crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
-    stealth::StealthTransferStatement,
+use tari_ootle_transaction::{
+    AuthorizationContext,
+    AuthorizerSet,
+    IntoSigned,
+    Transaction,
+    TransactionSignature,
+    UnsealedTransaction,
+    UnsignedTransaction,
 };
+use tari_template_lib_types::{crypto::RistrettoPublicKeyBytes, stealth::StealthTransferStatement};
 
 use crate::{
     signer,
-    stealth::{BurnClaimStatementSpec, ResolvedStealthTransferSpec, SignatureRequirements},
+    stealth::{ResolvedStealthTransferSpec, SignatureRequirements},
     transaction::TransactionSealSigner,
     types::Address,
     wallet::{NetworkWallet, WalletStealthAuthorizer, error::WalletError, traits::WalletKeyProvider},
@@ -92,11 +95,20 @@ impl OotleWallet {
         }
     }
 
+    /// Authorizes `unsigned` with `address`'s key, sealed by the default address. `authorizers` is the full set of
+    /// keys that will authorize the transaction and must hold `address`'s account key.
+    ///
+    /// `unsigned` must be a [`SchemaVersion::CURRENT`](tari_ootle_transaction::SchemaVersion::CURRENT) transaction.
     pub async fn authorize_transaction(
         &self,
         address: &Address,
+        authorizers: &AuthorizerSet,
         unsigned: &UnsignedTransaction,
     ) -> WalletResult<TransactionAuthorization> {
+        unsigned
+            .schema()
+            .ensure_current()
+            .map_err(|e| signer::SignerError::other(e.to_string()))?;
         let default_address = self.default_address();
         let signer = self
             .key_providers
@@ -105,7 +117,10 @@ impl OotleWallet {
                 address: address.clone(),
             })?;
         let signature = signer
-            .sign_authorization(default_address.account_public_key(), unsigned)
+            .sign_authorization(
+                AuthorizationContext::new(default_address.account_public_key(), authorizers),
+                unsigned,
+            )
             .await?;
         Ok(signature)
     }
@@ -148,44 +163,6 @@ impl OotleWallet {
         Ok(secret)
     }
 
-    /// Decrypt an L1 burn output's value and mask using the default key provider.
-    /// See [`crate::stealth::BurnClaimKeyProvider::decrypt_burn_claim_output`].
-    pub async fn decrypt_burn_claim_output(
-        &self,
-        encrypted_data: &EncryptedData,
-        commitment: &PedersenCommitmentBytes,
-        sender_offset_public_key: &RistrettoPublicKey,
-    ) -> WalletResult<DecryptedData> {
-        let address = self.default_address();
-        let signer = self
-            .key_providers
-            .get(address)
-            .ok_or_else(|| WalletError::KeyProviderNotFound {
-                address: address.clone(),
-            })?;
-        let decrypted = signer
-            .decrypt_burn_claim_output(encrypted_data, commitment, sender_offset_public_key)
-            .await?;
-        Ok(decrypted)
-    }
-
-    /// Build the statement that spends a minted burn UTXO using the default key provider.
-    /// See [`crate::stealth::BurnClaimKeyProvider::create_burn_claim_statement`].
-    pub async fn create_burn_claim_statement(
-        &self,
-        spec: BurnClaimStatementSpec,
-    ) -> WalletResult<StealthTransferStatement> {
-        let address = self.default_address();
-        let signer = self
-            .key_providers
-            .get(address)
-            .ok_or_else(|| WalletError::KeyProviderNotFound {
-                address: address.clone(),
-            })?;
-        let statement = signer.create_burn_claim_statement(spec).await?;
-        Ok(statement)
-    }
-
     /// An authorizer for one transaction. Call this per transaction rather than reusing the result: an ephemeral seal
     /// draws its key here, so a shared authorizer seals every transaction with the same key and links them.
     pub fn stealth_authorizer(&self, required_signatures: SignatureRequirements) -> WalletStealthAuthorizer<'_, Self> {
@@ -210,15 +187,19 @@ impl OotleWallet {
         &self,
         address: &Address,
         public_nonce: &RistrettoPublicKey,
-        seal_signer: &RistrettoPublicKeyBytes,
+        context: AuthorizationContext<'_>,
         unsigned: &UnsignedTransaction,
     ) -> signer::Result<TransactionAuthorization> {
+        unsigned
+            .schema()
+            .ensure_current()
+            .map_err(|e| signer::SignerError::other(e.to_string()))?;
         let signer = self.key_providers.get(address).ok_or_else(|| {
             signer::SignerError::other(format!("Signer for address {address} not found in wallet signers"))
         })?;
 
         signer
-            .sign_authorization_with_stealth(public_nonce, seal_signer, unsigned)
+            .sign_authorization_with_stealth(public_nonce, context, unsigned)
             .await
     }
 
@@ -246,9 +227,13 @@ impl NetworkWallet for OotleWallet {
     }
 
     async fn sign_transaction(&self, unsigned: UnsignedTransaction) -> WalletResult<Transaction> {
+        let authorizers: AuthorizerSet = self
+            .additional_signers()
+            .map(|address| *address.account_public_key())
+            .collect();
         let mut signatures = vec![];
         for signer in self.additional_signers() {
-            let sig = self.authorize_transaction(signer, &unsigned).await?;
+            let sig = self.authorize_transaction(signer, &authorizers, &unsigned).await?;
             signatures.push(sig.into_signature());
         }
         let transaction = self.seal_transaction(unsigned.with_signatures(signatures)).await?;

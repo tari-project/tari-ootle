@@ -101,8 +101,8 @@ impl ProcessManager {
     ) -> anyhow::Result<()> {
         match req {
             ManagerRequest::GetTipInfo { reply } => {
-                let response = self.minotari_nodes.get_tip_status().await?;
-                drop(reply.send(Ok(response)));
+                let response = self.minotari_nodes.get_tip_status().await;
+                drop(reply.send(response));
             },
             ManagerRequest::GetActiveValidatorNodes { reply } => {
                 let response = self.minotari_nodes.get_active_validator_nodes().await;

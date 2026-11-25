@@ -26,7 +26,7 @@ fn it_allows_badge_to_withdraw_from_account() {
     // Approve a withdrawal amount for user1
     test.execute_expect_success(
         test.transaction()
-            .call_method(owner, "approve", args![user1_proof, TARI_TOKEN, 1000])
+            .call_method(owner, "approve", args![user1_proof, TARI_TOKEN, 0, 1000])
             .finish()
             .seal(&owner_secret),
         vec![owner_proof],
@@ -57,7 +57,7 @@ fn the_withdraw_approved_event_names_the_spending_badge() {
 
     test.execute_expect_success(
         test.transaction()
-            .call_method(owner, "approve", args![user1_proof, TARI_TOKEN, 1000])
+            .call_method(owner, "approve", args![user1_proof, TARI_TOKEN, 0, 1000])
             .finish()
             .seal(&owner_secret),
         vec![owner_proof],
@@ -101,7 +101,7 @@ fn it_rejects_withdrawals_greater_than_approval() {
     // Approve a withdrawal amount for user1
     test.execute_expect_success(
         test.transaction()
-            .call_method(owner, "approve", args![user1_proof, TARI_TOKEN, 1000])
+            .call_method(owner, "approve", args![user1_proof, TARI_TOKEN, 0, 1000])
             .finish()
             .seal(&owner_secret),
         vec![owner_proof],
@@ -158,7 +158,7 @@ fn it_clears_the_approval() {
     // Approve a withdrawal amount for user1
     test.execute_expect_success(
         test.transaction()
-            .call_method(owner, "approve", args![user1_proof, TARI_TOKEN, 1000])
+            .call_method(owner, "approve", args![user1_proof, TARI_TOKEN, 0, 1000])
             .finish()
             .seal(&owner_secret),
         vec![owner_proof.clone()],
@@ -187,6 +187,132 @@ fn it_clears_the_approval() {
     assert_reject_reason(reason, "No approval for badge");
 }
 
+#[test]
+fn replacing_an_approval_fails_once_a_spend_has_changed_it() {
+    let mut test = TemplateTest::new_builtin_only();
+
+    let (owner, owner_proof, owner_secret) = test.create_funded_account();
+    let (spender, spender_badge, spender_secret) = test.create_empty_account();
+    test.execute_expect_success(
+        test.transaction()
+            .call_method(owner, "approve", args![spender_badge.clone(), TARI_TOKEN, 0, 100])
+            .finish()
+            .seal(&owner_secret),
+        vec![owner_proof.clone()],
+    );
+    test.execute_expect_success(
+        test.transaction()
+            .call_method(owner, "withdraw_approved", args![
+                spender_badge.clone(),
+                TARI_TOKEN,
+                100
+            ])
+            .put_last_instruction_output_on_workspace("bucket")
+            .call_method(spender, "deposit", args![Workspace("bucket")])
+            .finish()
+            .seal(&spender_secret),
+        vec![spender_badge.clone()],
+    );
+
+    // The owner replaces the allowance it last saw (100) with 10, but the spend above has already exhausted it.
+    let reason = test.execute_expect_failure(
+        test.transaction()
+            .call_method(owner, "approve", args![spender_badge.clone(), TARI_TOKEN, 100, 10])
+            .finish()
+            .seal(&owner_secret),
+        vec![owner_proof],
+    );
+    assert_reject_reason(
+        reason,
+        format!("Approval for badge {spender_badge} on resource {TARI_TOKEN} is 0, not the expected 100"),
+    );
+    assert_eq!(approval(&mut test, owner, &spender_badge), Amount::zero());
+
+    let reason = test.execute_expect_failure(
+        test.transaction()
+            .call_method(owner, "withdraw_approved", args![spender_badge.clone(), TARI_TOKEN, 10])
+            .put_last_instruction_output_on_workspace("bucket")
+            .call_method(spender, "deposit", args![Workspace("bucket")])
+            .finish()
+            .seal(&spender_secret),
+        vec![spender_badge],
+    );
+    assert_reject_reason(reason, "No approval for badge");
+}
+
+#[test]
+fn replacing_an_approval_succeeds_when_the_expected_value_is_current() {
+    let mut test = TemplateTest::new_builtin_only();
+
+    let (owner, owner_proof, owner_secret) = test.create_funded_account();
+    let (spender, spender_badge, spender_secret) = test.create_empty_account();
+    test.execute_expect_success(
+        test.transaction()
+            .call_method(owner, "approve", args![spender_badge.clone(), TARI_TOKEN, 0, 100])
+            .finish()
+            .seal(&owner_secret),
+        vec![owner_proof.clone()],
+    );
+    test.execute_expect_success(
+        test.transaction()
+            .call_method(owner, "withdraw_approved", args![spender_badge.clone(), TARI_TOKEN, 30])
+            .put_last_instruction_output_on_workspace("bucket")
+            .call_method(spender, "deposit", args![Workspace("bucket")])
+            .finish()
+            .seal(&spender_secret),
+        vec![spender_badge.clone()],
+    );
+    assert_eq!(approval(&mut test, owner, &spender_badge), Amount::from(70u64));
+
+    // A stale expected value is refused and leaves the approval as it is.
+    let reason = test.execute_expect_failure(
+        test.transaction()
+            .call_method(owner, "approve", args![spender_badge.clone(), TARI_TOKEN, 100, 10])
+            .finish()
+            .seal(&owner_secret),
+        vec![owner_proof.clone()],
+    );
+    assert_reject_reason(reason, "is 70, not the expected 100");
+    assert_eq!(approval(&mut test, owner, &spender_badge), Amount::from(70u64));
+
+    test.execute_expect_success(
+        test.transaction()
+            .call_method(owner, "approve", args![spender_badge.clone(), TARI_TOKEN, 70, 10])
+            .finish()
+            .seal(&owner_secret),
+        vec![owner_proof],
+    );
+    assert_eq!(approval(&mut test, owner, &spender_badge), Amount::from(10u64));
+}
+
+#[test]
+fn revoking_an_approval_ignores_the_expected_value() {
+    let mut test = TemplateTest::new_builtin_only();
+
+    let (owner, owner_proof, owner_secret) = test.create_funded_account();
+    let (_, spender_badge, _) = test.create_empty_account();
+    test.execute_expect_success(
+        test.transaction()
+            .call_method(owner, "approve", args![spender_badge.clone(), TARI_TOKEN, 0, 100])
+            .finish()
+            .seal(&owner_secret),
+        vec![owner_proof.clone()],
+    );
+
+    test.execute_expect_success(
+        test.transaction()
+            .call_method(owner, "approve", args![spender_badge.clone(), TARI_TOKEN, 12345, 0])
+            .finish()
+            .seal(&owner_secret),
+        vec![owner_proof],
+    );
+    assert_eq!(approval(&mut test, owner, &spender_badge), Amount::zero());
+}
+
+fn approval(test: &mut TemplateTest, account: ComponentAddress, spender_badge: &NonFungibleAddress) -> Amount {
+    test.call_method(account, "approval", args![spender_badge.clone(), TARI_TOKEN], vec![])
+}
+
 struct ApprovalFixture {
     test: TemplateTest,
     granter: ComponentAddress,
@@ -209,7 +335,7 @@ fn approval_fixture() -> ApprovalFixture {
     let (recipient, _, _) = test.create_empty_account();
     test.execute_expect_success(
         test.transaction()
-            .call_method(granter, "approve", args![spender_badge.clone(), TARI_TOKEN, 100])
+            .call_method(granter, "approve", args![spender_badge.clone(), TARI_TOKEN, 0, 100])
             .finish()
             .seal(&granter_secret),
         vec![granter_badge.clone()],
@@ -336,7 +462,7 @@ fn a_component_spends_an_approval_naming_its_caller_badge() {
     let component_badge = NonFungibleAddress::caller_component_badge(component);
     test.execute_expect_success(
         test.transaction()
-            .call_method(granter, "approve", args![component_badge, TARI_TOKEN, 100])
+            .call_method(granter, "approve", args![component_badge, TARI_TOKEN, 0, 100])
             .finish()
             .seal(&granter_secret),
         vec![granter_badge],
@@ -378,7 +504,7 @@ fn a_stored_badge_approval_is_spent_with_a_proof_of_the_badge() {
         test.call_function("ApprovalSpender", "mint_badge_into", args![spender], vec![]);
     test.execute_expect_success(
         test.transaction()
-            .call_method(granter, "approve", args![stored_badge.clone(), TARI_TOKEN, 100])
+            .call_method(granter, "approve", args![stored_badge.clone(), TARI_TOKEN, 0, 100])
             .finish()
             .seal(&granter_secret),
         vec![granter_badge],

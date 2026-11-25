@@ -127,6 +127,10 @@ pub fn hash_blob(blob: &Blob) -> Hash32 {
 pub struct Blobs(
     #[n(0)]
     #[cbor(decode_with = "decode_blobs")]
+    #[cfg_attr(
+        feature = "serde",
+        serde(deserialize_with = "ootle_serde::bounded_seq::deserialize::<{ Blobs::MAX_BLOBS }, _, _>")
+    )]
     Vec<Blob>,
 );
 
@@ -207,7 +211,22 @@ impl IntoIterator for Blobs {
 )]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize), serde(transparent))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
-pub struct BlobHashes(#[n(0)] Vec<Hash32>);
+pub struct BlobHashes(
+    #[n(0)]
+    #[cbor(decode_with = "decode_blob_hashes")]
+    #[cfg_attr(
+        feature = "serde",
+        serde(deserialize_with = "ootle_serde::bounded_seq::deserialize::<{ Blobs::MAX_BLOBS }, _, _>")
+    )]
+    Vec<Hash32>,
+);
+
+fn decode_blob_hashes<'b, C>(
+    d: &mut minicbor::Decoder<'b>,
+    ctx: &mut C,
+) -> Result<Vec<Hash32>, minicbor::decode::Error> {
+    tari_bor::adapters::bounded_vec::decode(d, ctx, Blobs::MAX_BLOBS)
+}
 
 impl BlobHashes {
     pub fn empty() -> Self {
@@ -332,5 +351,17 @@ mod tests {
         let json = serde_json::to_string(&blobs).unwrap();
         let decoded: Blobs = serde_json::from_str(&json).unwrap();
         assert_eq!(blobs, decoded);
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn serde_rejects_more_blobs_or_hashes_than_max_blobs() {
+        let over_blobs = Blobs::from_vec(vec![Blob::default(); Blobs::MAX_BLOBS + 1]);
+        let blobs_json = serde_json::to_string(&over_blobs).unwrap();
+        assert!(serde_json::from_str::<Blobs>(&blobs_json).is_err());
+
+        let over_hashes = over_blobs.hashes();
+        let hashes_json = serde_json::to_string(&over_hashes).unwrap();
+        assert!(serde_json::from_str::<BlobHashes>(&hashes_json).is_err());
     }
 }

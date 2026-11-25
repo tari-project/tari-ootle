@@ -22,7 +22,7 @@
 
 use std::{net::SocketAddr, path::PathBuf};
 
-use clap::{Args, Parser};
+use clap::{Args, CommandFactory, FromArgMatches, Parser};
 use tari_common::configuration::{ConfigOverrideProvider, Network as L1Network};
 use tari_common_types::seeds::seed_words::SeedWords;
 use tari_crypto::tari_utilities::SafePassword;
@@ -117,7 +117,12 @@ pub struct Cli {
 
 impl Cli {
     pub fn init() -> Self {
-        Self::parse()
+        Self::from_arg_matches(&Self::command_with_defaults().get_matches()).unwrap_or_else(|e| e.exit())
+    }
+
+    /// The wallet daemon defaults to mainnet, unlike the other applications that share `CommonCliArgs`.
+    fn command_with_defaults() -> clap::Command<'static> {
+        Self::command().mut_arg("network", |arg| arg.default_value(Network::MainNet.as_key_str()))
     }
 
     pub fn network(&self) -> Network {
@@ -224,7 +229,8 @@ pub enum Subcommand {
         name: Option<String>,
         #[clap(long, alias = "key")]
         key_index: Option<u64>,
-        #[clap(long)]
+        /// Accepted so that scripts which pass it keep working; it has no effect.
+        #[clap(long, hide = true)]
         set_active: bool,
         #[clap(long, alias = "output", short = 'o')]
         output_path: Option<PathBuf>,
@@ -356,6 +362,13 @@ mod tests {
         for (long, env) in expected {
             assert_eq!(env_of(long).as_deref(), Some(env), "--{long}");
         }
+    }
+
+    #[test]
+    fn network_defaults_to_mainnet() {
+        let cmd = Cli::command_with_defaults();
+        let network = cmd.get_arguments().find(|arg| arg.get_id() == "network").unwrap();
+        assert_eq!(network.get_default_values(), [Network::MainNet.as_key_str()]);
     }
 
     #[test]

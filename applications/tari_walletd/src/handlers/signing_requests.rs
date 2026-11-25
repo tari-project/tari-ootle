@@ -23,7 +23,7 @@ use axum_extra::headers::authorization::Bearer;
 use log::*;
 use ootle_byte_type::ToByteType;
 use tari_ootle_common_types::optional::IsNotFoundError;
-use tari_ootle_transaction::TransactionSignature;
+use tari_ootle_transaction::{AuthorizationContext, TransactionSignature};
 use tari_ootle_wallet_sdk::{
     models::{
         KeyBranch,
@@ -53,8 +53,11 @@ use tari_ootle_walletd_client::{
 
 use super::context::{AuthIdentity, HandlerContext};
 use crate::handlers::{
+    component_rules_changes::component_rules_changes,
     component_upgrades::component_upgrades,
-    helpers::{invalid_params, invalid_request},
+    helpers,
+    helpers::{OrJrpcNotFound, invalid_params, invalid_request, validate_transaction_for_approval},
+    transaction::validate_epoch_bounds,
 };
 
 const LOG_TARGET: &str = "tari::ootle::wallet_daemon::handlers::signing_requests";
@@ -94,6 +97,16 @@ pub async fn handle_create(
         },
         Err(e) => return Err(e.into()),
     };
+    if !req.authorizers.contains(&signer_public_key) {
+        return Err(invalid_params(
+            "authorizers",
+            Some(format!(
+                "must include {signer_public_key}, the public key of key {}: the signature commits to the set it is \
+                 one of",
+                req.key_id
+            )),
+        ));
+    }
 
     let current_epoch = context.current_epoch().await?;
     if transaction.max_epoch() < current_epoch {
@@ -106,7 +119,10 @@ pub async fn handle_create(
         ));
     }
 
-    let message_hash = TransactionSignature::create_message(&req.seal_public_key, &transaction);
+    let message_hash = TransactionSignature::create_message(
+        AuthorizationContext::new(&req.seal_public_key, &req.authorizers),
+        transaction.body(),
+    );
     let requester = requester_of(auth);
 
     let model = sdk.store().with_write_tx(|tx| {
@@ -119,6 +135,7 @@ pub async fn handle_create(
         let model = tx.signing_request_insert(NewSigningRequest {
             unsigned_transaction: &transaction,
             seal_public_key: &req.seal_public_key,
+            authorizers: &req.authorizers,
             key_id: req.key_id,
             signer_public_key: &signer_public_key,
             message_hash: message_hash.as_bytes(),
@@ -151,29 +168,8 @@ fn validate_create_request(
     context: &HandlerContext,
     req: &SigningRequestCreateRequest,
 ) -> Result<Duration, anyhow::Error> {
-    let transaction = &req.transaction;
-    transaction
-        .validate_blob_references()
-        .map_err(|e| invalid_params("transaction.blobs", Some(e.to_string())))?;
-
-    let network = context.config().network;
-    if transaction.network() != network.as_byte() {
-        return Err(invalid_params(
-            "transaction.network",
-            Some(format!(
-                "the transaction is for network byte {:#04x}, but this wallet is on {network} ({:#04x})",
-                transaction.network(),
-                network.as_byte()
-            )),
-        ));
-    }
-
-    if transaction.is_dry_run() {
-        return Err(invalid_params(
-            "transaction.dry_run",
-            Some("a dry-run transaction cannot be committed, so it is never co-signed"),
-        ));
-    }
+    validate_transaction_for_approval(context.config().network, &req.transaction)?;
+    validate_epoch_bounds(&req.transaction)?;
 
     if req.memo.chars().count() > MAX_MEMO_CHARS {
         return Err(invalid_params(
@@ -216,7 +212,8 @@ pub async fn handle_get(
     let model = context
         .wallet_sdk()
         .store()
-        .with_read_tx(|tx| tx.signing_request_get(req.request_id))?;
+        .with_read_tx(|tx| tx.signing_request_get(req.request_id))
+        .or_jrpc_not_found()?;
 
     Ok(SigningRequestGetResponse {
         request: to_info(model),
@@ -255,9 +252,17 @@ pub async fn handle_approve(
 
     let request = get_pending(context, req.request_id)?;
 
+    if let Err(e) = request.unsigned_transaction.schema().ensure_current() {
+        return Err(invalid_request(format!(
+            "Signing request {} cannot be approved: {e}; reject it and ask for a new one",
+            req.request_id
+        )));
+    }
+
     // The approver was shown `message_hash`; sign only if the stored request
     // still produces exactly that message.
-    let message = TransactionSignature::create_message(&request.seal_public_key, &request.unsigned_transaction);
+    let context = AuthorizationContext::new(&request.seal_public_key, &request.authorizers);
+    let message = TransactionSignature::create_message(context, request.unsigned_transaction.body());
     if *message.as_bytes() != request.message_hash {
         return Err(invalid_request(format!(
             "Signing request {} no longer produces the message it was created with; reject it and ask for a new one",
@@ -267,7 +272,7 @@ pub async fn handle_approve(
 
     let signature = sdk
         .signer_api()
-        .with_context(&request.seal_public_key)
+        .with_context(context)
         .generate_signature(request.key_id, &request.unsigned_transaction)?;
     if *signature.public_key() != request.signer_public_key {
         return Err(invalid_request(format!(
@@ -323,7 +328,8 @@ fn get_pending(context: &HandlerContext, request_id: SigningRequestId) -> Result
     let model = context
         .wallet_sdk()
         .store()
-        .with_read_tx(|tx| tx.signing_request_get(request_id))?;
+        .with_read_tx(|tx| tx.signing_request_get(request_id))
+        .or_jrpc_not_found()?;
 
     match model.effective_status_now() {
         SigningRequestEffectiveStatus::Pending => Ok(model),
@@ -345,7 +351,7 @@ fn requester_of(auth: AuthIdentity) -> SigningRequester {
 /// authorizer of a stealth statement's revealed funds, in a transaction walletd
 /// seals itself, so a co-signature for another party never needs one.
 fn is_signing_key(context: &HandlerContext, key_id: &KeyId) -> Result<bool, anyhow::Error> {
-    let is_signing_key = context.wallet_sdk().key_manager_api().is_signing_key(*key_id)?;
+    let is_signing_key = helpers::is_signing_key(context.wallet_sdk(), "key_id", key_id)?;
     Ok(is_signing_key && key_id.derived_branch() != Some(KeyBranch::Nonce))
 }
 
@@ -359,12 +365,18 @@ fn to_info(model: SigningRequestModel) -> SigningRequestInfo {
         model.unsigned_transaction.fee_instructions(),
         model.unsigned_transaction.instructions(),
     );
+    let component_rules_changes = component_rules_changes(
+        model.unsigned_transaction.fee_instructions(),
+        model.unsigned_transaction.instructions(),
+    );
     SigningRequestInfo {
         request_id: model.id,
         status: model.effective_status_now(),
         transaction: model.unsigned_transaction,
         component_upgrades,
+        component_rules_changes,
         seal_public_key: model.seal_public_key,
+        authorizers: model.authorizers,
         key_id: model.key_id,
         signer_public_key: model.signer_public_key,
         message_hash: model.message_hash,
@@ -379,14 +391,15 @@ fn to_info(model: SigningRequestModel) -> SigningRequestInfo {
 
 #[cfg(test)]
 mod tests {
+    use axum_jrpc::error::{JsonRpcError, JsonRpcErrorReason};
     use tari_ootle_address::Network;
     use tari_ootle_common_types::Epoch;
-    use tari_ootle_transaction::{Transaction, UnsignedTransaction};
+    use tari_ootle_transaction::{AuthorizerSet, Transaction, UnsignedTransaction};
     use tari_ootle_wallet_sdk::models::{KeyBranch, KeyId, SigningRequestStatus};
     use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
     use super::*;
-    use crate::handlers::test_support::TestDaemon;
+    use crate::{handlers::test_support::TestDaemon, server::ApplicationErrorCode};
 
     struct SigningTest {
         daemon: TestDaemon,
@@ -409,6 +422,23 @@ mod tests {
         UnsignedTransaction::new(Network::LocalNet.as_byte(), Epoch(100))
     }
 
+    /// A co-signer other than this wallet.
+    fn other_authorizer() -> RistrettoPublicKeyBytes {
+        RistrettoPublicKeyBytes::from_bytes(&[0x77; 32]).unwrap()
+    }
+
+    fn authorizers(test: &SigningTest) -> AuthorizerSet {
+        let signer_public_key = test
+            .context
+            .wallet_sdk()
+            .key_manager_api()
+            .get_public_key(signer_key())
+            .unwrap()
+            .public_key
+            .to_byte_type();
+        [signer_public_key, other_authorizer()].into_iter().collect()
+    }
+
     async fn setup() -> SigningTest {
         let daemon = TestDaemon::start().await;
         let api_key = daemon.api_key("governance-signer", "signing_requests:create,signing_requests:approve");
@@ -423,20 +453,28 @@ mod tests {
     /// Stores a pending request the way `handle_create` would, skipping its
     /// network-dependent epoch check.
     fn insert_request(test: &SigningTest) -> SigningRequestId {
+        insert_request_for(test, transaction())
+    }
+
+    fn insert_request_for(test: &SigningTest, transaction: UnsignedTransaction) -> SigningRequestId {
         let sdk = test.context.wallet_sdk();
-        let transaction = transaction();
         let signer_public_key = sdk
             .key_manager_api()
             .get_public_key(signer_key())
             .unwrap()
             .public_key
             .to_byte_type();
-        let message_hash = TransactionSignature::create_message(&seal_public_key(), &transaction);
+        let authorizers = authorizers(test);
+        let message_hash = TransactionSignature::create_message(
+            AuthorizationContext::new(&seal_public_key(), &authorizers),
+            transaction.body(),
+        );
         sdk.store()
             .with_write_tx(|tx| {
                 tx.signing_request_insert(NewSigningRequest {
                     unsigned_transaction: &transaction,
                     seal_public_key: &seal_public_key(),
+                    authorizers: &authorizers,
                     key_id: signer_key(),
                     signer_public_key: &signer_public_key,
                     message_hash: message_hash.as_bytes(),
@@ -455,6 +493,7 @@ mod tests {
         SigningRequestCreateRequest {
             transaction,
             seal_public_key: seal_public_key(),
+            authorizers: [other_authorizer()].into_iter().collect(),
             key_id,
             memo: String::new(),
             ttl_secs: None,
@@ -491,12 +530,30 @@ mod tests {
         let signature = info.signature.expect("a signed request carries its signature");
         assert_eq!(Some(&signature), response.signature.as_ref());
         assert_eq!(*signature.public_key(), info.signer_public_key);
-        let message = TransactionSignature::create_message(&seal_public_key(), &transaction());
+        assert_eq!(info.authorizers, authorizers(&test));
+        let message = TransactionSignature::create_message(
+            AuthorizationContext::new(&seal_public_key(), &authorizers(&test)),
+            transaction().body(),
+        );
         assert_eq!(info.message_hash, *message.as_bytes());
         assert!(
             signature.verify_message(message),
             "the signature must verify against the message the approver was shown"
         );
+    }
+
+    #[tokio::test]
+    async fn a_stored_request_under_an_older_schema_is_not_approved() {
+        let test = setup().await;
+        let request_id = insert_request_for(&test, UnsignedTransaction::V1(transaction().into_body()));
+
+        let err = handle_approve(&test.context, Some(&test.session), SigningRequestDecisionRequest {
+            request_id,
+        })
+        .await
+        .unwrap_err();
+        assert!(err.to_string().contains("V1"), "{err}");
+        assert_eq!(status_of(&test, request_id), SigningRequestStatus::Pending);
     }
 
     #[tokio::test]
@@ -619,10 +676,18 @@ mod tests {
             assert!(err.to_string().contains("not a signing key"), "{key_branch:?}: {err}");
         }
 
+        let older_schema = UnsignedTransaction::V1(transaction().into_body());
+        let err = create(create_request(older_schema, signer_key())).await.unwrap_err();
+        assert!(err.to_string().contains("V1"), "{err}");
+
         let mut long_memo = create_request(transaction(), signer_key());
         long_memo.memo = "x".repeat(MAX_MEMO_CHARS + 1);
         let err = create(long_memo).await.unwrap_err();
         assert!(err.to_string().contains("memo"), "{err}");
+
+        // The signer's own key is missing from the set its signature would commit to.
+        let err = create(create_request(transaction(), signer_key())).await.unwrap_err();
+        assert!(err.to_string().contains("authorizers"), "{err}");
 
         let none_created = test
             .context
@@ -631,5 +696,35 @@ mod tests {
             .with_read_tx(|tx| tx.signing_requests_list())
             .unwrap();
         assert!(none_created.is_empty());
+    }
+
+    #[tokio::test]
+    async fn missing_signing_request_maps_to_not_found_for_get_approve_and_reject() {
+        let test = setup().await;
+        let missing_id = 999_999;
+
+        for err in [
+            handle_get(&test.context, Some(&test.session), SigningRequestGetRequest {
+                request_id: missing_id,
+            })
+            .await
+            .unwrap_err(),
+            handle_approve(&test.context, Some(&test.session), SigningRequestDecisionRequest {
+                request_id: missing_id,
+            })
+            .await
+            .unwrap_err(),
+            handle_reject(&test.context, Some(&test.session), SigningRequestDecisionRequest {
+                request_id: missing_id,
+            })
+            .await
+            .unwrap_err(),
+        ] {
+            let jrpc = err.downcast_ref::<JsonRpcError>().expect("JsonRpcError");
+            assert!(matches!(
+                jrpc.error_reason(),
+                JsonRpcErrorReason::ApplicationError(code) if code == ApplicationErrorCode::NotFound as i32
+            ));
+        }
     }
 }

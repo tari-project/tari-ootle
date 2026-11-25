@@ -43,6 +43,10 @@
 # Indexer API URLs. The wallet picks one at random at startup and moves to the next if it stops responding.
 # (default: ["http://127.0.0.1:18300"])
 # indexer_api_url = ["http://127.0.0.1:18300"]
+
+[mainnet.ootle_wallet_daemon]
+indexer_api_url = ["https://indexer-a.ootle.tari.com/", "https://indexer-b.ootle.tari.com/"]
+
 [esmeralda.ootle_wallet_daemon]
 # Authentication method: "webauthn" (default) or "none" (dangerous: any local program can spend funds)
 #authentication = "webauthn"

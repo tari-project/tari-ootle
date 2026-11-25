@@ -138,6 +138,10 @@ const VERIFICATION_CHECK_INTERVAL: Duration = Duration::from_secs(5);
 /// versions. A burst's versions are promoted on the next leaf, so this bounds how far promotion trails the stream at
 /// one probe per group a second.
 const BURST_PROBE_MIN_INTERVAL: Duration = Duration::from_secs(1);
+/// `tokio::time::interval` panics on a zero period, which would kill the reporting task, and a
+/// zero work interval also turns error/pause cooldowns into tight loops, so configured intervals
+/// are raised to this floor.
+const MIN_WORK_INTERVAL: Duration = Duration::from_secs(1);
 /// The soonest a shard group syncs a missing checkpoint again once its stream shows the committee has entered the
 /// epoch after it. Committee members commit the checkpoint within moments of each other, and one that has not yet costs
 /// a reopen, so this bounds the reopens to one a period. See [`CheckpointRetryBackoff`] for how it grows.
@@ -216,7 +220,7 @@ impl NetworkWideStateSync {
         epoch_manager: EpochManagerHandle<PeerAddress>,
         networking: NetworkingHandle<TariMessagingSpec>,
         storage: SqliteIndexerStore,
-        config: NetworkWideStateSyncConfig,
+        mut config: NetworkWideStateSyncConfig,
         notify: Notify<IndexerEvent>,
         transaction_event_notify: Notify<TransactionEvent>,
         validator_status: ValidatorStatusMonitor,
@@ -228,6 +232,7 @@ impl NetworkWideStateSync {
         #[cfg(feature = "metrics")] substate_cache_metrics: SubstateCacheMetrics,
         #[cfg(feature = "metrics")] substate_manager: SubstateManager,
     ) -> Self {
+        config.work_interval = config.work_interval.max(MIN_WORK_INTERVAL);
         Self {
             epoch_manager,
             networking,
@@ -342,6 +347,7 @@ impl NetworkWideStateSync {
                                     },
                                 }
                             },
+                            Ok(EpochManagerEvent::PendingActivation { .. }) => Ok(()),
                             Err(broadcast::error::RecvError::Lagged(n)) => {
                                 warn!(target: LOG_TARGET, "⚠️ Missed {n} epoch event(s). Re-planning the state sync");
                                 Ok(())
@@ -973,8 +979,8 @@ impl NetworkWideStateSync {
             Ok(Some(probe)) => {
                 self.consensus_epoch.observe(probe.tip.shard_group, probe.tip.epoch);
                 self.observe_tip(&probe);
-                // Record the quorum-signed state root so the read path can skip re-validating
-                // commit proofs for this tip. A failure here must not abort the state sync.
+                // Record the quorum-signed state root so the read path knows how recent anchors
+                // citing it are. A failure here must not abort the state sync.
                 if let Err(e) = self.persist_verified_tip(probe.tip).await {
                     warn!(target: LOG_TARGET, "⚠️ Failed to record verified state root for shard group {}: {}", shard_group, e);
                 }
@@ -2958,8 +2964,8 @@ fn promote_staged(
 /// Every substate is committed at the snapshot's version, in one commit per creation epoch, which the indexed UTXOs
 /// record. The snapshot is read [`MAX_PROMOTED_SNAPSHOT_SUBSTATES`] at a time, so it is never held in memory whole.
 /// The receipts and events it indexes are history rather than news, so they are counted but not announced: a
-/// subscriber reads them from the store. The snapshot holds no tombstone of a UTXO spent at or below its version, so
-/// the shard's UTXO tombstone horizon is raised to that version.
+/// subscriber reads them from the store. The snapshot holds no tombstone of a UTXO spent without burning at or below
+/// its version, so the shard's UTXO tombstone horizon is raised to that version.
 fn promote_snapshot(
     tx: &mut SqliteStoreWriteTransaction<'_>,
     shard: Shard,
@@ -2990,6 +2996,7 @@ fn promote_snapshot(
                 let update = SubstateUpdateProof::Create(Box::new(SubstateCreate { substate }));
                 buf.extend_from_substate_update(shard, state_version, update, value_filters);
             }
+            buf.mark_burns(shard, state_version);
             let committed = buf.commit(tx, shard, state_version, epoch, event_filters, watched_templates)?;
             promoted.add(state_version, CommittedVersion {
                 finalized: Vec::new(),
@@ -3022,23 +3029,31 @@ impl VersionBuf {
                 buf.extend_from_substate_update(shard, state_version, update, value_filters);
             }
         }
-        buf.mark_burns();
+        buf.mark_burns(shard, state_version);
         Ok(buf)
     }
 
-    /// Marks each spend of a UTXO version whose next version this version brings up with no output as a burn. A burn
-    /// takes a version down and brings the next one up in the same transaction, and a UTXO's versions share its shard,
-    /// so both are in this version.
-    fn mark_burns(&mut self) {
+    /// A burn brings up the next version of a UTXO with no output. When this version also takes the burnt version
+    /// down, that spend is marked burnt; a snapshot holds only the version brought up, and its burnt version is
+    /// recorded as a burn at this state version.
+    fn mark_burns(&mut self, shard: Shard, state_version: StateVersion) {
         if self.burnt_utxos.is_empty() {
             return;
         }
         for update in &mut self.utxos {
             if let UtxoUpdateRecord::Spent(spent) = update &&
-                self.burnt_utxos.contains(&(spent.address.clone(), spent.version))
+                self.burnt_utxos.remove(&(spent.address.clone(), spent.version))
             {
                 *update = UtxoUpdateRecord::Burnt(spent.clone());
             }
+        }
+        for (address, version) in std::mem::take(&mut self.burnt_utxos) {
+            self.utxos.push(UtxoUpdateRecord::Burnt(UtxoSpent {
+                address,
+                shard,
+                version,
+                state_version,
+            }));
         }
     }
 
@@ -3421,8 +3436,28 @@ mod tests {
             for update in updates {
                 buf.extend_from_substate_update(SHARD, StateVersion::new(5), update, stream_value_filters());
             }
-            buf.mark_burns();
+            buf.mark_burns(SHARD, StateVersion::new(5));
             buf
+        }
+
+        /// A burnt UTXO in a snapshot arrives as a `Create` with `output: None` and no matching `Destroy`, and is
+        /// recorded as a `Burnt` update for the version the burn took down.
+        #[test]
+        fn a_burnt_utxo_in_a_snapshot_is_recorded_burnt() {
+            let (address, _) = output();
+
+            let buf = sorted(vec![up(&address, 1, None)]);
+
+            assert_eq!(buf.utxos.len(), 1);
+            assert!(
+                matches!(&buf.utxos[0], UtxoUpdateRecord::Burnt(burnt)
+                    if burnt.address == address &&
+                        burnt.version == SubstateVersion::ZERO &&
+                        burnt.shard == SHARD &&
+                        burnt.state_version == StateVersion::new(5)),
+                "{:?}",
+                buf.utxos[0]
+            );
         }
 
         /// A burn takes the output's version down and brings the next one up with no output, in either order.
@@ -3931,13 +3966,35 @@ mod tests {
 
         #[tokio::test]
         async fn a_promoted_snapshot_is_indexed_and_verified_at_its_version() {
+            use tari_engine_types::Utxo;
+            use tari_indexer_client::types::{UtxoBurnt, WalletUtxoUpdate};
+
             let (_dir, store) = store().await;
             let num_substates = MAX_PROMOTED_SNAPSHOT_SUBSTATES as u64 + 5;
+            let UtxoUpdateRecord::Unspent(burnt_template) = crate::storage_sqlite::unspent_at(1, 1) else {
+                unreachable!()
+            };
+            let burnt_address = burnt_template.address;
+            let burnt_snapshot = SnapshotSubstate {
+                epoch: Epoch(2),
+                leaf_key: tari_state_tree::LeafKey::new(tari_state_tree::TreeHash::new([0xff; 32])),
+                substate: rpc::SubstateData::from(SubstateData {
+                    substate_id: SubstateId::Utxo(burnt_address.clone()),
+                    version: tari_engine_types::SubstateVersion::new(1),
+                    value: SubstateValueOrHash::Value(Box::new(SubstateValue::Utxo(Utxo {
+                        output: None,
+                        is_frozen: false,
+                    }))),
+                    template_metadata: None,
+                })
+                .encode_to_vec(),
+            };
             store
                 .with_write_tx(move |tx| {
-                    let substates = (1..=num_substates)
+                    let mut substates = (1..=num_substates)
                         .map(|n| snapshot_receipt(n, n % 3 + 1))
                         .collect::<Vec<_>>();
+                    substates.push(burnt_snapshot);
                     tx.snapshot_substates_insert(SHARD, &substates)?;
                     tx.checkpoint_shard_leaves_insert(&[checkpoint_leaf(40), checkpoint_leaf(60)])?;
                     // Another shard's snapshot is left alone
@@ -3966,6 +4023,26 @@ mod tests {
                     .await
                     .unwrap();
             }
+            let resource = *burnt_address.resource_address();
+            let burnt_id = *burnt_address.id();
+            let utxo_updates = store
+                .with_read_tx(move |tx| tx.utxos_get_updates(resource, Epoch(2), SHARD, v(0), false, 10))
+                .await
+                .unwrap();
+            assert_eq!(utxo_updates.max_epoch, Epoch(2));
+            assert_eq!(utxo_updates.max_state_version, v(50));
+            assert_eq!(utxo_updates.updates.len(), 1);
+            assert!(
+                matches!(&utxo_updates.updates[0], WalletUtxoUpdate::Burnt(UtxoBurnt { id, version })
+                    if *id == burnt_id && *version == SubstateVersion::ZERO),
+                "{:?}",
+                utxo_updates.updates[0]
+            );
+            let after_epoch = store
+                .with_read_tx(move |tx| tx.utxos_get_updates(resource, Epoch(3), SHARD, v(0), false, 10))
+                .await
+                .unwrap();
+            assert!(after_epoch.updates.is_empty());
             let stored = stored_progress(&store).await;
             assert_eq!(stored.verified.get(&SHARD), Some(&verified));
             assert_eq!(stored.last_state_version(SHARD), Some(v(50)));
@@ -4758,6 +4835,12 @@ mod tests {
             }
 
             async fn get_birthday_epoch(&self) -> Result<Option<Epoch>, EpochManagerError> {
+                unimplemented!()
+            }
+
+            async fn get_pending_activation(
+                &self,
+            ) -> Result<Option<tari_epoch_manager::PendingActivation>, EpochManagerError> {
                 unimplemented!()
             }
         }

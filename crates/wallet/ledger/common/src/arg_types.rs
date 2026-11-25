@@ -78,10 +78,56 @@ pub struct GetPublicKeyResponse {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, BorshSerialize, BorshDeserialize)]
 #[borsh(use_discriminant = true)]
 pub enum SignMode {
-    /// Authorization signature added by an extra signer; binds the seal signer's public key.
+    /// Authorization signature added by an extra signer; binds the authorizer set and the seal signer's
+    /// public key.
     AddSigner = 0x00,
     /// Final seal signature by the transaction originator; binds the prior signatures.
     Seal = 0x01,
+}
+
+/// Canonical field order for an authorization signature. Matches
+/// `tari_ootle_transaction::TransactionSignature::signing_preimage`.
+pub const ADD_SIGNER_SEQ: &[SigningField] = &[
+    SigningField::SchemaVersion,
+    SigningField::Network,
+    SigningField::FeeInstructions,
+    SigningField::Instructions,
+    SigningField::Inputs,
+    SigningField::MinEpoch,
+    SigningField::MaxEpoch,
+    SigningField::MainSigner,
+    SigningField::DryRun,
+    SigningField::TransactionNonce,
+    SigningField::BlobHashes,
+    SigningField::Authorizers,
+    SigningField::SealSigner,
+];
+
+/// Canonical field order for a seal signature. Matches
+/// `tari_ootle_transaction::TransactionSealSignature::signing_preimage`.
+pub const SEAL_SEQ: &[SigningField] = &[
+    SigningField::SchemaVersion,
+    SigningField::Network,
+    SigningField::FeeInstructions,
+    SigningField::Instructions,
+    SigningField::Inputs,
+    SigningField::MinEpoch,
+    SigningField::MaxEpoch,
+    SigningField::MainSigner,
+    SigningField::DryRun,
+    SigningField::TransactionNonce,
+    SigningField::BlobHashes,
+    SigningField::Signatures,
+];
+
+impl SignMode {
+    /// Expected sequence of [`SigningField`]s for this signing mode.
+    pub const fn expected_fields(self) -> &'static [SigningField] {
+        match self {
+            SignMode::AddSigner => ADD_SIGNER_SEQ,
+            SignMode::Seal => SEAL_SEQ,
+        }
+    }
 }
 
 /// `SignTransaction` APDU frame kind, carried in `P2`.
@@ -114,11 +160,12 @@ impl TryFrom<u8> for FrameKind {
 /// the last APDU chunk of that field's bytes.
 pub const SEGMENT_LAST_CHUNK: u8 = 0x80;
 
-/// A field of the canonical transaction signing preimage, in chain order.
+/// A field of the canonical transaction signing preimage.
 ///
 /// MUST stay numerically in lock-step with `tari_ootle_transaction::PreimageField` — the host
 /// streams `field as u8` in `P1` and the device reconstructs the exact byte sequence chained into
-/// the message digest. The lock-step is asserted by a test in the ledger client crate.
+/// the message digest. The lock-step is asserted by a test in the ledger client crate. A tag names
+/// a field, not its position: the order is [`ADD_SIGNER_SEQ`] or [`SEAL_SEQ`].
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SigningField {
@@ -135,6 +182,7 @@ pub enum SigningField {
     TransactionNonce = 10,
     BlobHashes = 11,
     Signatures = 12,
+    Authorizers = 13,
 }
 
 impl SigningField {
@@ -163,6 +211,7 @@ impl TryFrom<u8> for SigningField {
             10 => Ok(TransactionNonce),
             11 => Ok(BlobHashes),
             12 => Ok(Signatures),
+            13 => Ok(Authorizers),
             _ => Err(()),
         }
     }

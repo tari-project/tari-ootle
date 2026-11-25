@@ -197,13 +197,14 @@ fn test_composed() {
 fn test_buggy_template() {
     // Uncomment the following lines to print the template definition bytes embedded in the
     // `tari_tdef` custom section
-    // let bytes = tari_template_abi::TemplateDef::V1(tari_template_abi::TemplateDefV1 {
+    // let encoded = tari_bor::encode(&tari_template_abi::TemplateDef::V2(tari_template_abi::TemplateDefV2 {
     //     template_name: "Buggy".to_string(),
     //     abi_version: tari_template_abi::version::MINIMUM_SUPPORTED_WASM_ABI_VERSION,
     //     functions: vec![],
-    // })
-    // .encode_for_wasm_embedding()
+    // }))
     // .unwrap();
+    // let mut bytes = ((encoded.len() + 4) as u32).to_le_bytes().to_vec();
+    // bytes.extend(encoded);
     // println!("static _TARI_TEMPLATE_DEF: [u8; {}] = [", bytes.len());
     // for chunk in bytes.chunks(16) {
     //     print!("    ");
@@ -214,10 +215,8 @@ fn test_buggy_template() {
     // }
     // println!("];");
 
-    let err = compile_template("tests/templates/buggy", &["unexpected_export_function"])
-        .unwrap()
-        .load_template()
-        .unwrap_err();
+    let module = compile_template("tests/templates/buggy", &["unexpected_export_function"]).unwrap();
+    let err = WasmModule::validate_and_load(module.code()).unwrap_err();
     assert!(matches!(
         err,
         TemplateLoaderError::WasmModuleError(WasmExecutionError::UnexpectedAbiFunction { .. })
@@ -351,7 +350,7 @@ fn test_tuples() {
     assert_eq!(fn_get.output.to_string(), "Tuple<String,U32>");
     // the "set" method accepts a tuple (String, u32) as argument
     let fn_set = module.find_func_by_name("set").unwrap();
-    assert_eq!(fn_set.arguments[1].arg_type.to_string(), "Tuple<String,U32>");
+    assert_eq!(fn_set.arguments[0].arg_type.to_string(), "Tuple<String,U32>");
     // the "new_with_self" constructor returns a tuple (Self, String)
     let fn_new_with_self = module.find_func_by_name("new_with_self").unwrap();
     assert_eq!(fn_new_with_self.output.to_string(), "Tuple<Tuple,String>");
@@ -1344,15 +1343,55 @@ fn test_builtin_templates() {
 
 #[test]
 fn all_builtin_templates_are_correct() {
-    // To prevent cyclic dev-deps on publish, we add this test here instead of inside template builtin
+    // To prevent cyclic dev-deps on publish, we add this test here instead of inside template builtin.
+    // Built-ins reach the engine through the load path alone, so this is where they are held to the publish
+    // admission rules. They are compiled with a `name` section, which only a publish refuses.
     for template in all_builtin_templates() {
-        let loaded = WasmModule::load_template_from_code(template.binary)
-            .unwrap_or_else(|e| panic!("Failed to load builtin template at address {}: {}", template.address, e));
+        let code = without_custom_sections_but_tdef(template.binary);
+        let def = WasmModule::validate_and_load(&code).unwrap_or_else(|e| {
+            panic!(
+                "Builtin template at address {} fails publish admission: {}",
+                template.address, e
+            )
+        });
         assert_eq!(
-            loaded.template_name(),
+            def.template_name(),
             template.name,
             "Template name mismatch for address {}",
             template.address
         );
     }
+}
+
+/// `code` with every custom section other than `tari_tdef` removed.
+fn without_custom_sections_but_tdef(code: &[u8]) -> Vec<u8> {
+    use wasmer::wasmparser::{Parser, Payload};
+
+    let mut stripped = code[..8].to_vec();
+    for payload in Parser::new(0).parse_all(code) {
+        let payload = payload.expect("built-in template is well-formed wasm");
+        if let Payload::CustomSection(section) = &payload &&
+            section.name() != tari_template_abi::TEMPLATE_DEF_CUSTOM_SECTION
+        {
+            continue;
+        }
+        let Some((id, range)) = payload.as_section() else {
+            continue;
+        };
+        let start = usize::try_from(range.start).unwrap();
+        let end = usize::try_from(range.end).unwrap();
+        stripped.push(id);
+        let mut len = end - start;
+        loop {
+            let byte = (len & 0x7f) as u8;
+            len >>= 7;
+            if len == 0 {
+                stripped.push(byte);
+                break;
+            }
+            stripped.push(byte | 0x80);
+        }
+        stripped.extend_from_slice(&code[start..end]);
+    }
+    stripped
 }

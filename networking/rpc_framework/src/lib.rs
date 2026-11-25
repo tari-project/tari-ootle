@@ -74,7 +74,7 @@ pub use client::{RpcClient, RpcClientBuilder, RpcClientConfig, RpcRequestOptions
 mod either;
 
 mod message;
-pub use message::{Request, Response};
+pub use message::{Request, Response, ResponseGuard};
 
 mod error;
 pub use error::RpcError;

@@ -82,15 +82,9 @@ pub fn pay_to_output_authorization(
     pay_to: &PayTo,
     derive_stealth_key: impl FnOnce() -> RistrettoPublicKeyBytes,
 ) -> Result<SpendAuthorization, WalletCryptoError> {
-    match pay_to {
-        PayTo::StealthPublicKey => Ok(SpendAuthorization::Key(derive_stealth_key())),
-        PayTo::AccessRule(rule) => Ok(SpendAuthorization::Script(condition_root(&[
-            SpendCondition::access_rule(rule.clone()),
-        ])?)),
-        PayTo::TemplateFunction(tf) => Ok(SpendAuthorization::Script(condition_root(&[
-            SpendCondition::template_function(tf.clone()),
-        ])?)),
-        PayTo::Conditions(conditions) => Ok(SpendAuthorization::Script(validated_condition_root(conditions)?)),
+    match pay_to.conditions() {
+        None => Ok(SpendAuthorization::Key(derive_stealth_key())),
+        Some(conditions) => Ok(SpendAuthorization::Script(validated_condition_root(&conditions)?)),
     }
 }
 
@@ -150,12 +144,6 @@ where
     Outputs: IntoIterator<Item = &'a StealthOutputWitness> + Clone,
     Outputs::IntoIter: ExactSizeIterator,
 {
-    if revealed_input_amount.is_negative() {
-        return Err(WalletCryptoError::InvalidArgument {
-            name: "revealed_input_amount",
-            details: format!("Revealed input amount must be non-negative: {revealed_input_amount}"),
-        });
-    }
     if let Some(revealed) = revealed_output &&
         !revealed.amount.is_positive()
     {
@@ -352,12 +340,18 @@ pub fn create_outputs_statement<'a, Outputs: IntoIterator<Item = &'a StealthOutp
 
 #[cfg(test)]
 mod tests {
-    use tari_crypto::{keys::SecretKey, ristretto::RistrettoSecretKey};
+    use tari_crypto::{
+        keys::{PublicKey, SecretKey},
+        ristretto::{RistrettoPublicKey, RistrettoSecretKey},
+    };
     use tari_engine_types::stealth::validate_stealth_outputs_statement;
     use tari_template_lib_types::{
+        AccessRule,
         Amount,
         EncryptedData,
+        access_rules::{MAX_ACCESS_RULE_NODES, RequireRule, RestrictedAccessRule, RuleRequirement},
         crypto::{RistrettoPublicKeyBytes, UtxoTag},
+        stealth::{AtomicCondition, TemplateFunction},
     };
 
     use super::*;
@@ -365,6 +359,7 @@ mod tests {
 
     fn create_valid_proof(amount: u64, minimum_value_promise: u64) -> StealthOutputsStatement {
         let mask = RistrettoSecretKey::random(&mut rand::rng());
+        let owner_pk = RistrettoPublicKey::from_secret_key(&mask).to_byte_type();
         create_outputs_statement(
             &[StealthOutputWitness {
                 witness: OutputWitness {
@@ -375,7 +370,7 @@ mod tests {
                     encrypted_data: EncryptedData::try_from(vec![0; EncryptedData::min_size()]).unwrap(),
                     resource_view_key: None,
                 },
-                auth: SpendAuthorization::Key(RistrettoPublicKeyBytes::default()),
+                auth: SpendAuthorization::Key(owner_pk),
                 tag: UtxoTag::new(0),
             }],
             None,
@@ -409,6 +404,64 @@ mod tests {
             matches!(err, WalletCryptoError::InvalidArgument { name: "inputs", .. }),
             "unexpected error: {err}"
         );
+    }
+
+    fn template_function_with_args(num_args: usize) -> TemplateFunction {
+        TemplateFunction {
+            template: Default::default(),
+            function: "predicate".try_into().unwrap(),
+            args: vec![Bytes::default(); num_args],
+        }
+    }
+
+    /// An access rule requiring any one of `num_requirements` distinct templates, holding `1 + num_requirements` nodes.
+    fn access_rule_with_requirements(num_requirements: usize) -> AccessRule {
+        let requirements = (0..num_requirements)
+            .map(|i| {
+                let mut bytes = [0u8; 32];
+                bytes[..8].copy_from_slice(&(i as u64).to_le_bytes());
+                RuleRequirement::ScopedToTemplate(Hash32::from_array(bytes))
+            })
+            .collect();
+        AccessRule::Restricted(RestrictedAccessRule::Require(RequireRule::AnyOf(requirements)))
+    }
+
+    fn assert_rejects_pay_to(pay_to: PayTo) {
+        let err = pay_to_output_authorization(&pay_to, RistrettoPublicKeyBytes::default)
+            .expect_err("a pay_to whose leaf cannot be revealed at spend time must be rejected");
+        assert!(
+            matches!(err, WalletCryptoError::InvalidArgument { name: "conditions", .. }),
+            "unexpected error: {err}"
+        );
+    }
+
+    /// Every leaf a pay_to commits must decode, or the output it gates can never be spent.
+    #[test]
+    fn it_rejects_a_pay_to_whose_leaf_exceeds_the_decode_node_limit() {
+        let rule = access_rule_with_requirements(MAX_ACCESS_RULE_NODES - 1);
+        assert_eq!(rule.num_nodes(), MAX_ACCESS_RULE_NODES);
+        tari_bor::decode::<AccessRule>(&tari_bor::encode(&rule).unwrap()).expect("the rule alone is within the limit");
+        assert_rejects_pay_to(PayTo::AccessRule(rule));
+
+        let tf = template_function_with_args(MAX_ACCESS_RULE_NODES);
+        assert_rejects_pay_to(PayTo::TemplateFunction(tf.clone()));
+        assert_rejects_pay_to(PayTo::Conditions(vec![SpendCondition::template_function(tf)]));
+
+        let half = template_function_with_args(MAX_ACCESS_RULE_NODES / 2);
+        assert_rejects_pay_to(PayTo::Conditions(vec![SpendCondition::all([
+            AtomicCondition::TemplateFunction(half.clone()),
+            AtomicCondition::TemplateFunction(half),
+        ])]));
+    }
+
+    #[test]
+    fn it_accepts_a_pay_to_whose_leaf_is_at_the_decode_node_limit() {
+        let rule = access_rule_with_requirements(MAX_ACCESS_RULE_NODES - 2);
+        let tf = template_function_with_args(MAX_ACCESS_RULE_NODES - 1);
+        for pay_to in [PayTo::AccessRule(rule), PayTo::TemplateFunction(tf)] {
+            let auth = pay_to_output_authorization(&pay_to, RistrettoPublicKeyBytes::default).unwrap();
+            assert!(matches!(auth, SpendAuthorization::Script(_)));
+        }
     }
 
     #[test]

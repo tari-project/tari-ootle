@@ -164,6 +164,7 @@ async fn health_check(Extension(handlers): Extension<Arc<JsonRpcHandlers>>) -> i
                 ConsensusCurrentState::Idle |
                 ConsensusCurrentState::Running |
                 ConsensusCurrentState::Syncing |
+                ConsensusCurrentState::Presyncing |
                 ConsensusCurrentState::CheckSync
         );
 

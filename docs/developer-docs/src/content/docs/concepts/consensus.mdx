@@ -12,7 +12,7 @@ This page covers the protocol that turns proposed blocks into irreversible state
 - The consensus model — **chained HotStuff BFT** — and the roles of proposer and voter.
 - The message flow: proposal → vote → quorum certificate.
 - The **three-chain commit rule** and the block-lock that makes it safe.
-- Leader selection by round-robin.
+- Leader selection by smooth weighted round-robin.
 - The **pacemaker**: view timeouts, `TimeoutCertificate`s, and the new-view message.
 - The quorum mathematics behind the fault tolerance.
 - How a transaction that touches several shards is sequenced.
@@ -232,16 +232,14 @@ stops extending. Committed is the only one that is safe to report to a user as d
 
 ## Leader selection
 
-The leader of a view is chosen by **round-robin** over the committee:
+The leader of a view is chosen by **smooth weighted round-robin** over the committee
+(`crates/consensus/src/leader_selection.rs`). The schedule repeats every `total_power` heights and
+gives each member `vote_power` of them, spreading a heavier member's turns through the period
+rather than bunching them. Each step adds every member's power to its counter, picks the highest
+counter (the lowest committee index on a tie) and subtracts `total_power` from the winner.
 
-```rust
-// applications/tari_validator_node/src/consensus/leader_selection.rs
-fn calculate_leader(&self, committee: &Committee<TAddr>, height: NodeHeight) -> u32 {
-    (height.as_u64() % committee.len() as u64) as u32
-}
-```
-
-Every member takes the proposer role in turn. There is **no verifiable random function and no
+At equal vote power the schedule is exactly `height % committee.len()`: every member takes the
+proposer role in turn. There is **no verifiable random function and no
 sortition** in leader selection — leadership is a deterministic function of the height and the
 committee, so any validator can compute who is allowed to propose at any height without being told.
 Rotating the role limits how much a single faulty leader can stall progress before the pacemaker
@@ -380,7 +378,8 @@ view whose leader fails. The base layer contributes the membership clock — the
 - A view = a block height; the leader proposes, validators vote, votes aggregate into a
   `ProposalCertificate`.
 - A block is committed by the **three-chain rule**; a **lock** keeps honest nodes from contradicting it.
-- Leaders are **round-robin**, `height % committee.len()` — no VRF, no sortition.
+- Leaders are **smooth weighted round-robin** by vote power (`height % committee.len()` at equal
+  power) — no VRF, no sortition.
 - The **pacemaker** times out stalled views; a quorum of timeout votes forms a `TimeoutCertificate`,
   and a `NewViewMessage` starts the next view.
 - Quorum tolerance is `f = (power - 1) / 3`; the quorum and liveness threshold is `power - f`.

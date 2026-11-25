@@ -41,4 +41,4 @@ reqwest = { workspace = true, features = ["json", "blocking"] }
 serde_json = { workspace = true }
 
 toml = "0.8.12"
-humantime = "2.1.0"
+time = { workspace = true, features = ["formatting"] }

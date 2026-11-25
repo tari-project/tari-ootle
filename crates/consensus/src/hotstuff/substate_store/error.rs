@@ -75,4 +75,14 @@ impl LockFailedError {
             _ => None,
         }
     }
+
+    /// Whether the failed lock was requested for an output of the transaction. A missing substate is only ever
+    /// reported for an input.
+    pub fn is_output_lock(&self) -> bool {
+        match self {
+            LockFailedError::SubstateExists { .. } => true,
+            LockFailedError::LockConflict { conflict, .. } => conflict.requested_lock.is_output(),
+            LockFailedError::SubstateNotFound { .. } => false,
+        }
+    }
 }

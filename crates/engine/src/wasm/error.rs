@@ -3,7 +3,7 @@
 
 use tari_bor::BorError;
 use tari_engine_types::{commit_result::ExecutionFailureCode, indexed_value::IndexedValueError};
-use tari_template_abi::{TEMPLATE_DEF_CUSTOM_SECTION, version::WasmAbiVersion};
+use tari_template_abi::{FunctionIdent, TEMPLATE_DEF_CUSTOM_SECTION, version::WasmAbiVersion};
 use wasmer::{ExportError, InstantiationError, MemoryAccessError};
 
 use crate::runtime::RuntimeError;
@@ -107,8 +107,18 @@ pub enum WasmExecutionError {
 
 #[derive(Debug, thiserror::Error)]
 pub enum WasmValidationError {
+    #[error("Template name {name} is too long, maximum length is {max_length}")]
+    TemplateNameTooLong { name: String, max_length: usize },
     #[error("Function name {name} is too long, maximum length is {max_length}")]
     FunctionNameTooLong { name: String, max_length: usize },
+    #[error("Template declares duplicate function `{name}`")]
+    DuplicateFunctionName { name: String },
+    #[error("Functions `{first}` and `{second}` share function identifier {ident:#010x}")]
+    FunctionIdentCollision {
+        first: String,
+        second: String,
+        ident: FunctionIdent,
+    },
     #[error("Function {name} contained too many arguments, maximum is {max_args}, but got {num_args}")]
     FunctionTooManyArguments {
         name: String,
@@ -126,6 +136,16 @@ pub enum WasmValidationError {
     },
     #[error("Too many functions in the module, maximum is {max_functions}")]
     TooManyFunctions { max_functions: usize },
+    #[error("Function {function} declares a type nested more than {max_depth} deep")]
+    AbiTypeTooDeep { function: String, max_depth: usize },
+    #[error("Function {function} declares a type made of more than {max_types} types")]
+    AbiTypeTooLarge { function: String, max_types: usize },
+    #[error("Function {function} declares a type named with {length} bytes, more than the maximum of {max_length}")]
+    AbiTypeNameTooLong {
+        function: String,
+        length: usize,
+        max_length: usize,
+    },
     #[error("Function {function_name} has invalid return type: {return_type:?}")]
     InvalidMigrationReturnType {
         function_name: String,
@@ -143,6 +163,8 @@ pub enum WasmValidationError {
     TooManyTables { count: usize, max_tables: usize },
     #[error("Module declares {count} globals, the maximum is {max_globals}")]
     TooManyGlobals { count: usize, max_globals: usize },
+    #[error("Module declares more active element segments than the maximum of {max_element_segments}")]
+    TooManyElementSegments { max_element_segments: usize },
     #[error("Module contains more than {max_functions} functions")]
     TooManyModuleFunctions { max_functions: usize },
     #[error("Module's functions declare more than {max_variables} parameters and locals")]
@@ -226,15 +248,22 @@ impl WasmValidationError {
     /// Every validation failure is a property of the published module, so the template is always at fault.
     pub fn failure_code(&self) -> ExecutionFailureCode {
         match self {
+            Self::TemplateNameTooLong { .. } |
             Self::FunctionNameTooLong { .. } |
+            Self::DuplicateFunctionName { .. } |
+            Self::FunctionIdentCollision { .. } |
             Self::FunctionTooManyArguments { .. } |
             Self::FunctionTooManyTupleReturn { .. } |
             Self::TooManyFunctions { .. } |
+            Self::AbiTypeTooDeep { .. } |
+            Self::AbiTypeTooLarge { .. } |
+            Self::AbiTypeNameTooLong { .. } |
             Self::InvalidMigrationReturnType { .. } |
             Self::DisallowedCustomSection { .. } |
             Self::StartSectionNotAllowed |
             Self::TooManyTables { .. } |
             Self::TooManyGlobals { .. } |
+            Self::TooManyElementSegments { .. } |
             Self::TooManyModuleFunctions { .. } |
             Self::TooManyModuleVariables { .. } |
             Self::TooManyFunctionMeteringChecks { .. } |

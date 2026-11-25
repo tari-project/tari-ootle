@@ -17,14 +17,26 @@ use crate::Epoch;
 #[borsh(use_discriminant = true)]
 #[serde(into = "u32", try_from = "u32")]
 pub enum ProtocolVersion {
-    /// The genesis schema, which every network starts under. Block IDs and votes commit to the version; each leaf of
+    /// The genesis schema of every network launched before V1. Block IDs and votes commit to the version; each leaf of
     /// a block's state merkle root commits to its shard, shard root and state version; each header commits to a
     /// transaction merkle root over the decision it reached for every transaction it finalizes; and each leaf of a
     /// block's command merkle root commits to the shard groups that a foreign commit proof of the block must carry the
     /// command in full for.
     #[default]
     V0 = 0,
+    /// Each substate value hash commits to the value's CBOR encoding instead of its borsh encoding. A field appended
+    /// to a substate type as an `Option` leaves the hash of every value written before it unchanged, so adding one
+    /// needs a coordinated upgrade but no new protocol version.
+    V1 = 1,
 }
+
+/// The epoch Esmeralda activates V1 at: L1 height 1,036,080, about 2026-11-06 12:00 UTC. It is consensus-bound once
+/// Esmeralda reaches it and must never move.
+const ESMERALDA_V1_ACTIVATION: Epoch = Epoch(12951);
+
+/// The epoch LocalNet activates V1 at. It is low but non-zero so that local networks and tests run under V0 first and
+/// cross the activation.
+const LOCALNET_V1_ACTIVATION: Epoch = Epoch(10);
 
 impl ProtocolVersion {
     /// The schema activation schedule for `network`, ordered by activation epoch ascending. Entry at
@@ -44,12 +56,12 @@ impl ProtocolVersion {
     /// one.
     const fn activations(network: Network) -> &'static [(Epoch, Self)] {
         match network {
-            Network::MainNet => &[(Epoch(0), Self::V0)],
-            Network::StageNet => &[(Epoch(0), Self::V0)],
-            Network::NextNet => &[(Epoch(0), Self::V0)],
-            Network::Igor => &[(Epoch(0), Self::V0)],
-            Network::Esmeralda => &[(Epoch(0), Self::V0)],
-            Network::LocalNet => &[(Epoch(0), Self::V0)],
+            Network::MainNet => &[(Epoch(0), Self::V1)],
+            Network::StageNet => &[(Epoch(0), Self::V1)],
+            Network::NextNet => &[(Epoch(0), Self::V1)],
+            Network::Igor => &[(Epoch(0), Self::V1)],
+            Network::Esmeralda => &[(Epoch(0), Self::V0), (ESMERALDA_V1_ACTIVATION, Self::V1)],
+            Network::LocalNet => &[(Epoch(0), Self::V0), (LOCALNET_V1_ACTIVATION, Self::V1)],
         }
     }
 
@@ -75,6 +87,7 @@ impl ProtocolVersion {
     pub const fn from_u32(v: u32) -> Option<Self> {
         match v {
             0 => Some(Self::V0),
+            1 => Some(Self::V1),
             _ => None,
         }
     }
@@ -275,11 +288,44 @@ mod tests {
             .collect()
     }
 
+    /// Esmeralda and LocalNet have history under V0. Every other network has none, so it starts at the newest version.
     #[test]
-    fn every_network_starts_at_v0() {
+    fn networks_without_history_start_at_v1() {
         for network in all_networks() {
-            assert_eq!(ProtocolVersion::genesis(network), ProtocolVersion::V0, "{network}");
+            let expected = match network {
+                Network::Esmeralda | Network::LocalNet => ProtocolVersion::V0,
+                _ => ProtocolVersion::V1,
+            };
+            assert_eq!(ProtocolVersion::genesis(network), expected, "{network}");
         }
+    }
+
+    #[test]
+    fn localnet_crosses_into_v1() {
+        let before = Epoch(LOCALNET_V1_ACTIVATION.as_u64() - 1);
+        assert_eq!(ProtocolVersion::at(Network::LocalNet, before), ProtocolVersion::V0);
+        assert_eq!(
+            ProtocolVersion::at(Network::LocalNet, LOCALNET_V1_ACTIVATION),
+            ProtocolVersion::V1
+        );
+    }
+
+    #[test]
+    fn esmeralda_crosses_into_v1() {
+        let before = Epoch(ESMERALDA_V1_ACTIVATION.as_u64() - 1);
+        assert_eq!(ProtocolVersion::at(Network::Esmeralda, before), ProtocolVersion::V0);
+        assert_eq!(
+            ProtocolVersion::at(Network::Esmeralda, ESMERALDA_V1_ACTIVATION),
+            ProtocolVersion::V1
+        );
+    }
+
+    #[test]
+    fn every_version_round_trips_through_its_u32() {
+        for version in [ProtocolVersion::V0, ProtocolVersion::V1] {
+            assert_eq!(ProtocolVersion::from_u32(version.as_u32()), Some(version));
+        }
+        assert_eq!(ProtocolVersion::from_u32(2), None);
     }
 
     #[test]

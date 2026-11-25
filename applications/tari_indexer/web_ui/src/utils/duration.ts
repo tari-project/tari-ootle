@@ -8,11 +8,13 @@ export interface Duration {
 
 export function displayDuration(duration: Duration): string {
   if (duration.secs === 0) {
-    if (duration.nanos > 1000000) {
-      return `${(duration.nanos / 1000000).toFixed(2)}ms`;
+    if (duration.nanos >= 1000000) {
+      const ms = Math.floor(duration.nanos / 10000) / 100;
+      return `${ms.toFixed(2)}ms`;
     }
-    if (duration.nanos > 1000) {
-      return `${(duration.nanos / 1000).toFixed(2)}µs`;
+    if (duration.nanos >= 1000) {
+      const us = Math.floor(duration.nanos / 10) / 100;
+      return `${us.toFixed(2)}µs`;
     }
     return `${duration.nanos}ns`;
   }

@@ -64,10 +64,11 @@ import type {
 const JSON_RPC_ADDRESS: string =
   import.meta.env.VITE_JRPC_ADDRESS || import.meta.env.VITE_JSON_RPC_ADDRESS || "/json_rpc";
 
+let nextRequestId = 0;
+
 async function jsonRpc(method: string, params: any = null) {
-  let id = 0;
-  id += 1;
-  let response = await fetch(new URL(JSON_RPC_ADDRESS, window.location.origin), {
+  const id = ++nextRequestId;
+  const response = await fetch(new URL(JSON_RPC_ADDRESS, window.location.origin), {
     method: "POST",
     body: JSON.stringify({
       method: method,
@@ -79,9 +80,20 @@ async function jsonRpc(method: string, params: any = null) {
       "Content-Type": "application/json",
     },
   });
-  let json = await response.json();
-  console.log(method, json);
-  if (json.error) {
+  if (!response.ok) {
+    let json: { error?: unknown } | undefined;
+    try {
+      json = await response.json();
+    } catch {
+      // Non-JSON error response body (e.g. reverse proxy HTML or plain text)
+    }
+    if (json?.error) {
+      throw json.error;
+    }
+    throw new Error(`JSON-RPC ${method} failed with HTTP ${response.status} ${response.statusText}`.trim());
+  }
+  const json = await response.json();
+  if (json?.error) {
     throw json.error;
   }
   return json.result;

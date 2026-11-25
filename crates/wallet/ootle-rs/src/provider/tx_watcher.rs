@@ -922,8 +922,8 @@ mod tests {
         let watch_b = pending.register(Duration::from_secs(2)).await.unwrap();
         let (outcome_a, outcome_b) = tokio::join!(watch_a, watch_b);
 
-        assert_eq!(outcome_a.unwrap(), FinalizeOutcome::Commit);
-        assert_eq!(outcome_b.unwrap(), FinalizeOutcome::Commit);
+        assert!(matches!(outcome_a.unwrap(), FinalizeOutcome::Commit));
+        assert!(matches!(outcome_b.unwrap(), FinalizeOutcome::Commit));
     }
 
     #[tokio::test]

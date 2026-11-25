@@ -7,8 +7,8 @@ _Last Updated: November 25, 2026_
 [The Tari Council](https://rfc.tari.com/TIP-0002_tari_community_charter.html) guides the development of the
 [Tari open source project](https://tari.com). As the stewards of Tari, we welcome feedback from security researchers and
 the general public. If you believe you have discovered a vulnerability, privacy issue, exposed data, or other security
-issues in Tari software or Tari project infrastructure, we want to hear from you. This policy outlines steps for reporting vulnerabilities to us, what we
-expect, and what you can expect from us.
+issues in Tari software or Tari project infrastructure, we want to hear from you. This policy outlines steps for
+reporting vulnerabilities to us, what we expect, and what you can expect from us.
 
 ![hacking_tari](./meta/img/hacker1.webp)
 
@@ -37,11 +37,13 @@ This policy does not apply to:
 * Social engineering of Tari users, Core Contributors, or their contractors;
 * Services, applications, and mix networks run by volunteers (e.g., Tor hidden services);
 * Attacks which require more than 50% of network hash rate (or equivalent luck for enough blocks to execute);
-* Assets, equipment, and systems not controlled by the Tari Council or the Tari Foundation; and
+* Assets, equipment, and systems not owned, operated, or maintained by the Tari Council, the Tari Foundation, or Core
+  Contributors as part of their duties; and
 * [Commonplace Reports](#commonplace-reports) as described in this policy.
 
-Vulnerabilities discovered or suspected in systems not controlled by the Tari Council or the Tari Foundation should be reported to the appropriate owner,
-vendor, or applicable authority. We emphasize that researchers should not engage in Denial of Service, active exploits
+Vulnerabilities discovered or suspected in systems not owned, operated, or maintained by the Tari Council, the Tari
+Foundation, or Core Contributors as part of their duties should be reported to the appropriate owner, vendor, or
+applicable authority. We emphasize that researchers should not engage in Denial of Service, active exploits
 against networks, or any physical or electronic attempts against property and/or data centers.
 
 ## Disclosure
@@ -80,7 +82,7 @@ When disclosing a security issue, we ask that you:
   between this policy and any other applicable terms, the terms of this policy will prevail;
 * Report any vulnerability you’ve discovered promptly and in good faith;
 * Avoid violating the privacy of others, disrupting our systems, destroying data, and/or harming user experience;
-* Use only the [Official Channels](#disclosure) to discuss vulnerability information with us;
+* Use only the [official channel](#disclosure) to discuss vulnerability information with us;
 * Provide us a reasonable amount of time (**at least 60 days** from the initial report) to resolve the issue before you
   disclose it publicly;
 * Perform testing only on in-scope systems, and respect systems and activities which are [Out of Scope](#out-of-scope);
@@ -114,7 +116,7 @@ you, and you have complied with this policy, we will take steps to make it known
 compliance with this policy.
 
 If at any time you have concerns or are uncertain whether your security research is consistent with this policy, please
-submit a report through one of our [Disclosure Channels](#disclosure) before going any further.
+submit a [Private Security Advisory](#disclosure) before going any further.
 
 * **IMPORTANT:** Please note that Safe Harbor applies only to legal claims under the control of the organization
   participating in this policy, and that the policy does not bind independent third parties.
@@ -139,13 +141,13 @@ Each severity maps to a bounty size. The XTM value of each size, with its histor
 
 * Minotari earned through the bounty programme will be unencumbered and can be spent or traded immediately after
   conversion.
-* Researchers will have to provide a valid Tari wallet emoji id in order to receive their Minotari tokens. The Tari Council
-  and Tari Foundation will not custody any tokens on behalf of researchers.
+* Researchers will have to provide a valid Tari wallet emoji id in order to receive their Minotari tokens. The Tari
+  Council and Tari Foundation will not custody any tokens on behalf of researchers.
 * The Tari Council reserves the right to adjust the bounty reward amounts from time to time.
 
-Our rewards are based on severity per CVSS (the Common Vulnerability Scoring Standard) as determined by the Core Contributor
-responsible for the affected system. Please note these are general guidelines, and reward decisions are up to the
-discretion of that Core Contributor and the Tari Council.
+Our rewards are based on severity per CVSS (the Common Vulnerability Scoring Standard) as determined by the Core
+Contributor responsible for the affected system. Please note these are general guidelines, and reward decisions are up
+to the discretion of that Core Contributor and the Tari Council.
 
 Please allow up to one week from the time the report was approved and validated to receive your bounty reward payment.
 
@@ -170,8 +172,8 @@ The more detail you provide, the easier it will be for us to triage and fix the 
 
 3. **Submit one vulnerability per report**, unless you need to chain vulnerabilities to provide impact.
 
-4. **First come, first served:** Only the first person to identify a particular vulnerability will qualify for a bounty
-  reward. Any additional reports will be considered as duplicates and will not qualify.
+4. **First come, first served:** Only the first person to report a particular vulnerability, by advisory creation time,
+  will qualify for a bounty reward. Any additional reports will be considered as duplicates and will not qualify.
 
 5. **Play it safe:** All testing must be performed on test accounts under your control. Any attacks against other users
   without provable express consent are not allowed. If a particular issue is severe enough that

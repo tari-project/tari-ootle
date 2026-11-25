@@ -73,6 +73,11 @@ with `libsqlite3-sys` 0.39 allowed and the workspace moves to it.""" },
 `unmaintained = "workspace"` already keeps it out of this check. It is listed so
 `rustsec/audit-check` follows the same policy. Remove once those dependencies move off
 `humantime`.""" },
+    { id = "RUSTSEC-2026-0441", reason = """
+`pin-utils` 0.1.0 is flagged unmaintained (archived upstream), with no patched release. Every path to
+it is transitive (`hyper` 1.8.1 and `nix` 0.26.4; macro helpers only), so `unmaintained = "workspace"`
+already keeps it out of this check. It is listed so `rustsec/audit-check` follows the same policy.
+Remove once `hyper` and `nix` move off `pin-utils`.""" },
 ]
 
 [licenses]

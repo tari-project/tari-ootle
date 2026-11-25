@@ -13,4 +13,6 @@ ignore = [
     "RUSTSEC-2026-0459",
     # humantime 2.3.0 unmaintained; transitive only (log4rs, env_logger, console-subscriber, cucumber, humantime-serde).
     "RUSTSEC-2026-0542",
+    # pin-utils 0.1.0 unmaintained (archived upstream); transitive only (hyper 1.8.1, nix 0.26.4).
+    "RUSTSEC-2026-0441",
 ]

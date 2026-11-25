@@ -146,6 +146,8 @@ mod size_cap_tests {
 
     #[test]
     fn rejects_access_rule_nodes_over_transaction_limit() {
+        use tari_template_lib_types::access_rules::{AccessRule, ComponentAccessRules};
+
         let per_method = "any_of(resource(TARI), resource(TARI), resource(TARI))";
         let methods = (0..64)
             .map(|i| format!("m{i} = {per_method}"))
@@ -157,11 +159,19 @@ mod size_cap_tests {
         );
         assert!(parse_manifest(&at_limit, HashMap::new(), Default::default(), Default::default()).is_ok());
 
+        let fee_rules = ComponentAccessRules::new().add_method_rule("m", AccessRule::AllowAll);
+        let globals = HashMap::from([
+            (
+                "pk".to_string(),
+                ManifestValue::Value(tari_bor::Value::Bytes(vec![0u8; 32])),
+            ),
+            ("rules".to_string(), ManifestValue::new_value(&fee_rules).unwrap()),
+        ]);
         let over_limit = format!(
-            "fn main() {{ let c = new_component_addr!(); set_access_rules!(c, {methods}); set_access_rules!(c, \
-             {methods}, extra = allow_all); }}"
+            "fn fee_main() {{ create_account!(pk, access_rules = rules); }} fn main() {{ let c = \
+             new_component_addr!(); set_access_rules!(c, {methods}); set_access_rules!(c, {methods}); }}"
         );
-        let res = parse_manifest(&over_limit, HashMap::new(), Default::default(), Default::default());
+        let res = parse_manifest(&over_limit, globals, Default::default(), Default::default());
         assert!(matches!(res, Err(ManifestError::InvalidInstruction { reason })
             if reason.contains("nodes in total")));
     }

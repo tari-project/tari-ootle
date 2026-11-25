@@ -2,7 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 import { describe, expect, it } from "vitest";
-import { shortenString, shortenSubstateId } from "../src";
+import { rejectReasonToString, shortenString, shortenSubstateId } from "../src";
 
 // The ellipsis inserted by shortenString is 3 characters, so a value is only
 // worth shortening once it is at least `start + end + 3` characters long.
@@ -75,5 +75,56 @@ describe("shortenSubstateId", () => {
 
   it("returns a value without a prefix separator unchanged", () => {
     expect(shortenSubstateId("no-underscore-here")).toBe("no-underscore-here");
+  });
+});
+
+describe("rejectReasonToString", () => {
+  it("returns an empty string for null", () => {
+    expect(rejectReasonToString(null)).toBe("");
+  });
+
+  it("returns unit string variants verbatim", () => {
+    expect(rejectReasonToString("ForeignPledgeInputConflict")).toBe("ForeignPledgeInputConflict");
+    expect(rejectReasonToString("FeePaymentInMainIntent")).toBe("FeePaymentInMainIntent");
+  });
+
+  it("formats ExecutionFailure with code and message", () => {
+    expect(
+      rejectReasonToString({
+        ExecutionFailure: { code: "RuntimeError", message: "insufficient balance" },
+      }),
+    ).toBe("ExecutionFailure (RuntimeError): insufficient balance");
+  });
+
+  it("formats SubstateNotFound", () => {
+    expect(rejectReasonToString({ SubstateNotFound: "component_abcd" })).toBe("SubstateNotFound: component_abcd");
+  });
+
+  it("formats Abort with its abort reason", () => {
+    expect(rejectReasonToString({ Abort: { reason: "EpochExpired" } })).toBe("Abort: EpochExpired");
+  });
+
+  it("formats FailedToLockInputs, FailedToLockOutputs, and InsufficientFeesPaid", () => {
+    expect(rejectReasonToString({ FailedToLockInputs: "input already downed" })).toBe(
+      "FailedToLockInputs: input already downed",
+    );
+    expect(rejectReasonToString({ FailedToLockOutputs: "output conflict" })).toBe(
+      "FailedToLockOutputs: output conflict",
+    );
+    expect(rejectReasonToString({ InsufficientFeesPaid: "paid 10, required 20" })).toBe(
+      "InsufficientFeesPaid: paid 10, required 20",
+    );
+  });
+
+  it("formats ForeignShardGroupDecidedToAbort", () => {
+    expect(
+      rejectReasonToString({
+        ForeignShardGroupDecidedToAbort: {
+          start_shard: 0,
+          end_shard: 63,
+          abort_reason: "LockInputsFailed",
+        },
+      }),
+    ).toBe("ForeignShardGroupDecidedToAbort: 0-63, LockInputsFailed");
   });
 });

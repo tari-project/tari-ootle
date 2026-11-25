@@ -1,19 +1,13 @@
 // Copyright 2026 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
+import { isAccountNotFoundError } from "@api/helpers/errors";
+
 export type MyAssetsView<TAccount> =
   | { kind: "ready"; account: TAccount }
   | { kind: "redirect-onboarding" }
   | { kind: "error"; message: string }
   | { kind: "loading" };
-
-export function isAccountNotFoundError(error: unknown): boolean {
-  if (!error || typeof error !== "object") {
-    return false;
-  }
-  const cause = (error as { cause?: unknown }).cause;
-  return Boolean(cause && typeof cause === "object" && (cause as { code?: unknown }).code === 404);
-}
 
 export function resolveMyAssetsView<TAccount>(params: {
   account: TAccount | null | undefined;

@@ -2,16 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 import { describe, expect, it } from "vitest";
-import { isAccountNotFoundError, resolveOnboardingView } from "./onboardingHelpers";
-
-describe("isAccountNotFoundError", () => {
-  it("returns true only when error.cause.code is 404", () => {
-    expect(isAccountNotFoundError(new Error("not found", { cause: { code: 404 } }))).toBe(true);
-    expect(isAccountNotFoundError(new Error("server error", { cause: { code: 500 } }))).toBe(false);
-    expect(isAccountNotFoundError(new Error("network down"))).toBe(false);
-    expect(isAccountNotFoundError(null)).toBe(false);
-  });
-});
+import { resolveOnboardingView } from "./onboardingHelpers";
 
 describe("resolveOnboardingView", () => {
   it("redirects home when store account is already present even if an error exists", () => {

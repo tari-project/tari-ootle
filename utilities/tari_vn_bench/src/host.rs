@@ -10,7 +10,11 @@
 //! Everything here is best-effort: the fields come from `/proc`, and a host that does not provide
 //! them reports `None` rather than failing the run. A missing CPU model never invalidates a timing.
 
-use std::{fs, thread};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fs,
+    thread,
+};
 
 use serde::{Deserialize, Serialize};
 
@@ -50,7 +54,7 @@ impl Host {
             arch: std::env::consts::ARCH.to_string(),
             cpu_model: field(&cpuinfo, "model name"),
             logical_cpus: thread::available_parallelism().map(|n| n.get()).unwrap_or(1),
-            physical_cpus: field(&cpuinfo, "cpu cores").and_then(|v| v.parse().ok()),
+            physical_cpus: parse_physical_cpus(&cpuinfo),
             cpu_max_mhz: read_max_mhz(),
             mem_total_bytes: meminfo_bytes("MemTotal"),
             mem_available_bytes: meminfo_bytes("MemAvailable"),
@@ -77,9 +81,69 @@ impl Host {
 fn field(cpuinfo: &str, key: &str) -> Option<String> {
     cpuinfo
         .lines()
-        .find(|line| line.starts_with(key))
-        .and_then(|line| line.split_once(':'))
+        .filter_map(|line| line.split_once(':'))
+        .find(|(k, _)| k.trim() == key)
         .map(|(_, value)| value.trim().to_string())
+}
+
+/// Counts total physical cores across all sockets in `/proc/cpuinfo`.
+///
+/// `cpu cores` in `/proc/cpuinfo` reports cores per physical socket (`physical id`), not the
+/// machine total. Prefer counting distinct `(physical id, core id)` pairs across processor blocks,
+/// falling back to summing `cpu cores` across distinct `physical id`s or a single `cpu cores` entry.
+fn parse_physical_cpus(cpuinfo: &str) -> Option<usize> {
+    let mut socket_cores: BTreeSet<(usize, usize)> = BTreeSet::new();
+    let mut cores_per_socket: BTreeMap<usize, usize> = BTreeMap::new();
+    let mut fallback_cpu_cores: Option<usize> = None;
+
+    let mut current_socket: Option<usize> = None;
+    let mut current_core: Option<usize> = None;
+    let mut current_cpu_cores: Option<usize> = None;
+
+    let mut flush_block = |socket: &mut Option<usize>, core: &mut Option<usize>, cpu_cores: &mut Option<usize>| {
+        if let (Some(s), Some(c)) = (*socket, *core) {
+            socket_cores.insert((s, c));
+        }
+        if let (Some(s), Some(cores)) = (*socket, *cpu_cores) {
+            cores_per_socket.entry(s).or_insert(cores);
+        }
+        if fallback_cpu_cores.is_none() {
+            fallback_cpu_cores = *cpu_cores;
+        }
+        *socket = None;
+        *core = None;
+        *cpu_cores = None;
+    };
+
+    for line in cpuinfo.lines() {
+        if line.trim().is_empty() {
+            flush_block(&mut current_socket, &mut current_core, &mut current_cpu_cores);
+            continue;
+        }
+        let Some((key, value)) = line.split_once(':') else {
+            continue;
+        };
+        let key = key.trim();
+        let value = value.trim();
+        match key {
+            "processor" => {
+                flush_block(&mut current_socket, &mut current_core, &mut current_cpu_cores);
+            },
+            "physical id" => current_socket = value.parse().ok(),
+            "core id" => current_core = value.parse().ok(),
+            "cpu cores" => current_cpu_cores = value.parse().ok(),
+            _ => {},
+        }
+    }
+    flush_block(&mut current_socket, &mut current_core, &mut current_cpu_cores);
+
+    if !socket_cores.is_empty() {
+        Some(socket_cores.len())
+    } else if !cores_per_socket.is_empty() {
+        Some(cores_per_socket.values().sum::<usize>())
+    } else {
+        fallback_cpu_cores.filter(|&c| c > 0)
+    }
 }
 
 /// Maximum non-turbo frequency from cpufreq, in MHz. Absent on hosts without the driver, and on
@@ -106,4 +170,31 @@ fn kib_line(text: &str, key: &str) -> Option<u64> {
         .and_then(|line| line.split_whitespace().nth(1))
         .and_then(|kib| kib.parse::<u64>().ok())
         .map(|kib| kib * 1024)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_physical_cpus_counts_across_sockets_and_smt_siblings() {
+        let single_socket_smt = "\
+processor\t: 0\nphysical id\t: 0\ncore id\t\t: 0\ncpu cores\t: 2\n\n\
+processor\t: 1\nphysical id\t: 0\ncore id\t\t: 1\ncpu cores\t: 2\n\n\
+processor\t: 2\nphysical id\t: 0\ncore id\t\t: 0\ncpu cores\t: 2\n\n\
+processor\t: 3\nphysical id\t: 0\ncore id\t\t: 1\ncpu cores\t: 2\n";
+        assert_eq!(parse_physical_cpus(single_socket_smt), Some(2));
+
+        let multi_socket_vm = "\
+processor\t: 0\nphysical id\t: 0\ncore id\t\t: 0\ncpu cores\t: 1\n\n\
+processor\t: 1\nphysical id\t: 1\ncore id\t\t: 0\ncpu cores\t: 1\n\n\
+processor\t: 2\nphysical id\t: 2\ncore id\t\t: 0\ncpu cores\t: 1\n\n\
+processor\t: 3\nphysical id\t: 3\ncore id\t\t: 0\ncpu cores\t: 1\n";
+        assert_eq!(parse_physical_cpus(multi_socket_vm), Some(4));
+
+        let dual_socket_without_core_id = "\
+processor\t: 0\nphysical id\t: 0\ncpu cores\t: 8\n\n\
+processor\t: 8\nphysical id\t: 1\ncpu cores\t: 8\n";
+        assert_eq!(parse_physical_cpus(dual_socket_without_core_id), Some(16));
+    }
 }

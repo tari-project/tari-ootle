@@ -45,13 +45,21 @@ fn main() -> anyhow::Result<()> {
     // PS_THREADS ("1,8") and PS_WORKLOAD ("transfer"/"grind") narrow a run for profiling.
     let thread_counts: Vec<usize> = std::env::var("PS_THREADS")
         .ok()
-        .map(|s| s.split(',').filter_map(|t| t.trim().parse().ok()).collect())
+        .map(|s| {
+            s.split(',')
+                .filter_map(|t| t.trim().parse::<usize>().ok())
+                .filter(|&k| k > 0)
+                .collect()
+        })
         .unwrap_or_else(|| {
             [1, 2, 4, 8, 16, 24, 32, 48, 64]
                 .into_iter()
                 .filter(|&k| k <= cpus)
                 .collect()
         });
+    if thread_counts.is_empty() {
+        anyhow::bail!("no valid (> 0) thread counts specified in PS_THREADS");
+    }
     let workload = std::env::var("PS_WORKLOAD").unwrap_or_else(|_| "both".into());
 
     println!("host: {cpus} cpus, loadavg at start: {}", loadavg());
@@ -148,7 +156,7 @@ fn run_workload(
             best_secs = best_secs.min(secs);
         }
         let tx_per_sec = transactions.len() as f64 / best_secs;
-        if k == 1 {
+        if k == thread_counts[0] {
             base_tx_per_sec = tx_per_sec;
         }
         let speedup = tx_per_sec / base_tx_per_sec;

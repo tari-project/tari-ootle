@@ -23,7 +23,7 @@
 import ContentCopyIcon from "@mui/icons-material/ContentCopy";
 import IconButton from "@mui/material/IconButton";
 import Tooltip from "@mui/material/Tooltip";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 interface CopyProps {
   copy: string;
@@ -32,18 +32,47 @@ interface CopyProps {
 
 const CopyToClipboard = ({ copy, floatright }: CopyProps) => {
   const [open, setOpen] = useState(false);
-  const handleClick = (copyThis: string) => {
-    setOpen(true);
-    navigator.clipboard.writeText(copyThis);
-    setTimeout(() => {
-      setOpen(false);
-    }, 2000);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (timeoutRef.current !== null) {
+        clearTimeout(timeoutRef.current);
+      }
+    };
+  }, []);
+
+  const handleClick = async (copyThis: string) => {
+    if (!navigator.clipboard?.writeText) {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(copyThis);
+      if (!mountedRef.current) {
+        return;
+      }
+      setOpen(true);
+      if (timeoutRef.current !== null) {
+        clearTimeout(timeoutRef.current);
+      }
+      timeoutRef.current = setTimeout(() => {
+        setOpen(false);
+        timeoutRef.current = null;
+      }, 2000);
+    } catch (error) {
+      console.error("Failed to copy to clipboard:", error);
+    }
   };
 
   return (
     <>
       <IconButton
-        onClick={() => handleClick(copy)}
+        onClick={() => {
+          void handleClick(copy);
+        }}
         size="small"
         aria-label="copy to clipboard"
         style={

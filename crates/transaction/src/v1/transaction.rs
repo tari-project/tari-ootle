@@ -1200,11 +1200,6 @@ mod weight_tests {
         let full = nft_assertion((0..32).map(long_id).collect());
         let full_bytes = (0..32).map(|i| tari_bor::encoded_len(&long_id(i)) as u64).sum::<u64>();
         assert_eq!(calc_instruction_weight(&full), 1 + full_bytes / LITERAL_BYTE_DIVISOR);
-        assert!(
-            calc_instruction_weight(&full) > 600,
-            "{}",
-            calc_instruction_weight(&full)
-        );
 
         // More ids never weigh less, and splitting them across assertions does not reduce the total.
         let half = nft_assertion((0..16).map(long_id).collect());

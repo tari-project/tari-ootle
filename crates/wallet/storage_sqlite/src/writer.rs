@@ -221,19 +221,8 @@ impl<'a> WriteTransaction<'a> {
         for res in locked_outputs {
             let (id, owner_account_id, resx, commitment) =
                 res.map_err(|e| WalletStorageError::general(OPERATION, e))?;
-            let resource_address: ResourceAddress = resx.parse().map_err(|_| WalletStorageError::DecodingError {
-                operation: "try_to_substate_id",
-                item: "output",
-                details: format!("Corrupt db: invalid resource address '{resx}' for id {id}"),
-            })?;
-            let commitment: PedersenCommitmentBytes =
-                deserialize_hex_try_from(&commitment).map_err(|_| WalletStorageError::DecodingError {
-                    operation: "try_into_output",
-                    item: "output commitment",
-                    details: "Corrupt db: invalid hex representation".to_string(),
-                })?;
-
-            let addr = UtxoAddress::new(resource_address, commitment.into());
+            let addr = stealth_output_row_address(id, &resx, &commitment)?;
+            let resource_address = *addr.resource_address();
             let downed_version = down_id_index.get(&addr).copied();
             let is_upped = up_id_index.contains(&addr);
             let is_burnt = burnt_id_index.contains(&addr);
@@ -3588,6 +3577,22 @@ pub(crate) fn signing_request_from_row(
         created_at: row.created_at,
         updated_at: row.updated_at,
     })
+}
+
+/// Decodes the `UtxoAddress` of the stealth output row `id` from its stored resource address and commitment.
+fn stealth_output_row_address(id: i32, resx: &str, commitment: &str) -> Result<UtxoAddress, WalletStorageError> {
+    let resource_address: ResourceAddress = resx.parse().map_err(|_| WalletStorageError::DecodingError {
+        operation: "try_to_substate_id",
+        item: "output",
+        details: format!("Corrupt db: invalid resource address '{resx}' for id {id}"),
+    })?;
+    let commitment: PedersenCommitmentBytes =
+        deserialize_hex_try_from(commitment).map_err(|_| WalletStorageError::DecodingError {
+            operation: "try_into_output",
+            item: "output commitment",
+            details: "Corrupt db: invalid hex representation".to_string(),
+        })?;
+    Ok(UtxoAddress::new(resource_address, commitment.into()))
 }
 
 fn api_key_from_row(row: models::ApiKey) -> ApiKey {

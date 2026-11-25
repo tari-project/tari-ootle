@@ -341,7 +341,7 @@ fn finalizing_a_lock_marks_burnt_stealth_outputs_as_burnt_and_records_balance_ch
 
     let lock_id = tx.locks_create(None, LockOwner::Wallet).unwrap();
     tx.locks_link_transaction(lock_id, transaction_id).unwrap();
-    tx.stealth_outputs_lock_many(&stealth_resource, &[&burnt_input.commitment], lock_id)
+    tx.stealth_outputs_lock_many_for_account(&account, &stealth_resource, &[&burnt_input.commitment], lock_id)
         .unwrap();
 
     let burnt_addr = burnt_input.to_utxo_address();
@@ -415,7 +415,7 @@ fn finalizing_a_lock_over_a_re_versioned_unburnt_input_releases_it_to_unspent() 
     tx.stealth_outputs_insert(&input).unwrap();
 
     let lock_id = tx.locks_create(None, LockOwner::Wallet).unwrap();
-    tx.stealth_outputs_lock_many(&stealth_resource, &[&input.commitment], lock_id)
+    tx.stealth_outputs_lock_many_for_account(&account, &stealth_resource, &[&input.commitment], lock_id)
         .unwrap();
 
     let addr = input.to_utxo_address();

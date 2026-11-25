@@ -86,30 +86,11 @@ export function rejectReasonToString(reason: RejectReason | null): string {
   if (typeof reason === "string") {
     return reason;
   }
-  if ("ShardsNotPledged" in reason) {
-    return `ShardsNotPledged: ${reason.ShardsNotPledged}`;
-  }
   if ("ExecutionFailure" in reason) {
     return `ExecutionFailure (${reason.ExecutionFailure.code}): ${reason.ExecutionFailure.message}`;
   }
-  if ("ShardPledgedToAnotherPayload" in reason) {
-    return `ShardPledgedToAnotherPayload: ${reason.ShardPledgedToAnotherPayload}`;
-  }
-  if ("ShardRejected" in reason) {
-    return `ShardRejected: ${reason.ShardRejected}`;
-  }
-  if ("InsufficientFeesPaid" in reason) {
-    return `InsufficientFeesPaid: ${reason.InsufficientFeesPaid}`;
-  }
-  if ("ForeignShardGroupDecidedToAbort" in reason) {
-    const r = reason.ForeignShardGroupDecidedToAbort;
-    return `ForeignShardGroupDecidedToAbort: ${r.start_shard}-${r.end_shard}, ${r.abort_reason}`;
-  }
-  if ("InvalidTransaction" in reason) {
-    return `InvalidTransaction: ${reason.InvalidTransaction}`;
-  }
-  if ("OneOrMoreInputsNotFound" in reason) {
-    return `OneOrMoreInputsNotFound: ${reason.OneOrMoreInputsNotFound}`;
+  if ("SubstateNotFound" in reason) {
+    return `SubstateNotFound: ${reason.SubstateNotFound}`;
   }
   if ("FailedToLockInputs" in reason) {
     return `FailedToLockInputs: ${reason.FailedToLockInputs}`;
@@ -117,8 +98,19 @@ export function rejectReasonToString(reason: RejectReason | null): string {
   if ("FailedToLockOutputs" in reason) {
     return `FailedToLockOutputs: ${reason.FailedToLockOutputs}`;
   }
-  console.error("Unknown reason", reason);
-  return JSON.stringify(reason);
+  if ("ForeignShardGroupDecidedToAbort" in reason) {
+    const r = reason.ForeignShardGroupDecidedToAbort;
+    return `ForeignShardGroupDecidedToAbort: ${r.start_shard}-${r.end_shard}, ${r.abort_reason}`;
+  }
+  if ("InsufficientFeesPaid" in reason) {
+    return `InsufficientFeesPaid: ${reason.InsufficientFeesPaid}`;
+  }
+  if ("Abort" in reason) {
+    return `Abort: ${reason.Abort.reason}`;
+  }
+  const unhandled: never = reason;
+  console.error("Unknown reason", unhandled);
+  return JSON.stringify(unhandled);
 }
 
 export function getSubstateDiffFromTransactionResult(result: TransactionResult): SubstateDiff | null {

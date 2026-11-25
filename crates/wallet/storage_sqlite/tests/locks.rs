@@ -378,7 +378,9 @@ fn finalizing_a_lock_marks_burnt_stealth_outputs_as_burnt_and_records_balance_ch
         .balance_changes_get_page_by_account(&account, 0, 10, Some(&stealth_resource), None, None)
         .unwrap();
     assert_eq!(page.total, 1);
-    assert_eq!(page.changes[0].source, BalanceChangeSource::Transaction { transaction_id });
+    assert_eq!(page.changes[0].source, BalanceChangeSource::Transaction {
+        transaction_id
+    });
     assert_eq!(page.changes[0].confidential_before, Amount::from(1_000_000u64));
     assert_eq!(page.changes[0].confidential_after, Amount::from(600_000u64));
     assert_eq!(page.changes[0].confidential_delta, "-400000");

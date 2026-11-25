@@ -70,6 +70,9 @@ pub fn read_chunk(path: &Path, end: Option<u64>, max_bytes: Option<u64>) -> io::
         } else if let Some(back) = window[..lookback].iter().rposition(|b| !is_utf8_continuation(*b)) {
             bytes = &window[back..];
             start = map_start + back as u64;
+        } else {
+            // No character boundary within reach: the window is rendered as-is and lossy decoding replaces the
+            // partial character.
         }
     }
 
@@ -104,6 +107,8 @@ fn tail_lines_within(path: &Path, n: usize, scan_bytes: u64) -> io::Result<Vec<S
             bytes = &bytes[nl + 1..];
         } else if let Some(char_start) = bytes.iter().position(|b| !is_utf8_continuation(*b)) {
             bytes = &bytes[char_start..];
+        } else {
+            // No character boundary in the window: lossy decoding replaces the partial character.
         }
     }
     let body = String::from_utf8_lossy(bytes);

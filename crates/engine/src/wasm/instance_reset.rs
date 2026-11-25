@@ -14,9 +14,10 @@
 //!   instantiation left in it (the active data segments), captured once per loaded template.
 //! * **Mutable globals** are restored: [`ResettableState`] exports every one the module defines, so the engine can read
 //!   each initial value and write it back.
-//! * **Tables** are immutable: `table.set`, `table.grow`, `table.fill` and `table.copy` are refused at compile.
+//! * **Tables** are immutable: `table.set`, `table.grow`, `table.fill`, `table.copy` and `table.init` are refused at
+//!   compile.
 //! * **Segments** are stateless: passive segments are refused, so every segment is dropped at instantiation and
-//!   `memory.init`, `table.init`, `data.drop` and `elem.drop` cannot change anything.
+//!   `memory.init`, `data.drop` and `elem.drop` cannot change anything.
 //!
 //! The globals the metering middlewares add are not restored and need not be: they are appended
 //! after [`ResettableState`] runs, the engine sets the meter before every call, and the bulk
@@ -68,6 +69,13 @@ impl ModuleMiddleware for ResettableState {
         if !module_info.passive_elements.is_empty() {
             return Err(refused("passive element segments are not allowed"));
         }
+        if let Some(name) = module_info
+            .exports
+            .keys()
+            .find(|name| name.starts_with(GLOBAL_EXPORT_PREFIX))
+        {
+            return Err(refused(format!("export name `{name}` is reserved")));
+        }
 
         let defined_globals = module_info
             .globals
@@ -82,9 +90,6 @@ impl ModuleMiddleware for ResettableState {
                 return Err(refused(format!("mutable global {} has type {ty}", index.as_u32())));
             }
             let name = format!("{GLOBAL_EXPORT_PREFIX}{}", index.as_u32());
-            if module_info.exports.contains_key(&name) {
-                return Err(refused(format!("export name `{name}` is reserved")));
-            }
             module_info.exports.insert(name, ExportIndex::Global(index));
         }
         Ok(())
@@ -105,6 +110,11 @@ impl<'a> FunctionMiddleware<'a> for FunctionResettableState {
             Operator::TableGrow { .. } |
             Operator::TableFill { .. } |
             Operator::TableCopy { .. } => Err(refused(format!("operator {operator:?} modifies a table"))),
+            // Every element segment is dropped at instantiation, so `table.init` can only trap or
+            // copy nothing, and wasmer re-syncs the whole table after a zero-length copy.
+            Operator::TableInit { .. } => Err(refused(format!(
+                "operator {operator:?} copies from an element segment, and none is kept after instantiation"
+            ))),
             operator => {
                 state.push_operator(operator);
                 Ok(())
@@ -319,8 +329,7 @@ mod tests {
             NFT_FAUCET_TEMPLATE_ADDRESS,
             LIQUIDITY_POOL_TEMPLATE_ADDRESS,
         ] {
-            let LoadedTemplate::Wasm(template) =
-                WasmModule::load_template_from_code(get_template_builtin(&address)).unwrap();
+            let LoadedTemplate::Wasm(template) = WasmModule::load(get_template_builtin(&address)).unwrap();
             let mut store = template.create_store();
             let imports = imports! {
                 "env" => {
@@ -397,6 +406,9 @@ mod tests {
             let wat = format!(r#"(module (table 1 4 funcref) (func {op}))"#);
             assert!(refusal(&wat).contains("modifies a table"), "{op} was not refused");
         }
+        let wat = r#"(module (table 1 1 funcref) (func $f) (elem (i32.const 0) func $f)
+                       (func (table.init 0 (i32.const 0) (i32.const 0) (i32.const 0))))"#;
+        assert!(refusal(wat).contains("element segment"), "table.init was not refused");
     }
 
     #[test]
@@ -408,6 +420,50 @@ mod tests {
     #[test]
     fn a_reference_typed_mutable_global_is_refused() {
         assert!(refusal(r#"(module (global (mut funcref) (ref.null func)))"#).contains("mutable global"));
+    }
+
+    #[test]
+    fn reserved_global_export_prefix_is_refused_and_injected_mutable_globals_still_load() {
+        for wat in [
+            r#"(module (global (export "__tari_global_z") i32 (i32.const 0)))"#,
+            r#"(module (global (export "__tari_global_0") i32 (i32.const 0)))"#,
+            r#"(module (global (export "__tari_global_0") (mut i32) (i32.const 0)))"#,
+            r#"(module (func (export "__tari_global_fn")))"#,
+        ] {
+            assert!(
+                refusal(wat).contains("is reserved"),
+                "expected reserved export refusal for {wat}"
+            );
+            let wasm = wat::parse_str(wat).unwrap();
+            let err = match WasmModule::load(&wasm) {
+                Ok(_) => panic!("expected WasmModule::load to reject {wat}"),
+                Err(err) => err,
+            };
+            assert!(err.to_string().contains("is reserved"), "unexpected error: {err:?}");
+        }
+
+        // A module with unexported mutable/immutable globals and a non-reserved export still compiles and resets,
+        // exposing only the injected `__tari_global_<index>` export for its mutable global.
+        let (mut store, module) = compile(
+            r#"(module
+                 (memory (export "memory") 1 2)
+                 (global (export "version") i32 (i32.const 1))
+                 (global $counter (mut i32) (i32.const 5))
+                 (func (export "bump")
+                   (global.set $counter (i32.add (global.get $counter) (i32.const 1)))))"#,
+        )
+        .unwrap();
+        let instance = Instance::new(&mut store, &module, &imports! {}).unwrap();
+        let initial = InitialState::capture(&mut store, &instance).unwrap();
+        assert_eq!(initial.globals, vec![(
+            "__tari_global_1".to_string(),
+            GlobalValue::I32(5)
+        )]);
+
+        let bump: TypedFunction<(), ()> = instance.exports.get_typed_function(&store, "bump").unwrap();
+        bump.call(&mut store).unwrap();
+        initial.restore(&mut store, &instance).unwrap();
+        assert_eq!(InitialState::capture(&mut store, &instance).unwrap(), initial);
     }
 
     #[test]

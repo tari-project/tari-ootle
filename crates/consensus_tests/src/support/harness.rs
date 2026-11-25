@@ -54,6 +54,7 @@ use tokio::{
 
 use super::{
     MessageFilter,
+    MessageInjector,
     NetworkSendObserver,
     TEST_NUM_PRESHARDS,
     TEST_WASM_EXECUTION_POINTS,
@@ -426,9 +427,14 @@ impl Test {
         self.network.start();
     }
 
+    /// Waits until every validator that is active at its current epoch runs consensus.
     pub async fn wait_for_all_validators_to_start_consensus(&mut self) {
         let mut complete = HashSet::new();
-        let total_validators = self.validators.len();
+        let total_validators = self
+            .validators
+            .values()
+            .filter(|v| !v.epoch_manager.is_pending_activation())
+            .count();
         loop {
             let validators = self.validators.values_mut();
             for validator in validators {
@@ -685,6 +691,7 @@ pub struct TestBuilder {
     rocks_path: Option<String>,
     timeout: Option<Duration>,
     message_filter: Option<MessageFilter>,
+    message_injector: Option<MessageInjector>,
     send_observer: Option<NetworkSendObserver>,
     failure_nodes: Vec<TestAddress>,
     config: HotstuffConfig,
@@ -702,6 +709,7 @@ impl TestBuilder {
             timeout: Some(DEFAULT_PACEMAKER_BLOCK_TIME * 3),
             rocks_path: None,
             message_filter: None,
+            message_injector: None,
             send_observer: None,
             failure_nodes: Vec::new(),
             claim_keys: None,
@@ -741,6 +749,8 @@ impl TestBuilder {
                     max_block_validation_shard_output_bytes:
                         tari_ootle_common_types::MAX_BLOCK_VALIDATION_SHARD_OUTPUT_BYTES,
                     max_block_pledge_bytes: ConsensusConstants::DEVNET.max_block_pledge_bytes,
+                    max_transaction_input_load_bytes: ConsensusConstants::DEVNET.max_transaction_input_load_bytes,
+                    max_block_input_load_bytes: ConsensusConstants::DEVNET.max_block_input_load_bytes,
                     max_block_foreign_proposal_bytes: ConsensusConstants::DEVNET.max_block_foreign_proposal_bytes,
                     max_block_validation_foreign_proposal_bytes: ConsensusConstants::DEVNET
                         .max_block_validation_foreign_proposal_bytes,
@@ -753,6 +763,7 @@ impl TestBuilder {
                 epoch_end_grace_period: Duration::from_secs(1),
                 epoch_end_drain_period: Duration::from_secs(5),
                 catch_up_request_timeout: Duration::from_secs(15),
+                catch_up_page_bytes: tari_consensus::hotstuff::DEFAULT_CATCH_UP_PAGE_BYTES,
             },
         }
     }
@@ -812,9 +823,19 @@ impl TestBuilder {
         self
     }
 
+    pub fn with_message_injector(mut self, message_injector: MessageInjector) -> Self {
+        self.message_injector = Some(message_injector);
+        self
+    }
+
     pub fn with_message_filter(mut self, message_filter: MessageFilter) -> Self {
         self.message_filter = Some(message_filter);
         self
+    }
+
+    /// The config each validator is built with.
+    pub fn hotstuff_config(&self) -> HotstuffConfig {
+        self.config.clone()
     }
 
     pub fn modify_consensus_constants<F: FnOnce(&mut ConsensusConstants)>(mut self, f: F) -> Self {
@@ -923,7 +944,12 @@ impl TestBuilder {
             shutdown.to_signal(),
         )
         .await;
-        let network = spawn_network(channels, shutdown.to_signal(), self.message_filter);
+        let network = spawn_network(
+            channels,
+            shutdown.to_signal(),
+            self.message_filter,
+            self.message_injector,
+        );
 
         Test {
             validators,

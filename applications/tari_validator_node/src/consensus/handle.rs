@@ -39,7 +39,7 @@ impl ConsensusHandle {
         Self::new(
             rx_current_state,
             EventSubscription::new(events.downgrade()),
-            CurrentView::new(),
+            CurrentView::detached(),
             tx_new_transaction,
         )
     }

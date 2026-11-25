@@ -110,18 +110,18 @@ impl Cf for StateTreeDeferredStaleNodesCf {
     }
 }
 
-pub struct ByDeferredStaleShardQuery;
-
-impl QueryCf for ByDeferredStaleShardQuery {
-    type Cf = StateTreeDeferredStaleNodesCf;
-    type Key = Shard;
-    type KeyCodec = ShardCodec;
-}
-
 pub struct ByDeferredStaleShardPinQuery;
 
 impl QueryCf for ByDeferredStaleShardPinQuery {
     type Cf = StateTreeDeferredStaleNodesCf;
     type Key = (Shard, Version);
     type KeyCodec = (ShardCodec, NumberCodec<Version>);
+}
+
+pub struct ByDeferredStaleShardPinStaleAtQuery;
+
+impl QueryCf for ByDeferredStaleShardPinStaleAtQuery {
+    type Cf = StateTreeDeferredStaleNodesCf;
+    type Key = (Shard, Version, Version);
+    type KeyCodec = (ShardCodec, NumberCodec<Version>, NumberCodec<Version>);
 }

@@ -759,6 +759,9 @@ pub unsafe extern "C" fn ootle_build_stealth_outputs_statement_with_seed(
             let seed = BuildSeed::from_array(seed_from_hex(seed_hex)?);
             let revealed_receiver = unsafe { optional_str(revealed_receiver_hex, "revealed_receiver_hex") }?
                 .map(|hex| {
+                    if hex.chars().any(|c| c.is_ascii_uppercase()) {
+                        return Err(OotleResult::err("PARSE", "revealed_receiver_hex must be lowercase hex"));
+                    }
                     RistrettoPublicKeyBytes::from_hex(hex).map_err(|e| {
                         OotleResult::err("PARSE", &format!("revealed_receiver_hex is not a public key: {e}"))
                     })

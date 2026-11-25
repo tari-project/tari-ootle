@@ -95,9 +95,9 @@ pub enum IndexerTrust {
     /// epoch's set before the network's first checkpoint, unless given one with
     /// [`IndexerProvider::restore_validator_set`](crate::provider::IndexerProvider::restore_validator_set), and walks
     /// the signed end-of-epoch handovers from it.
-    #[default]
     Verify,
-    /// The indexer's answers are taken at its word. For development against an indexer that does not verify proofs.
+    /// The indexer's answers are taken at its word. Works with an indexer that serves no proofs.
+    #[default]
     Trust,
 }
 
@@ -1164,6 +1164,7 @@ mod tests {
                 access_rules: ComponentAccessRules::new(),
                 entity_id: Default::default(),
                 upgrade_rule: Default::default(),
+                rules_updater: None,
             },
             body: ComponentBody::from_cbor_value(tari_bor::to_value(&vaults).unwrap()),
         }

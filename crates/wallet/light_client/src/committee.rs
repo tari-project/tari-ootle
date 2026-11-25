@@ -4,7 +4,15 @@
 use ootle_network::Network;
 use serde::{Deserialize, Serialize};
 use tari_indexer_client::types::{EpochCheckpointEntry, ValidatorSetCommittee};
-use tari_ootle_common_types::{Epoch, NumPreshards, ShardGroup, ValidatorSetHash, ValidatorSetMember, VotePower};
+use tari_ootle_common_types::{
+    Epoch,
+    NumPreshards,
+    ShardGroup,
+    ValidatorSetHash,
+    ValidatorSetMember,
+    VotePower,
+    committee::quorum_threshold_of,
+};
 use tari_ootle_storage::consensus_models::{CommittedBlockProof, VerifiedBlockTip};
 use tari_sidechain::SigningCommittee;
 use tari_state_tree::ValidatorSetCommitteeProof;
@@ -112,7 +120,7 @@ impl VerifiedCommittee {
         if total.is_zero() {
             return VotePower::max();
         }
-        total - (total - VotePower::of(1)) / VotePower::of(3)
+        quorum_threshold_of(total)
     }
 
     /// The vote power of `public_key` in this committee, zero for a non-member.

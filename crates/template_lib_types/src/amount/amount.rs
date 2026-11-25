@@ -26,13 +26,24 @@ impl<'b, C> minicbor::Decode<'b, C> for Amount {
             // 128-bit integer.
             Type::String => {
                 let s = d.str()?;
+                if s.len() > Amount::MAX_DECIMAL_STR_LEN {
+                    return Err(minicbor::decode::Error::message(
+                        "Amount: decimal string exceeds maximum length",
+                    ));
+                }
                 s.parse::<Amount>()
                     .map_err(|e| minicbor::decode::Error::message(format!("Amount: invalid string '{}': {}", s, e)))
             },
             Type::StringIndef => {
                 let mut s = String::new();
                 for chunk in d.str_iter()? {
-                    s.push_str(chunk?);
+                    let chunk = chunk?;
+                    if s.len().saturating_add(chunk.len()) > Amount::MAX_DECIMAL_STR_LEN {
+                        return Err(minicbor::decode::Error::message(
+                            "Amount: decimal string exceeds maximum length",
+                        ));
+                    }
+                    s.push_str(chunk);
                 }
                 s.parse::<Amount>()
                     .map_err(|e| minicbor::decode::Error::message(format!("Amount: invalid string '{}': {}", s, e)))
@@ -64,6 +75,8 @@ impl Amount {
     pub const BYTE_SIZE: usize = Self::BITS / 8;
     /// The maximum value that an `Amount` can hold.
     pub const MAX: Self = Self(u128::MAX);
+    /// The longest decimal string the CBOR decoder parses: the 39 digits of `u128::MAX` plus an optional `+`.
+    pub(crate) const MAX_DECIMAL_STR_LEN: usize = u128::MAX.ilog10() as usize + 2;
     /// The minimum value that an `Amount` can hold.
     pub const MIN: Self = Self(u128::MIN);
     /// The number of u64 digits used to represent a Amount i.e. 2
@@ -108,12 +121,6 @@ impl Amount {
         self.0 > 0
     }
 
-    /// Always returns false since this type cannot represent negative values.
-    /// This method is provided for symmetry with other amount types that may be signed.
-    pub const fn is_negative(&self) -> bool {
-        false
-    }
-
     pub const fn from_u64(value: u64) -> Self {
         // Until const u64 to u128 conversion is stable we'll do this cast
         Self(value as u128)
@@ -146,7 +153,7 @@ impl Amount {
         Self(self.into_inner_value().saturating_add(other.into_inner_value()))
     }
 
-    /// Returns the difference of two amounts, saturating at `0` if the result is negative.
+    /// Returns the difference of two amounts, or `None` if `other` is greater than `self`.
     pub const fn checked_sub(&self, other: Self) -> Option<Self> {
         match self.into_inner_value().checked_sub(other.into_inner_value()) {
             Some(value) => Some(Self(value)),
@@ -162,8 +169,7 @@ impl Amount {
         Some(sum)
     }
 
-    /// Returns the difference of two amounts, saturating at `Amount::MIN` if the result underflows.
-    /// If negative results are not desired, use `saturating_sub_positive`.
+    /// Returns the difference of two amounts, saturating at zero.
     pub const fn saturating_sub(&self, other: Self) -> Self {
         Self(self.into_inner_value().saturating_sub(other.into_inner_value()))
     }
@@ -214,7 +220,6 @@ impl Amount {
             None => return None,
         };
 
-        // If the remainder is zero or the result is negative, we round down
         if rem == 0 {
             Some(Self(div))
         } else {
@@ -240,7 +245,6 @@ impl Amount {
     }
 
     /// Returns the value as an u64 if possible, otherwise returns None.
-    /// Since the internal representation is i64, this will return None if the value is negative.
     pub fn to_u64_checked(&self) -> Option<u64> {
         self.into_inner_value().try_into().ok()
     }
@@ -306,25 +310,12 @@ impl Amount {
     #[cfg(feature = "extra-arith")]
     pub fn checked_sqrt(&self) -> Option<Self> {
         use num_integer::Roots;
-        if self.is_negative() {
-            return None;
-        }
         if self.is_zero() {
             return Some(Self::zero());
         }
         let inner = self.into_inner_value();
         let sqrt_inner = inner.sqrt();
         Some(Self(sqrt_inner))
-    }
-
-    /// If the amount is negative (< 0), returns `None`, otherwise returns `Some(self)`.
-    pub fn non_negative_checked(self) -> Option<Self> {
-        if self.is_negative() { None } else { Some(self) }
-    }
-
-    /// If the amount is positive (> 0), returns `None`, otherwise returns `Some(self)`.
-    pub fn negative_checked(self) -> Option<Self> {
-        if self.is_positive() { None } else { Some(self) }
     }
 
     /// Returns the amount raised to the power of `exp`.
@@ -488,9 +479,6 @@ impl TryFrom<Amount> for usize {
 
 impl PartialOrd<usize> for Amount {
     fn partial_cmp(&self, other: &usize) -> Option<cmp::Ordering> {
-        if self.is_negative() {
-            return Some(cmp::Ordering::Less);
-        }
         match usize::try_from(self.into_inner_value()) {
             Ok(value) => Some(value.cmp(other)),
             Err(_) => Some(cmp::Ordering::Greater),

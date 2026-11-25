@@ -176,14 +176,31 @@ fn get_function_block(template_ident: &Ident, ast: &FunctionAst, stateless: bool
             },
             TypeAst::Tuple { type_tuple, .. } => {
                 let error_failed_decode_arg = PanicDiagnostic::ArgDecode { index: i }.panic_format_string();
-                args.push(parse_quote! { #arg_ident });
-                stmts.extend([
-                    parse_quote! { let next_arg = call_info.next_arg_unchecked(); },
-                    parse_quote! {
-                        let #arg_ident = decode_exact::<#type_tuple>(next_arg)
-                            .unwrap_or_else(|e| panic!(#error_failed_decode_arg, e));
-                    },
-                ]);
+                if i == 0 && ast.is_migration {
+                    stmts.extend([
+                        parse_quote! { let next_arg = call_info.next_arg_unchecked(); },
+                        parse_quote! {
+                            let component_address = decode_exact::<::tari_template_lib::types::ComponentAddress>(next_arg)
+                                .unwrap_or_else(|e| panic!(#error_failed_decode_component, e));
+                        },
+                        parse_quote! {
+                            let component_manager = engine().component_manager(component_address);
+                        },
+                        parse_quote! {
+                            let old_state = component_manager.get_state::<#type_tuple>();
+                        },
+                    ]);
+                    args.push(parse_quote! { old_state });
+                } else {
+                    args.push(parse_quote! { #arg_ident });
+                    stmts.extend([
+                        parse_quote! { let next_arg = call_info.next_arg_unchecked(); },
+                        parse_quote! {
+                            let #arg_ident = decode_exact::<#type_tuple>(next_arg)
+                                .unwrap_or_else(|e| panic!(#error_failed_decode_arg, e));
+                        },
+                    ]);
+                }
             },
         }
     }
@@ -266,6 +283,7 @@ fn replace_self_in_single_value(type_path: &TypePath) -> Option<Stmt> {
                 ::tari_template_lib::template_macro_deps::ComponentAccessRules::new(),
                 None,
                 ::tari_template_lib::template_macro_deps::UpdateRule::Locked,
+                ::tari_template_lib::template_macro_deps::RulesUpdater::Locked,
             );
         });
     }
@@ -274,51 +292,66 @@ fn replace_self_in_single_value(type_path: &TypePath) -> Option<Stmt> {
 }
 
 fn replace_self_in_tuple(type_tuple: &TypeTuple) -> Stmt {
+    let tuple_expr = replace_self_in_tuple_expr(parse_quote!(rtn), type_tuple);
+    parse_quote! {
+        let rtn = #tuple_expr;
+    }
+}
+
+fn replace_self_in_tuple_expr(base_expr: Expr, type_tuple: &TypeTuple) -> Expr {
+    if type_tuple.elems.is_empty() {
+        return parse_quote! { () };
+    }
+
     // build the expressions for each element in the tuple
     let elems: Vec<Expr> = type_tuple
         .elems
         .iter()
         .enumerate()
-        .map(|(i, t)| match t {
-            syn::Type::Path(path) => {
-                let ident = path
-                    .path
-                    .segments
-                    .first()
-                    .expect("path segments is empty")
-                    .ident
-                    .clone();
-                let field_expr = build_tuple_field_expr("rtn".to_string(), i as u32);
-                if ident == "Self" {
-                    // When we return self we use default rules - which only permit the owner of the component to call
-                    // methods
-                    parse_quote! {
-                        engine().create_component(
-                            #field_expr,
-                            ::tari_template_lib::template_macro_deps::OwnerRule::default(),
-                            ::tari_template_lib::template_macro_deps::ComponentAccessRules::new(),
-                            None,
-                            ::tari_template_lib::template_macro_deps::UpdateRule::Locked,
-                        )
+        .map(|(i, t)| {
+            let field_expr = build_tuple_field_expr(base_expr.clone(), i as u32);
+            match t {
+                syn::Type::Path(path) => {
+                    let ident = path
+                        .path
+                        .segments
+                        .first()
+                        .expect("path segments is empty")
+                        .ident
+                        .clone();
+                    if ident == "Self" {
+                        // When we return self we use default rules - which only permit the owner of the component to
+                        // call methods
+                        parse_quote! {
+                            engine().create_component(
+                                #field_expr,
+                                ::tari_template_lib::template_macro_deps::OwnerRule::default(),
+                                ::tari_template_lib::template_macro_deps::ComponentAccessRules::new(),
+                                None,
+                                ::tari_template_lib::template_macro_deps::UpdateRule::Locked,
+                                ::tari_template_lib::template_macro_deps::RulesUpdater::Locked,
+                            )
+                        }
+                    } else {
+                        field_expr
                     }
-                } else {
-                    field_expr
-                }
-            },
-            _ => todo!("replace_self_in_tuple only supports paths"),
+                },
+                syn::Type::Tuple(subtuple) => replace_self_in_tuple_expr(field_expr, subtuple),
+                _ => todo!("replace_self_in_tuple only supports paths and tuples"),
+            }
         })
         .collect();
 
-    parse_quote! {
-        let rtn = (#(#elems),*);
+    if elems.len() == 1 {
+        parse_quote! { (#(#elems,)*) }
+    } else {
+        parse_quote! { (#(#elems),*) }
     }
 }
 
-fn build_tuple_field_expr(name: String, i: u32) -> Expr {
-    let name = Ident::new(&name, Span::call_site());
-
+fn build_tuple_field_expr(base: Expr, i: u32) -> Expr {
     let mut field_expr: ExprField = parse_quote! {
-        #name.0
+        #base.0
     };
 
     match field_expr.member {
@@ -329,4 +362,104 @@ fn build_tuple_field_expr(name: String, i: u32) -> Expr {
     }
 
     Expr::Field(field_expr)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr;
+
+    use indoc::indoc;
+    use proc_macro2::TokenStream;
+    use quote::ToTokens;
+    use syn::{Expr, ExprBlock, Local, LocalInit, Pat, PatIdent, Stmt, parse2};
+
+    use super::{generate_dispatcher, get_function_block};
+    use crate::template::ast::TemplateAst;
+
+    /// The value the dispatcher arm for `name` encodes, re-parsed from the emitted tokens.
+    fn encoded_return(ast: &TemplateAst, name: &str) -> Expr {
+        let function = ast.get_functions().find(|f| f.name == name).unwrap();
+        let block = get_function_block(&ast.template_name, function, ast.stateless);
+        let block = parse2::<ExprBlock>(block.to_token_stream()).unwrap();
+        block
+            .block
+            .stmts
+            .iter()
+            .rev()
+            .find_map(|stmt| match stmt {
+                Stmt::Local(Local {
+                    pat: Pat::Ident(PatIdent { ident, .. }),
+                    init: Some(LocalInit { expr, .. }),
+                    ..
+                }) if ident == "rtn" => Some((**expr).clone()),
+                _ => None,
+            })
+            .unwrap()
+    }
+
+    fn tuple_elems(expr: &Expr) -> Vec<&Expr> {
+        let Expr::Tuple(tuple) = expr else {
+            panic!("expected a tuple, got {}", expr.to_token_stream());
+        };
+        tuple.elems.iter().collect()
+    }
+
+    /// The component state passed to `create_component`.
+    fn created_component(expr: &Expr) -> String {
+        let Expr::MethodCall(call) = expr else {
+            panic!("expected create_component, got {}", expr.to_token_stream());
+        };
+        assert_eq!(call.method, "create_component");
+        call.args.first().unwrap().to_token_stream().to_string()
+    }
+
+    #[test]
+    fn supports_nested_and_unit_tuple_returns() {
+        let ast = parse2::<TemplateAst>(
+            TokenStream::from_str(indoc! {"
+                mod tuple_test {
+                    pub struct TupleComponent {}
+                    impl TupleComponent {
+                        pub fn unit_ret(&self) -> () { }
+                        pub fn nested_ret(&self) -> (u32, (u64, String)) { (1, (2, String::new())) }
+                        pub fn nested_self_ret() -> (u32, (Self, String)) { (1, (Self {}, String::new())) }
+                        pub fn single_self_tuple() -> (Self,) { (Self {},) }
+                    }
+                }
+            "})
+            .unwrap(),
+        )
+        .unwrap();
+
+        generate_dispatcher(&ast).unwrap();
+
+        // `unit_ret` encodes the unit value.
+        assert!(tuple_elems(&encoded_return(&ast, "unit_ret")).is_empty());
+
+        // `nested_ret` encodes each field of the nested tuple unchanged.
+        let nested = encoded_return(&ast, "nested_ret");
+        let outer = tuple_elems(&nested);
+        assert_eq!(outer.len(), 2);
+        assert_eq!(outer[0].to_token_stream().to_string(), "rtn . 0");
+        let inner = tuple_elems(outer[1]);
+        assert_eq!(inner.len(), 2);
+        assert_eq!(inner[0].to_token_stream().to_string(), "rtn . 1 . 0");
+        assert_eq!(inner[1].to_token_stream().to_string(), "rtn . 1 . 1");
+
+        // `nested_self_ret` creates a component from `rtn.1.0` and encodes `rtn.0` and `rtn.1.1` unchanged.
+        let nested_self = encoded_return(&ast, "nested_self_ret");
+        let outer = tuple_elems(&nested_self);
+        assert_eq!(outer.len(), 2);
+        assert_eq!(outer[0].to_token_stream().to_string(), "rtn . 0");
+        let inner = tuple_elems(outer[1]);
+        assert_eq!(inner.len(), 2);
+        assert_eq!(created_component(inner[0]), "rtn . 1 . 0");
+        assert_eq!(inner[1].to_token_stream().to_string(), "rtn . 1 . 1");
+
+        // `single_self_tuple` encodes a 1-tuple, so the emitted tokens keep the trailing comma.
+        let single = encoded_return(&ast, "single_self_tuple");
+        let elems = tuple_elems(&single);
+        assert_eq!(elems.len(), 1);
+        assert_eq!(created_component(elems[0]), "rtn . 0");
+    }
 }

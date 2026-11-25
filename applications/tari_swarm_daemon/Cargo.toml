@@ -32,9 +32,9 @@ axum = { workspace = true }
 axum-extra = { workspace = true, features = ["typed-header"] }
 axum-jrpc = { workspace = true }
 clap = { workspace = true, features = ["derive", "env"] }
-fern = { workspace = true, features = ["colored", "date-based"] }
+fern = { workspace = true, features = ["colored"] }
 futures = { workspace = true }
-humantime = { workspace = true }
+time = { workspace = true, features = ["formatting"] }
 include_dir = { workspace = true }
 serde_json5 = { workspace = true }
 lockfile = "0.4.0"

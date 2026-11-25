@@ -25,7 +25,10 @@ use std::collections::{HashMap, HashSet};
 use tari_ootle_common_types::{Epoch, ShardGroup, SubstateAddress, VotePower, committee::Committee};
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
-use crate::global::{GlobalDbAdapter, models::ValidatorNode};
+use crate::global::{
+    GlobalDbAdapter,
+    models::{ShardGroupSize, ValidatorNode},
+};
 
 pub struct ValidatorNodeDb<'a, 'tx, TGlobalDbAdapter: GlobalDbAdapter> {
     backend: &'a TGlobalDbAdapter,
@@ -77,6 +80,15 @@ impl<'a, 'tx, TGlobalDbAdapter: GlobalDbAdapter> ValidatorNodeDb<'a, 'tx, TGloba
     ) -> Result<u64, TGlobalDbAdapter::Error> {
         self.backend
             .validator_nodes_count_for_shard_group(self.tx, epoch, shard_group)
+    }
+
+    pub fn size_of_shard_group(
+        &mut self,
+        epoch: Epoch,
+        shard_group: ShardGroup,
+    ) -> Result<ShardGroupSize, TGlobalDbAdapter::Error> {
+        self.backend
+            .validator_nodes_size_of_shard_group(self.tx, epoch, shard_group)
     }
 
     pub fn get_by_public_key(

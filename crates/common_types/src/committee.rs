@@ -51,17 +51,13 @@ impl<TAddr: PartialEq> Committee<TAddr> {
     }
 
     pub fn max_failures(&self) -> VotePower {
-        let power = self.total_power();
-        if power.is_zero() {
-            return VotePower::of(0);
-        }
-        (power - VotePower::of(1)) / VotePower::of(3)
+        max_failures_of(self.total_power())
     }
 
     /// Returns the quorum threshold $n - f$, where $n$ is the committee's total vote power and $f$ is the
     /// tolerated faulty power. This equals $2f + 1$ exactly when $n = 3f + 1$.
     pub fn quorum_threshold(&self) -> VotePower {
-        self.total_power() - self.max_failures()
+        quorum_threshold_of(self.total_power())
     }
 
     pub fn total_power(&self) -> VotePower {
@@ -258,15 +254,12 @@ impl CommitteeInfo {
     /// Returns the quorum threshold $n - f$, where $n$ is the committee's total vote power and $f$ is the
     /// tolerated faulty power. This equals $2f + 1$ exactly when $n = 3f + 1$.
     pub fn quorum_threshold(&self) -> VotePower {
-        self.total_power() - self.max_failures()
+        quorum_threshold_of(self.total_power())
     }
 
     /// Returns the maximum faulty vote power $f$ that this committee tolerates.
     pub fn max_failures(&self) -> VotePower {
-        if self.total_power().is_zero() {
-            return VotePower::zero();
-        }
-        (self.total_power() - VotePower::of(1)) / VotePower::of(3)
+        max_failures_of(self.total_power())
     }
 
     /// Returns the total voting power of the committee.
@@ -328,6 +321,16 @@ impl CommitteeInfo {
     pub fn all_shard_groups_iter(&self) -> impl Iterator<Item = ShardGroup> {
         self.num_shards.all_shard_groups_iter(self.num_committees)
     }
+}
+
+/// $f = \lfloor (n - 1) / 3 \rfloor$, the faulty power a committee of total power $n$ tolerates.
+pub fn max_failures_of(total_power: VotePower) -> VotePower {
+    VotePower::of(total_power.value().saturating_sub(1) / 3)
+}
+
+/// $n - f$. $f \le n$, so the subtraction never saturates.
+pub fn quorum_threshold_of(total_power: VotePower) -> VotePower {
+    total_power.saturating_sub(max_failures_of(total_power))
 }
 
 #[cfg(test)]

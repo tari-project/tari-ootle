@@ -33,11 +33,18 @@ use crate::support::{
 };
 
 pub type MessageFilter = Box<dyn Fn(&TestAddress, &TestAddress, &HotstuffMessage) -> bool + Sync + Send + 'static>;
+/// Given a message about to be delivered from the first address to the second, returns further messages, each with
+/// its apparent sender, to deliver to the same recipient immediately before it. Models a peer that relays what it
+/// sees.
+pub type MessageInjector = Box<
+    dyn Fn(&TestAddress, &TestAddress, &HotstuffMessage) -> Vec<(TestAddress, HotstuffMessage)> + Sync + Send + 'static,
+>;
 
 pub fn spawn_network(
     channels: Vec<ValidatorChannels>,
     shutdown_signal: ShutdownSignal,
     message_filter: Option<MessageFilter>,
+    message_injector: Option<MessageInjector>,
 ) -> TestNetwork {
     let tx_new_transactions = channels
         .iter()
@@ -83,6 +90,7 @@ pub fn spawn_network(
         offline_destinations: offline_destinations.clone(),
         shutdown_signal,
         message_filter,
+        message_injector,
     }
     .spawn();
 
@@ -222,6 +230,7 @@ pub struct TestNetworkWorker {
     offline_destinations: Arc<RwLock<Vec<TestAddress>>>,
     shutdown_signal: ShutdownSignal,
     message_filter: Option<MessageFilter>,
+    message_injector: Option<MessageInjector>,
 }
 
 impl TestNetworkWorker {
@@ -337,6 +346,7 @@ impl TestNetworkWorker {
             if to != from && self.is_offline_destination(&from, &to).await {
                 continue;
             }
+            self.inject_before(&from, &to, &msg).await;
 
             if self
                 .tx_hs_message
@@ -367,10 +377,29 @@ impl TestNetworkWorker {
             return;
         }
         log::debug!("✉️ Message {} sent from {} to {}", msg, from, to);
+        self.inject_before(&from, &to, &msg).await;
         self.on_message.send(Some(msg.clone())).unwrap();
         self.num_sent_messages
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         self.tx_hs_message.get(&to).unwrap().send((from, msg)).await.unwrap();
+    }
+
+    async fn inject_before(&self, from: &TestAddress, to: &TestAddress, msg: &HotstuffMessage) {
+        let Some(injector) = &self.message_injector else {
+            return;
+        };
+        for (injected_from, injected) in injector(from, to, msg) {
+            if self
+                .tx_hs_message
+                .get(to)
+                .unwrap()
+                .send((injected_from, injected))
+                .await
+                .is_err()
+            {
+                log::warn!("Unable to inject a message to {to}. channel is closed.");
+            }
+        }
     }
 
     async fn is_offline_destination(&self, from: &TestAddress, to: &TestAddress) -> bool {

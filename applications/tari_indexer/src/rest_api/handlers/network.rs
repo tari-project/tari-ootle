@@ -398,6 +398,7 @@ fn to_client_consensus_state(state: ConsensusCurrentState) -> ValidatorConsensus
         ConsensusCurrentState::Idle => ValidatorConsensusState::Idle,
         ConsensusCurrentState::CheckSync => ValidatorConsensusState::CheckSync,
         ConsensusCurrentState::Syncing => ValidatorConsensusState::Syncing,
+        ConsensusCurrentState::Presyncing => ValidatorConsensusState::Presyncing,
         ConsensusCurrentState::Running => ValidatorConsensusState::Running,
         ConsensusCurrentState::Sleeping => ValidatorConsensusState::Sleeping,
         ConsensusCurrentState::Shutdown => ValidatorConsensusState::Shutdown,

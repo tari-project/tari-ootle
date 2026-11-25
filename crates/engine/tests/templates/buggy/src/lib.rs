@@ -35,7 +35,7 @@ pub use tari_template_abi::tari_alloc;
 static ALLOC: lol_alloc::AssumeSingleThreaded<lol_alloc::FreeListAllocator> =
     unsafe { lol_alloc::AssumeSingleThreaded::new(lol_alloc::FreeListAllocator::new()) };
 
-// Hard-coded minicbor encoding of `VersionedTemplateDef::V1(TemplateDefV1 { template_name: "Buggy",
+// Hard-coded minicbor encoding of `TemplateDef::V2(TemplateDefV2 { template_name: "Buggy",
 // abi_version: 0, functions: [] })`. The leading 4 bytes are the little-endian length prefix used
 // by `encode_for_wasm_embedding`. Regenerate by running the snippet preserved in
 // `tests/test.rs::test_buggy_template` (currently commented out at the top of that function).
@@ -51,7 +51,7 @@ static ALLOC: lol_alloc::AssumeSingleThreaded<lol_alloc::FreeListAllocator> =
 #[used]
 #[unsafe(link_section = "tari_tdef")]
 static _TARI_TEMPLATE_DEF: [u8; 16] = [
-    16, 0, 0, 0, 130, 0, 129, 131, 101, 66, 117, 103, 103, 121, 0, 128,
+    16, 0, 0, 0, 130, 1, 129, 131, 101, 66, 117, 103, 103, 121, 0, 128,
 ];
 
 #[cfg(not(any(
@@ -104,17 +104,17 @@ mod engine_call_in_alloc_or_free {
     const USIZE_SIZE: usize = size_of::<usize>();
     const USIZE_ALIGN: usize = align_of::<usize>();
 
-    /// Hard-coded minicbor encoding of `VersionedTemplateDef::V1(TemplateDefV1 { template_name: "Buggy",
-    /// abi_version: 0, functions: [FunctionDefV1 { name: "main", arguments: [], output: Type::Unit,
-    /// is_mut: false, is_migration: false }] })`, with the 4-byte little-endian length prefix that
+    /// Hard-coded minicbor encoding of `TemplateDef::V2(TemplateDefV2 { template_name: "Buggy",
+    /// abi_version: 0, functions: [FunctionDef { name: "main", kind: FunctionKind::Function, arguments: [],
+    /// output: Type::Unit }] })`, with the 4-byte little-endian length prefix that
     /// `encode_for_wasm_embedding` adds. The one declared function makes the template callable, so
     /// the engine drives the `tari_alloc` of the `CallInfo` and the `tari_free` of the returned
     /// pointer.
     #[used]
     #[unsafe(link_section = "tari_tdef")]
-    static _TARI_TEMPLATE_DEF: [u8; 28] = [
-        28, 0, 0, 0, 130, 0, 129, 131, 101, 66, 117, 103, 103, 121, 0, 129, 133, 100, 109, 97, 105,
-        110, 128, 130, 0, 128, 244, 244,
+    static _TARI_TEMPLATE_DEF: [u8; 29] = [
+        29, 0, 0, 0, 130, 1, 129, 131, 101, 66, 117, 103, 103, 121, 0, 129, 132, 100, 109, 97, 105,
+        110, 130, 0, 128, 128, 130, 0, 128,
     ];
 
     /// Hard-coded minicbor encoding of `EmitLogArg { message: "call", level: LogLevel::Info }`.

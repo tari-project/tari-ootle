@@ -57,7 +57,7 @@ pub(crate) fn arg_to_value(arg: InstructionArg) -> Result<tari_bor::Value, Manif
         .ok_or_else(|| ManifestError::InvalidInstruction {
             reason: format!("{arg:?} is not a literal"),
         })?;
-    Ok(tari_bor::decode(bytes)?)
+    Ok(tari_bor::decode_exact(bytes)?)
 }
 
 /// The CBOR value `address!` writes for `id`: the typed address it holds, which is what a template
@@ -159,16 +159,17 @@ impl FromStr for ManifestValue {
 /// decodes nothing deeper, and the bound keeps parsing an untrusted variable off a deep native stack.
 pub(crate) const MAX_LIST_DEPTH: usize = tari_bor::MAX_DECODE_DEPTH;
 
-/// Parses `s` as a value nested `depth` lists deep.
-fn parse_value(s: &str, depth: usize) -> Result<ManifestValue, ManifestParseError> {
-    if let Some(inner) = s.trim().strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
+/// Parses `raw` as a value nested `depth` lists deep.
+fn parse_value(raw: &str, depth: usize) -> Result<ManifestValue, ManifestParseError> {
+    let s = raw.trim();
+    if let Some(inner) = s.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
         if depth >= MAX_LIST_DEPTH {
             return Err(ManifestParseError(format!(
                 "list nested deeper than {MAX_LIST_DEPTH} levels"
             )));
         }
         return split_list(inner)
-            .ok_or_else(|| ManifestParseError(s.to_string()))?
+            .ok_or_else(|| ManifestParseError(raw.to_string()))?
             .into_iter()
             .map(|elem| {
                 parse_value(elem, depth + 1)?
@@ -179,38 +180,42 @@ fn parse_value(s: &str, depth: usize) -> Result<ManifestValue, ManifestParseErro
             .map(|items| ManifestValue::Value(tari_bor::Value::Array(items)));
     }
 
-    SubstateId::from_str(s)
-        .ok()
-        .map(ManifestValue::SubstateId)
-        .or_else(|| {
-            let id = NonFungibleId::try_from_canonical_string(s).ok()?;
-            Some(ManifestValue::NonFungibleId(id))
-        })
-        .or_else(|| {
-            let tokens: TokenStream = s.parse().ok()?;
-            // A literal holds no group. Rejecting groups first keeps `syn` from recursing into them.
-            if tokens.clone().into_iter().any(|tt| matches!(tt, TokenTree::Group(_))) {
-                return None;
+    if let Ok(id) = SubstateId::from_str(s) {
+        return Ok(ManifestValue::SubstateId(id));
+    }
+    if let Ok(id) = NonFungibleId::try_from_canonical_string(s) {
+        return Ok(ManifestValue::NonFungibleId(id));
+    }
+
+    // A 64-character hex string is always a 32-byte key or hash, even when every hex digit happens
+    // to be `0..=9` and its decimal value fits in `i64` (such as `0000...0000` or `0000...0001`).
+    let is_64_hex_digits = s.len() == 64 && s.bytes().all(|b| b.is_ascii_hexdigit());
+    if !is_64_hex_digits &&
+        let Ok(tokens) = s.parse::<TokenStream>() &&
+        // A literal holds no group. Rejecting groups first keeps `syn` from recursing into them.
+        !tokens.clone().into_iter().any(|tt| matches!(tt, TokenTree::Group(_))) &&
+        let Ok(lit) = parse2::<Lit>(tokens)
+    {
+        if lit_to_arg(&lit).is_ok() {
+            return Ok(ManifestValue::Literal(lit));
+        }
+        // An integer literal that overflows its target range is an error. Tokens that start with
+        // digits followed by hex letters (`044bcc...`) have a non-integer suffix in `syn` and fall
+        // through to `bytes_from_hex`.
+        if let Lit::Int(ref int_lit) = lit {
+            let is_int_suffix = matches!(
+                int_lit.suffix(),
+                "u8" | "u16" | "u32" | "u64" | "u128" | "usize" | "i8" | "i16" | "i32" | "i64" | "i128" | "isize"
+            );
+            if is_int_suffix || int_lit.suffix().is_empty() {
+                return Err(ManifestParseError(raw.to_string()));
             }
-            let lit: Lit = parse2(tokens).ok()?;
-            // Reject literals that are not supported or have unrecognized suffixes (e.g. hex strings
-            // like "044bccd4..." that syn misinterprets as integer + suffix, or "1e23" as float).
-            match &lit {
-                Lit::Str(_) | Lit::Bool(_) | Lit::ByteStr(_) | Lit::Byte(_) | Lit::Char(_) => {},
-                Lit::Int(i) => match i.suffix() {
-                    "" | "u8" | "u16" | "u32" | "u64" | "u128" | "i8" | "i16" | "i32" | "i64" | "i128" => {},
-                    _ => return None,
-                },
-                _ => return None,
-            }
-            Some(ManifestValue::Literal(lit))
-        })
-        .or_else(|| {
-            // Try parsing as hex bytes (e.g. public keys)
-            let bytes = bytes_from_hex(s).ok()?;
-            Some(ManifestValue::Value(tari_bor::Value::Bytes(bytes)))
-        })
-        .ok_or_else(|| ManifestParseError(s.to_string()))
+        }
+    }
+
+    // Try parsing as hex bytes (e.g. public keys)
+    let bytes = bytes_from_hex(s).map_err(|_| ManifestParseError(raw.to_string()))?;
+    Ok(ManifestValue::Value(tari_bor::Value::Bytes(bytes)))
 }
 
 /// The comma-separated elements of a list's contents, split at the commas outside any nested list
@@ -375,5 +380,100 @@ mod tests {
                 VaultId::from_hex("0000000000000000000000000000000000000000000000000000000000000000").unwrap()
             )
         );
+    }
+
+    #[test]
+    fn arg_to_value_rejects_trailing_bytes() {
+        let mut bytes = tari_bor::encode(&"valid_value").unwrap();
+        bytes.extend_from_slice(b"trailing_garbage");
+        let arg = InstructionArg::raw_literal_bytes(bytes);
+        let err = arg_to_value(arg).unwrap_err();
+        match err {
+            ManifestError::CborSerializationError(bor_err) => {
+                assert!(bor_err.to_string().contains("remaining on input"));
+            },
+            other => panic!("expected CborSerializationError, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn it_parses_digit_only_hex_bytes_and_rejects_overflowing_int_literals() {
+        let digit_only_pk = "1234567890123456789012345678901234567890123456789012345678901234";
+        let expected_bytes = tari_bor::Value::Bytes(bytes_from_hex(digit_only_pk).unwrap());
+
+        let parsed = digit_only_pk.parse::<ManifestValue>().unwrap();
+        assert_eq!(parsed.to_value().unwrap(), expected_bytes);
+
+        let parsed_list = format!("[{digit_only_pk}]").parse::<ManifestValue>().unwrap();
+        assert_eq!(
+            parsed_list.to_value().unwrap(),
+            tari_bor::Value::Array(vec![expected_bytes])
+        );
+
+        for overflowing in [
+            "12345678901234567890",
+            "9223372036854775808",
+            "256u8",
+            "65536u16",
+            "18446744073709551616u64",
+            "18446744073709551616u128",
+        ] {
+            assert!(
+                overflowing.parse::<ManifestValue>().is_err(),
+                "expected {overflowing} to be rejected by FromStr"
+            );
+        }
+    }
+
+    #[test]
+    fn leading_zero_64_digit_hex_parses_as_bytes_and_empty_input_remains_empty_bytes() {
+        let zero_pk = "0".repeat(64);
+        let one_pk = format!("{}1", "0".repeat(63));
+        let max_i64_padded = format!("{}{}", "0".repeat(45), i64::MAX);
+
+        for hex_str in [&zero_pk, &one_pk, &max_i64_padded] {
+            let expected = tari_bor::Value::Bytes(bytes_from_hex(hex_str).unwrap());
+
+            let parsed = hex_str.parse::<ManifestValue>().unwrap();
+            assert_eq!(parsed.to_value().unwrap(), expected, "misparsed {hex_str}");
+
+            let padded = format!("  {hex_str}  ").parse::<ManifestValue>().unwrap();
+            assert_eq!(padded.to_value().unwrap(), expected, "misparsed padded {hex_str}");
+
+            let in_list = format!("[{hex_str}]").parse::<ManifestValue>().unwrap();
+            assert_eq!(
+                in_list.to_value().unwrap(),
+                tari_bor::Value::Array(vec![expected.clone()])
+            );
+
+            let globals = std::collections::HashMap::from([("pk".to_string(), parsed)]);
+            crate::parse_manifest(
+                "fn main() { create_account!(pk); }",
+                globals,
+                Default::default(),
+                Default::default(),
+            )
+            .unwrap();
+        }
+
+        // Surrounding whitespace on standalone hex and substate IDs matches list element trimming.
+        let spaced_hex = "  044bccd4d01ceb41816bc9106a836806e6f9412646ecda4c2d726d8372b2c843  "
+            .parse::<ManifestValue>()
+            .unwrap();
+        assert!(matches!(spaced_hex, ManifestValue::Value(tari_bor::Value::Bytes(_))));
+
+        let spaced_addr = "  component_0000000000000000000000000000000000000000000000000000000000000000  "
+            .parse::<ManifestValue>()
+            .unwrap();
+        assert!(spaced_addr.as_address().is_some());
+
+        for empty in ["", "   ", "\t\n"] {
+            let parsed = empty.parse::<ManifestValue>().unwrap();
+            assert_eq!(
+                parsed.to_value().unwrap(),
+                tari_bor::Value::Bytes(vec![]),
+                "expected {empty:?} to decode as empty bytes"
+            );
+        }
     }
 }

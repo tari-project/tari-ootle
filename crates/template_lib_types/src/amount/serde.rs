@@ -111,6 +111,9 @@ impl<'de> Deserialize<'de> for Amount {
                 let digit2 = seq
                     .next_element::<u64>()?
                     .ok_or_else(|| Error::invalid_length(1, &self))?;
+                if seq.next_element::<serde::de::IgnoredAny>()?.is_some() {
+                    return Err(Error::invalid_length(Amount::NUM_U64_DIGITS + 1, &self));
+                }
                 Ok(Amount::from_le_digits([digit1, digit2]))
             }
 
@@ -147,6 +150,22 @@ mod tests {
         let val = json!(123u32);
         let decoded: Amount = serde_json::from_value(val).unwrap();
         assert_eq!(decoded, amount);
+
+        let from_digits: Amount = serde_json::from_value(json!([42u64, 1u64])).unwrap();
+        assert_eq!(from_digits, Amount::from_le_digits([42, 1]));
+
+        serde_json::from_value::<Amount>(json!([42u64])).unwrap_err();
+        serde_json::from_value::<Amount>(json!([42u64, 1u64, 0u64])).unwrap_err();
+
+        let from_cbor_seq: Amount = tari_bor::serde_codec::from_slice(&encode(&[42u64, 1u64]).unwrap()).unwrap();
+        assert_eq!(from_cbor_seq, Amount::from_le_digits([42, 1]));
+        tari_bor::serde_codec::from_slice::<Amount>(&encode(&[42u64]).unwrap()).unwrap_err();
+        tari_bor::serde_codec::from_slice::<Amount>(&encode(&[42u64, 1u64, 0u64]).unwrap()).unwrap_err();
+        // Indefinite-length CBOR arrays through serde_codec: 1 element (short), 2 elements (valid), 3 elements (long)
+        tari_bor::serde_codec::from_slice::<Amount>(&[0x9f, 0x01, 0xff]).unwrap_err();
+        let indef_ok: Amount = tari_bor::serde_codec::from_slice(&[0x9f, 0x18, 0x2a, 0x01, 0xff]).unwrap();
+        assert_eq!(indef_ok, Amount::from_le_digits([42, 1]));
+        tari_bor::serde_codec::from_slice::<Amount>(&[0x9f, 0x18, 0x2a, 0x01, 0x00, 0xff]).unwrap_err();
     }
 
     #[test]
@@ -176,5 +195,37 @@ mod tests {
         let cbor = encode(&amount).unwrap();
         let decoded: Amount = decode_exact(&cbor).unwrap();
         assert_eq!(decoded, amount);
+
+        // Indefinite-length CBOR string within the cap decodes
+        let indef = [0x7f, 0x63, b'1', b'2', b'3', 0x62, b'4', b'5', 0xff];
+        let decoded: Amount = decode_exact(&indef).unwrap();
+        assert_eq!(decoded, Amount::from(12345u64));
+
+        // The longest decimal string decodes, as a definite- or indefinite-length CBOR string
+        let longest = format!("+{}", Amount::MAX);
+        assert_eq!(longest.len(), Amount::MAX_DECIMAL_STR_LEN);
+        let decoded: Amount = decode_exact(&encode(longest.as_str()).unwrap()).unwrap();
+        assert_eq!(decoded, Amount::MAX);
+        let (head, tail) = longest.split_at(20);
+        let decoded: Amount = decode_exact(&indefinite_str(&[head, tail])).unwrap();
+        assert_eq!(decoded, Amount::MAX);
+
+        // One byte past the bound is rejected before parsing, though the zero-padded string is a valid number
+        let overlong = "0".repeat(Amount::MAX_DECIMAL_STR_LEN + 1);
+        let err = decode_exact::<Amount>(&encode(overlong.as_str()).unwrap()).unwrap_err();
+        assert!(err.to_string().contains("exceeds maximum length"), "{err}");
+        let (head, tail) = overlong.split_at(20);
+        let err = decode_exact::<Amount>(&indefinite_str(&[head, tail])).unwrap_err();
+        assert!(err.to_string().contains("exceeds maximum length"), "{err}");
+    }
+
+    /// Encodes `chunks` as one indefinite-length CBOR text string.
+    fn indefinite_str(chunks: &[&str]) -> Vec<u8> {
+        let mut cbor = vec![0x7f];
+        for chunk in chunks {
+            cbor.extend(encode(*chunk).unwrap());
+        }
+        cbor.push(0xff);
+        cbor
     }
 }

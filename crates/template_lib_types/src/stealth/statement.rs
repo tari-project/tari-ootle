@@ -5,7 +5,14 @@ use minicbor::{CborLen, Decode, Decoder, Encode, decode};
 use tari_bor::adapters::bounded_vec;
 use tari_template_abi::rust::{prelude::*, vec};
 
-use super::{MAX_CONDITIONS_PER_CONJUNCTION, MAX_INCLUSION_PROOF_LEN, SpendWitness, StealthUnspentOutput};
+use super::{
+    AtomicCondition,
+    MAX_CONDITIONS_PER_CONJUNCTION,
+    MAX_INCLUSION_PROOF_LEN,
+    SpendWitness,
+    StealthUnspentOutput,
+    TemplateFunction,
+};
 use crate::{
     Amount,
     UtxoAddress,
@@ -48,6 +55,10 @@ pub struct StealthOutputsStatement {
     /// The stealth outputs that are to be created
     #[n(0)]
     #[cbor(decode_with = "decode_outputs")]
+    #[cfg_attr(
+        feature = "serde",
+        serde(deserialize_with = "ootle_serde::bounded_seq::deserialize::<{ MAX_STEALTH_OUTPUTS }, _, _>")
+    )]
     pub outputs: Vec<StealthUnspentOutput>,
     /// The revealed funds to output, and the key authorised to take them. When set, a bucket containing the revealed
     /// stealth funds is created for `receiver`. `None` is the only encoding of "no revealed output": a zero amount is
@@ -142,6 +153,10 @@ pub struct StealthInputsStatement {
     /// The stealth inputs that are to be spent
     #[n(0)]
     #[cbor(decode_with = "decode_inputs")]
+    #[cfg_attr(
+        feature = "serde",
+        serde(deserialize_with = "ootle_serde::bounded_seq::deserialize::<{ MAX_STEALTH_INPUTS }, _, _>")
+    )]
     pub inputs: Vec<StealthInput>,
     /// The total amount of revealed funds being spent.
     #[n(1)]
@@ -150,7 +165,6 @@ pub struct StealthInputsStatement {
 
 impl StealthInputsStatement {
     pub fn new(inputs: Vec<StealthInput>, revealed_amount: Amount) -> Self {
-        assert!(!revealed_amount.is_negative(), "Revealed amount must be non-negative");
         assert!(
             !inputs.is_empty() || !revealed_amount.is_zero(),
             "At least one input or a revealed amount must be provided"
@@ -208,6 +222,10 @@ pub struct StealthTransferStatement {
     /// requires value conservation. Empty when no spent input gates on a covenant.
     #[n(3)]
     #[cbor(decode_with = "decode_covenant_claims")]
+    #[cfg_attr(
+        feature = "serde",
+        serde(deserialize_with = "ootle_serde::bounded_seq::deserialize::<{ MAX_STEALTH_INPUTS }, _, _>")
+    )]
     pub covenant_claims: Vec<CovenantBalanceClaim>,
 }
 
@@ -271,6 +289,18 @@ impl StealthTransferStatement {
 
     pub fn stealth_inputs(&self) -> &[StealthInput] {
         &self.inputs_statement.inputs
+    }
+
+    /// Every [`TemplateFunction`] condition revealed on a script-path spend of this statement's inputs.
+    pub fn script_path_template_functions(&self) -> impl Iterator<Item = &TemplateFunction> {
+        self.stealth_inputs()
+            .iter()
+            .filter_map(|input| input.witness.as_script_path())
+            .flat_map(|(leaf, _, _)| leaf.conditions())
+            .filter_map(|condition| match condition {
+                AtomicCondition::TemplateFunction(tf) => Some(tf),
+                _ => None,
+            })
     }
 
     /// The nodes of every spend condition the inputs reveal (see
@@ -367,5 +397,62 @@ mod tests {
         let mut over_limit = at_limit;
         over_limit.inputs_statement.inputs.push(script_path_input(1, 0));
         assert_decodes(&over_limit, false);
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn statement_deserializes_up_to_its_count_limits() {
+        fn deserializes(statement: &StealthTransferStatement) -> bool {
+            let json = serde_json::to_string(statement).unwrap();
+            serde_json::from_str::<StealthTransferStatement>(&json).is_ok()
+        }
+        let inputs = |n| {
+            (0..n)
+                .map(|_| StealthInput::new(PedersenCommitmentBytes::zero()))
+                .collect()
+        };
+        assert!(deserializes(&statement(inputs(MAX_STEALTH_INPUTS))));
+        assert!(!deserializes(&statement(inputs(MAX_STEALTH_INPUTS + 1))));
+
+        assert!(deserializes(&statement(vec![script_path_input(
+            MAX_CONDITIONS_PER_CONJUNCTION,
+            MAX_INCLUSION_PROOF_LEN
+        )])));
+        assert!(!deserializes(&statement(vec![script_path_input(
+            1,
+            MAX_INCLUSION_PROOF_LEN + 1
+        )])));
+        assert!(!deserializes(&statement(vec![script_path_input(
+            MAX_CONDITIONS_PER_CONJUNCTION + 1,
+            0
+        )])));
+
+        let output = || StealthUnspentOutput {
+            output: crate::stealth::UnspentOutput {
+                commitment: PedersenCommitmentBytes::zero(),
+                sender_public_nonce: RistrettoPublicKeyBytes::zero(),
+                encrypted_data: crate::EncryptedData::empty(),
+                minimum_value_promise: 0,
+                viewable_balance_proof: None,
+            },
+            auth: crate::stealth::SpendAuthorization::Key(RistrettoPublicKeyBytes::zero()),
+            tag: crate::crypto::UtxoTag::new(0),
+        };
+        let mut with_outputs = statement(vec![]);
+        with_outputs.outputs_statement.outputs = (0..MAX_STEALTH_OUTPUTS).map(|_| output()).collect();
+        assert!(deserializes(&with_outputs));
+        with_outputs.outputs_statement.outputs.push(output());
+        assert!(!deserializes(&with_outputs));
+
+        let claim = || CovenantBalanceClaim {
+            partition_input_index: 0,
+            revealed_amount: Amount::ZERO,
+            signature: BalanceProofSignature::zero(),
+        };
+        let mut with_claims = statement(vec![]);
+        with_claims.covenant_claims = (0..MAX_STEALTH_INPUTS).map(|_| claim()).collect();
+        assert!(deserializes(&with_claims));
+        with_claims.covenant_claims.push(claim());
+        assert!(!deserializes(&with_claims));
     }
 }

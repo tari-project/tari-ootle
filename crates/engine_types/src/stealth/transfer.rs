@@ -60,12 +60,73 @@ pub fn transfer_native_points_for_shape(num_inputs: usize, num_outputs: usize, h
         .saturating_add(P::PER_INPUT.saturating_mul(num_inputs as u64))
 }
 
+/// A [`StealthTransferStatement`] that has passed the structural checks: every commitment is unique across inputs and
+/// outputs ([`validate_transfer_commitments`]) and every covenant claim names a distinct input
+/// ([`validate_covenant_claims`]). [`CheckedStealthTransfer::check`] is the only way to build one, and the statement is
+/// reachable by shared reference only, so holding one proves those checks ran on exactly this statement.
+#[derive(Debug)]
+pub struct CheckedStealthTransfer(StealthTransferStatement);
+
+impl CheckedStealthTransfer {
+    pub fn check(statement: StealthTransferStatement) -> Result<Self, ResourceError> {
+        CheckedStatementRef::check(&statement)?;
+        Ok(Self(statement))
+    }
+
+    pub fn statement(&self) -> &StealthTransferStatement {
+        &self.0
+    }
+
+    fn as_checked_ref(&self) -> CheckedStatementRef<'_> {
+        CheckedStatementRef(&self.0)
+    }
+}
+
+/// The borrowed form of [`CheckedStealthTransfer`]: a statement reference that has passed the same structural checks.
+/// [`CheckedStatementRef::check`] and [`CheckedStealthTransfer::as_checked_ref`] are the only ways to build one.
+#[derive(Clone, Copy)]
+struct CheckedStatementRef<'a>(&'a StealthTransferStatement);
+
+impl<'a> CheckedStatementRef<'a> {
+    /// Covenant predicates look claims up by partition, so the claim list is bounded here, before any predicate runs.
+    fn check(statement: &'a StealthTransferStatement) -> Result<Self, ResourceError> {
+        validate_transfer_commitments(statement)?;
+        validate_covenant_claims(statement)?;
+        Ok(Self(statement))
+    }
+
+    fn statement(self) -> &'a StealthTransferStatement {
+        self.0
+    }
+}
+
+/// Validates `transfer` in full: the structural checks of [`CheckedStealthTransfer::check`], then the revealed
+/// amounts, balance proof and range proof.
 pub fn validate_transfer(
     transfer: &StealthTransferStatement,
     view_key: Option<&RistrettoPublicKey>,
 ) -> Result<ValidatedStealthTransfer, ResourceError> {
-    basic_validations(transfer)?;
-    let validated_outputs = stealth::validate_stealth_outputs_statement(&transfer.outputs_statement, view_key)?;
+    validate_checked_statement(CheckedStatementRef::check(transfer)?, view_key)
+}
+
+/// Validates the revealed amounts, balance proof and range proof of a transfer that holds the structural checks of
+/// [`CheckedStealthTransfer`].
+pub fn validate_checked_transfer(
+    transfer: &CheckedStealthTransfer,
+    view_key: Option<&RistrettoPublicKey>,
+) -> Result<ValidatedStealthTransfer, ResourceError> {
+    validate_checked_statement(transfer.as_checked_ref(), view_key)
+}
+
+/// Validates the revealed amounts, balance proof and range proof of `transfer`. The witness holds unique commitments
+/// across inputs and outputs, which [`stealth::validate_outputs`] requires.
+fn validate_checked_statement(
+    transfer: CheckedStatementRef<'_>,
+    view_key: Option<&RistrettoPublicKey>,
+) -> Result<ValidatedStealthTransfer, ResourceError> {
+    let transfer = transfer.statement();
+    check_revealed_amounts_and_balance_proof_presence(transfer)?;
+    let validated_outputs = stealth::validate_outputs(&transfer.outputs_statement, view_key)?;
 
     let balance_proof = transfer
         .balance_proof
@@ -124,20 +185,15 @@ pub fn validate_transfer(
 
     // We assume that the input amount is available and only check that the maths is correct. The engine is responsible
     // for checking that the input amount is actually available.
+    // Revealed amounts are public and carry no range proof, so they are committed at full `Amount` width.
     let revealed_input_commit = commit_amount(
         &RistrettoSecretKey::default(),
         transfer.inputs_statement.revealed_amount,
-    )
-    .ok_or_else(|| ResourceError::InvalidBalanceProof {
-        details: "Revealed input amount must be non-negative".to_string(),
-    })?;
+    );
     let revealed_output_commit = commit_amount(
         &RistrettoSecretKey::default(),
         transfer.outputs_statement.revealed_output_amount(),
-    )
-    .ok_or_else(|| ResourceError::InvalidBalanceProof {
-        details: "Revealed output amount must be non-negative".to_string(),
-    })?;
+    );
 
     let public_excess =
         agg_inputs + revealed_input_commit.as_public_key() - &agg_outputs - revealed_output_commit.as_public_key();
@@ -196,28 +252,43 @@ pub fn validate_covenant_claims(transfer: &StealthTransferStatement) -> Result<(
     Ok(())
 }
 
-fn basic_validations(transfer: &StealthTransferStatement) -> Result<(), ResourceError> {
-    // The excess folds the inputs positionally, so a commitment listed n times contributes n times its value to a
-    // balance proof its spender can still construct, while the spend downs the one UTXO once.
-    let mut seen = BTreeSet::new();
+/// Checks that every stealth commitment in `transfer` is unique across both inputs and outputs:
+/// - no input commitment appears more than once,
+/// - no output commitment duplicates an input commitment, and
+/// - no output commitment appears more than once.
+///
+/// Balance proofs fold inputs and outputs positionally while the engine downs and creates each UTXO substate once.
+/// [`CheckedStealthTransfer::check`] runs this, so the engine rejects a duplicate-commitment statement on admission,
+/// before native execution charging, resource auth hooks, or spend-script predicates run.
+pub fn validate_transfer_commitments(transfer: &StealthTransferStatement) -> Result<(), ResourceError> {
+    let mut seen_inputs = BTreeSet::new();
     for input in &transfer.inputs_statement.inputs {
-        if !seen.insert(input.commitment) {
+        if !seen_inputs.insert(input.commitment) {
             return Err(ResourceError::InvalidSpend {
                 details: format!("Duplicate input commitment {} in transfer statement", input.commitment),
             });
         }
     }
 
-    validate_covenant_claims(transfer)?;
-
-    if transfer.inputs_statement.revealed_amount.is_negative() {
-        return Err(ResourceError::InvalidBalanceProof {
-            details: format!(
-                "Revealed input amount must be non-negative: {}",
-                transfer.inputs_statement.revealed_amount
-            ),
-        });
+    let mut seen_outputs = BTreeSet::new();
+    for output in &transfer.outputs_statement.outputs {
+        let commitment = output.output.commitment;
+        if seen_inputs.contains(&commitment) {
+            return Err(ResourceError::InvalidSpend {
+                details: format!("Output commitment {commitment} duplicates an input commitment in transfer statement"),
+            });
+        }
+        if !seen_outputs.insert(commitment) {
+            return Err(ResourceError::InvalidConfidentialProof {
+                details: format!("Duplicate output commitment {commitment} in stealth outputs statement"),
+            });
+        }
     }
+
+    Ok(())
+}
+
+fn check_revealed_amounts_and_balance_proof_presence(transfer: &StealthTransferStatement) -> Result<(), ResourceError> {
     if let Some(revealed) = transfer.outputs_statement.revealed_output {
         // The presence of this field and the presence of a revealed bucket are the same fact, which holds only while
         // `None` is the sole encoding of "no revealed output".
@@ -297,5 +368,232 @@ mod tests {
         let no_vk = transfer_native_points_for_shape(1, 2, false);
         let with_vk = transfer_native_points_for_shape(1, 2, true);
         assert_eq!(with_vk - no_vk, 2 * P::PER_OUTPUT_VIEWABLE_SURCHARGE);
+    }
+
+    fn make_output(seed: u64, value: u64) -> tari_template_lib::types::stealth::StealthUnspentOutput {
+        use ootle_byte_type::ToByteType;
+        use tari_crypto::keys::PublicKey;
+        use tari_template_lib::types::{
+            EncryptedData,
+            crypto::UtxoTag,
+            stealth::{SpendAuthorization, StealthUnspentOutput, UnspentOutput},
+        };
+
+        use crate::crypto::commit_u64_amount;
+
+        let mask = RistrettoSecretKey::from(seed);
+        let commitment = commit_u64_amount(&mask, value).to_byte_type();
+        let pk = RistrettoPublicKey::from_secret_key(&mask).to_byte_type();
+        StealthUnspentOutput {
+            output: UnspentOutput {
+                commitment,
+                sender_public_nonce: pk,
+                encrypted_data: EncryptedData::try_from(vec![0u8; EncryptedData::min_size()]).unwrap(),
+                minimum_value_promise: 1,
+                viewable_balance_proof: None,
+            },
+            auth: SpendAuthorization::Key(pk),
+            tag: UtxoTag::new(0),
+        }
+    }
+
+    #[test]
+    fn validate_transfer_rejects_output_duplicating_input_or_sibling_output_commitment() {
+        use tari_template_lib::types::{
+            Amount,
+            crypto::{BalanceProofSignature, RangeProofBytes, RistrettoPublicKeyBytes, Scalar32Bytes},
+            stealth::{StealthInput, StealthInputsStatement, StealthOutputsStatement},
+        };
+
+        let out1 = make_output(1, 100);
+        let out2 = make_output(2, 100);
+        let dummy_sig =
+            BalanceProofSignature::new(RistrettoPublicKeyBytes::from([1u8; 32]), Scalar32Bytes::from([1u8; 32]));
+
+        // 1. Output commitment duplicating an input commitment is rejected with InvalidSpend.
+        let input_output_collision = StealthTransferStatement {
+            inputs_statement: StealthInputsStatement::new(
+                vec![StealthInput::new(out1.output.commitment)],
+                Amount::ZERO,
+            ),
+            outputs_statement: StealthOutputsStatement {
+                outputs: vec![out1.clone()],
+                revealed_output: None,
+                agg_range_proof: RangeProofBytes::empty(),
+            },
+            balance_proof: Some(dummy_sig),
+            covenant_claims: vec![],
+        };
+        let err = validate_transfer(&input_output_collision, None).unwrap_err();
+        assert!(
+            matches!(
+                &err,
+                ResourceError::InvalidSpend { details }
+                    if details.contains("duplicates an input commitment")
+            ),
+            "unexpected error: {err:?}"
+        );
+
+        // 2. Duplicate output commitments in the same transfer statement are rejected.
+        let dup_outputs = StealthTransferStatement {
+            inputs_statement: StealthInputsStatement::new(
+                vec![StealthInput::new(out1.output.commitment)],
+                Amount::ZERO,
+            ),
+            outputs_statement: StealthOutputsStatement {
+                outputs: vec![out2.clone(), out2],
+                revealed_output: None,
+                agg_range_proof: RangeProofBytes::try_from(vec![0xabu8; 64]).unwrap(),
+            },
+            balance_proof: Some(dummy_sig),
+            covenant_claims: vec![],
+        };
+        let err = validate_transfer(&dup_outputs, None).unwrap_err();
+        assert!(
+            matches!(
+                &err,
+                ResourceError::InvalidConfidentialProof { details }
+                    if details.contains("Duplicate output commitment")
+            ),
+            "unexpected error: {err:?}"
+        );
+    }
+
+    #[test]
+    fn validate_transfer_commitments_rejects_duplicates_and_accepts_unique() {
+        use tari_template_lib::types::{
+            Amount,
+            crypto::RangeProofBytes,
+            stealth::{StealthInput, StealthInputsStatement, StealthOutputsStatement},
+        };
+
+        let out1 = make_output(1, 100);
+        let dup_inputs = StealthTransferStatement {
+            inputs_statement: StealthInputsStatement::new(
+                vec![
+                    StealthInput::new(out1.output.commitment),
+                    StealthInput::new(out1.output.commitment),
+                ],
+                Amount::ZERO,
+            ),
+            outputs_statement: StealthOutputsStatement {
+                outputs: vec![],
+                revealed_output: None,
+                agg_range_proof: RangeProofBytes::empty(),
+            },
+            balance_proof: None,
+            covenant_claims: vec![],
+        };
+        let err = validate_transfer_commitments(&dup_inputs).unwrap_err();
+        assert!(
+            matches!(
+                &err,
+                ResourceError::InvalidSpend { details }
+                    if details.contains("Duplicate input commitment")
+            ),
+            "unexpected error: {err:?}"
+        );
+
+        let unique_commitments = StealthTransferStatement {
+            inputs_statement: StealthInputsStatement::new(
+                vec![StealthInput::new(out1.output.commitment)],
+                Amount::ZERO,
+            ),
+            outputs_statement: StealthOutputsStatement {
+                outputs: vec![make_output(3, 100)],
+                revealed_output: None,
+                agg_range_proof: RangeProofBytes::empty(),
+            },
+            balance_proof: None,
+            covenant_claims: vec![],
+        };
+        validate_transfer_commitments(&unique_commitments).unwrap();
+    }
+
+    #[test]
+    fn checked_stealth_transfer_rejects_what_validate_transfer_rejects_structurally() {
+        use tari_template_lib::types::{
+            Amount,
+            crypto::{BalanceProofSignature, RangeProofBytes},
+            stealth::{
+                CovenantBalanceClaim,
+                StealthInput,
+                StealthInputsStatement,
+                StealthOutputsStatement,
+                StealthUnspentOutput,
+            },
+        };
+
+        fn statement(
+            inputs: Vec<StealthInput>,
+            outputs: Vec<StealthUnspentOutput>,
+            claim_indices: &[u32],
+        ) -> StealthTransferStatement {
+            StealthTransferStatement {
+                inputs_statement: StealthInputsStatement::new(inputs, Amount::ZERO),
+                outputs_statement: StealthOutputsStatement {
+                    outputs,
+                    revealed_output: None,
+                    agg_range_proof: RangeProofBytes::empty(),
+                },
+                balance_proof: None,
+                covenant_claims: claim_indices
+                    .iter()
+                    .map(|&partition_input_index| CovenantBalanceClaim {
+                        partition_input_index,
+                        revealed_amount: Amount::ZERO,
+                        signature: BalanceProofSignature::zero(),
+                    })
+                    .collect(),
+            }
+        }
+
+        let out1 = make_output(1, 100);
+        let out2 = make_output(2, 100);
+        let input1 = StealthInput::new(out1.output.commitment);
+
+        let cases = [
+            (
+                statement(vec![input1.clone(), input1.clone()], vec![], &[]),
+                "Duplicate input commitment",
+            ),
+            (
+                statement(vec![input1.clone()], vec![out1.clone()], &[]),
+                "duplicates an input commitment",
+            ),
+            (
+                statement(vec![input1.clone()], vec![out2.clone(), out2.clone()], &[]),
+                "Duplicate output commitment",
+            ),
+            (
+                statement(vec![input1.clone()], vec![out2.clone()], &[1]),
+                "names input 1, but the transfer has 1 inputs",
+            ),
+            (
+                statement(vec![input1.clone()], vec![out2.clone()], &[0, 0]),
+                "a second claim for input 0",
+            ),
+        ];
+        for (stmt, expected) in cases {
+            let unchecked_err = validate_transfer(&stmt, None).unwrap_err();
+            let checked_err = CheckedStealthTransfer::check(stmt).unwrap_err();
+            assert_eq!(checked_err.to_string(), unchecked_err.to_string());
+            assert!(
+                checked_err.to_string().contains(expected),
+                "expected `{expected}`, got: {checked_err:?}"
+            );
+        }
+
+        // A structurally sound statement is checked, and the remaining checks still reject its missing balance proof.
+        let stmt = statement(vec![input1], vec![out2], &[0]);
+        let unchecked_err = validate_transfer(&stmt, None).unwrap_err();
+        let checked = CheckedStealthTransfer::check(stmt).unwrap();
+        let checked_err = validate_checked_transfer(&checked, None).unwrap_err();
+        assert!(
+            matches!(&checked_err, ResourceError::InvalidBalanceProof { details }
+                if details.contains("Balance proof must be provided")),
+            "unexpected error: {checked_err:?}"
+        );
+        assert_eq!(checked_err.to_string(), unchecked_err.to_string());
     }
 }

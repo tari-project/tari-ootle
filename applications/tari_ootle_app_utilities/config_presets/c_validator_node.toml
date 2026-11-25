@@ -6,6 +6,9 @@
 
 [validator_node]
 
+# A public key from your wallet account for claiming validator fees. A nonzero key is required to start the node.
+#fee_claim_public_key = "<wallet-account-public-key>"
+
 # A path to the file that stores your node identity and secret key (default = "validator_node_id.json")
 #identity_file = "validator_node_id.json"
 

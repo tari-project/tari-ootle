@@ -5,6 +5,8 @@ mod catch_up_no_vote;
 #[cfg(test)]
 mod catch_up_on_proposal_ahead;
 #[cfg(test)]
+mod catch_up_relay;
+#[cfg(test)]
 mod catch_up_rewind;
 #[cfg(test)]
 mod consensus;
@@ -21,6 +23,8 @@ mod epoch_end_drain;
 #[cfg(test)]
 mod extends_justify;
 #[cfg(test)]
+mod finalized_transaction_proofs;
+#[cfg(test)]
 mod foreign_prepare_timeout;
 #[cfg(test)]
 mod foreign_proposal_committee;
@@ -28,6 +32,10 @@ mod foreign_proposal_committee;
 mod foreign_proposal_size;
 #[cfg(test)]
 mod high_pc_block_binding;
+#[cfg(test)]
+mod input_load_size;
+#[cfg(test)]
+mod invalid_foreign_proposal;
 #[cfg(test)]
 mod justify_certificate;
 #[cfg(test)]
@@ -37,9 +45,15 @@ mod leader_failure;
 #[cfg(test)]
 mod leader_fast_skip;
 #[cfg(test)]
+mod missing_foreign_proposal;
+#[cfg(test)]
 mod output_exists;
 #[cfg(test)]
+mod pacemaker_restart;
+#[cfg(test)]
 mod peer_message_admission;
+#[cfg(test)]
+mod presync;
 #[cfg(test)]
 mod proposal_certificate_signatures;
 #[cfg(test)]
@@ -58,5 +72,7 @@ mod template_visibility;
 mod timeout_certificate;
 #[cfg(test)]
 mod timeout_certificate_signatures;
+#[cfg(test)]
+mod unexecuted_block_commit;
 #[cfg(test)]
 mod vote_equivocation_withholding;

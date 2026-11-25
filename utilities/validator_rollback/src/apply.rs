@@ -4,7 +4,7 @@
 use std::{
     iter,
     ops::Deref,
-    path::PathBuf,
+    path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -23,6 +23,7 @@ use tari_state_store_rocksdb::{
     RocksDbStateStore,
     codecs::ByteColumn,
     column_families::bookkeeping::{CURRENT_SCHEMA_VERSION, DatabaseMigrationVersion},
+    writer::RocksDbStateStoreWriteTransaction,
 };
 use tari_state_tree::Version;
 
@@ -30,6 +31,8 @@ use crate::{
     audit::AuditWriter,
     audit_writer::{AuditCounters, write_block_plan, write_footer, write_header, write_substate_plan},
     storage::{
+        BlocksAfterEpochRow,
+        SubstateRewindPlanRow,
         rollback_delete_after_epoch,
         rollback_history_insert,
         rollback_plan_collect_blocks,
@@ -183,67 +186,42 @@ pub fn run_with_options(opts: ApplyOptions) -> anyhow::Result<ApplyOutcome> {
     })?;
     let block_rows = store.with_read_tx(|tx| rollback_plan_collect_blocks(tx, target_epoch))?;
 
-    let audit_basename = audit_path
-        .file_name()
-        .and_then(|f| f.to_str())
-        .unwrap_or("")
-        .to_string();
+    // Applying the rollback is the preflight: `rewind_shard` refuses a target whose restored substates have lost their
+    // values, and that must fail before an audit file exists on disk.
+    let history = (!opts.dry_run).then(|| RollbackHistoryEntry {
+        target_epoch,
+        shard_group,
+        applied_at_unix_secs: now_unix,
+        tool_version: env!("CARGO_PKG_VERSION").to_string(),
+        audit_file_basename: audit_path
+            .file_name()
+            .and_then(|f| f.to_str())
+            .unwrap_or("")
+            .to_string(),
+    });
     let mut tx = store.create_write_tx()?;
-    if let Err(err) = (|| -> anyhow::Result<()> {
-        for (shard, version) in &state_versions {
-            rewind_shard(&mut tx, *shard, *version)?;
-        }
-        if !opts.dry_run {
-            rollback_delete_after_epoch(&mut tx, target_epoch).context("rollback_delete_after_epoch")?;
-            rollback_history_insert(&mut tx, &RollbackHistoryEntry {
-                target_epoch,
-                shard_group,
-                applied_at_unix_secs: now_unix,
-                tool_version: env!("CARGO_PKG_VERSION").to_string(),
-                audit_file_basename: audit_basename,
-            })
-            .context("rollback_history_insert")?;
-        }
-        Ok(())
-    })() {
-        let _ = tx.rollback();
-        return Err(err);
+    if let Err(err) = stage_rollback(&mut tx, &state_versions, target_epoch, history.as_ref()) {
+        return Err(rollback_after_error(&mut tx, err));
     }
     if opts.dry_run {
         tx.rollback().context("rolling back dry-run write transaction")?;
     }
 
-    let footer_snapshot = match (|| -> anyhow::Result<AuditCounters> {
-        let audit_file =
-            std::fs::File::create(&audit_path).with_context(|| format!("creating audit file at {:?}", audit_path))?;
-        let mut writer = AuditWriter::new(std::io::BufWriter::new(audit_file))?;
-
-        write_header(
-            &mut writer,
-            target_epoch,
-            shard_group,
-            pre_rollback_tip,
-            state_versions.clone(),
-            env!("CARGO_PKG_VERSION"),
-            now_unix,
-            opts.dry_run,
-        )?;
-
-        let mut counters = AuditCounters::default();
-        write_substate_plan(&mut writer, &mut counters, &substate_rows)?;
-        write_block_plan(&mut writer, &mut counters, &block_rows)?;
-        let footer_snapshot = clone_counters(&counters);
-        write_footer(&mut writer, counters)?;
-        writer.finish()?;
-        Ok(footer_snapshot)
-    })() {
+    let audit = write_audit_file(
+        &audit_path,
+        target_epoch,
+        shard_group,
+        pre_rollback_tip,
+        state_versions,
+        now_unix,
+        opts.dry_run,
+        &substate_rows,
+        &block_rows,
+    );
+    let footer_snapshot = match audit {
         Ok(snapshot) => snapshot,
-        Err(err) => {
-            if !opts.dry_run {
-                let _ = tx.rollback();
-            }
-            return Err(err);
-        },
+        Err(err) if opts.dry_run => return Err(err),
+        Err(err) => return Err(rollback_after_error(&mut tx, err)),
     };
 
     println!("Audit file written: {}", audit_path.display());
@@ -286,6 +264,73 @@ pub fn run_with_options(opts: ApplyOptions) -> anyhow::Result<ApplyOutcome> {
 
     println!("Rollback applied successfully.");
     Ok(outcome)
+}
+
+/// Stages the rollback in `tx`: rewinds every shard in `state_versions`, then, when `history` is given, deletes the
+/// blocks after `target_epoch` and records `history`.
+fn stage_rollback(
+    tx: &mut RocksDbStateStoreWriteTransaction<'_, PeerAddress>,
+    state_versions: &[(Shard, u64)],
+    target_epoch: Epoch,
+    history: Option<&RollbackHistoryEntry>,
+) -> anyhow::Result<()> {
+    for (shard, version) in state_versions {
+        rewind_shard(tx, *shard, *version)?;
+    }
+    if let Some(history) = history {
+        rollback_delete_after_epoch(tx, target_epoch).context("rollback_delete_after_epoch")?;
+        rollback_history_insert(tx, history).context("rollback_history_insert")?;
+    }
+    Ok(())
+}
+
+/// Rolls back `tx` after `err` aborted the rollback, returning `err` with any rollback failure attached.
+fn rollback_after_error(
+    tx: &mut RocksDbStateStoreWriteTransaction<'_, PeerAddress>,
+    err: anyhow::Error,
+) -> anyhow::Error {
+    match tx.rollback() {
+        Ok(()) => err,
+        Err(rollback_err) => err.context(format!(
+            "rolling back the write transaction also failed: {rollback_err}"
+        )),
+    }
+}
+
+/// Writes the audit file for a rollback plan to `audit_path` and returns the counters its footer records.
+fn write_audit_file(
+    audit_path: &Path,
+    target_epoch: Epoch,
+    shard_group: ShardGroup,
+    pre_rollback_tip: Option<(Epoch, tari_consensus_types::BlockId)>,
+    state_versions: Vec<(Shard, u64)>,
+    now_unix: u64,
+    dry_run: bool,
+    substate_rows: &[SubstateRewindPlanRow],
+    block_rows: &[BlocksAfterEpochRow],
+) -> anyhow::Result<AuditCounters> {
+    let audit_file =
+        std::fs::File::create(audit_path).with_context(|| format!("creating audit file at {:?}", audit_path))?;
+    let mut writer = AuditWriter::new(std::io::BufWriter::new(audit_file))?;
+
+    write_header(
+        &mut writer,
+        target_epoch,
+        shard_group,
+        pre_rollback_tip,
+        state_versions,
+        env!("CARGO_PKG_VERSION"),
+        now_unix,
+        dry_run,
+    )?;
+
+    let mut counters = AuditCounters::default();
+    write_substate_plan(&mut writer, &mut counters, substate_rows)?;
+    write_block_plan(&mut writer, &mut counters, block_rows)?;
+    let footer_snapshot = clone_counters(&counters);
+    write_footer(&mut writer, counters)?;
+    writer.finish()?;
+    Ok(footer_snapshot)
 }
 
 /// Rewinds `shard`'s state tree and substates to `version`.
@@ -431,7 +476,7 @@ mod tests {
 
     impl Drop for TempTestDir {
         fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
+            drop(std::fs::remove_dir_all(&self.0));
         }
     }
 

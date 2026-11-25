@@ -51,12 +51,14 @@ pub async fn list(
         };
 
     // Each record holds one block's changes, and the table pages over the changes.
+    let has_key_prefix = cfs::block_diff::BlockDiffRecordCf::key_prefix().is_some();
     let page_size = req.limit.unwrap_or(1_000);
     let skip = req.page.unwrap_or(0).saturating_mul(page_size);
     let mut total = 0usize;
     for result in iter {
         let (block_id, changes) = result?;
-        let encoded_key = hex::encode(cf.encode_key(&block_id));
+        let encoded_key = cf.encode_key(&block_id);
+        let key_hex = hex::encode(&encoded_key[usize::from(has_key_prefix)..]);
         for (i, change) in changes.into_iter().enumerate() {
             total += 1;
             if total <= skip || total > skip.saturating_add(page_size) {
@@ -64,7 +66,7 @@ pub async fn list(
             }
             let versioned = change.versioned_substate_id();
             table.add_row(json!({
-                "id": format!("{}-{}", encoded_key, i),
+                "id": format!("{}-{}", key_hex, i),
                 "block_id": block_id,
                 "substate_id": versioned.substate_id(),
                 "version": versioned.version(),

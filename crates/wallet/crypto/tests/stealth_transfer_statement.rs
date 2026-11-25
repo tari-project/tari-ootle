@@ -7,19 +7,25 @@ use tari_crypto::{
     keys::{PublicKey, SecretKey},
     ristretto::{RistrettoPublicKey, RistrettoSecretKey},
 };
-use tari_engine_types::{Hash64, crypto::messages, stealth};
+use tari_engine_types::{
+    Hash64,
+    crypto::{self, messages},
+    stealth,
+};
 use tari_ootle_common_types::crypto::create_key_pair_from_seed;
 use tari_ootle_wallet_crypto::{
     MaskAndValue,
     OutputWitness,
     StealthInputWitness,
     StealthOutputWitness,
+    balance_proof::{generate_covenant_balance_proof_signature, validate_balance_proof_signature},
     confidential,
     stealth::create_transfer_statement,
 };
 use tari_template_lib_types::{
     Amount,
     EncryptedData,
+    Hash32,
     access_rules::AccessRule,
     bytes::Bytes,
     crypto::{BalanceProofSignature, PedersenCommitmentBytes, RistrettoPublicKeyBytes, UtxoTag},
@@ -180,6 +186,63 @@ mod stealth_tests {
         revealed.receiver = RistrettoPublicKeyBytes::from_bytes(&[0xffu8; 32]).unwrap();
 
         stealth::validate_transfer(&statement, None).unwrap_err();
+    }
+
+    /// Revealed amounts are public and carry no range proof, so they span the full `Amount` width. Only stealth output
+    /// values are bounded by the 64-bit range proof.
+    #[test]
+    fn revealed_amounts_above_u64_max_balance() {
+        let revealed_input_amount = Amount::from_u64(u64::MAX).checked_add(Amount::ONE).unwrap();
+        let revealed_output_amount = revealed_input_amount.checked_add(Amount::TEN).unwrap();
+        let statement = create_transfer_statement(
+            make_input_statements(&[(1, 10)]),
+            revealed_input_amount,
+            iter::empty(),
+            revealed(revealed_output_amount),
+        )
+        .unwrap();
+
+        stealth::validate_transfer(&statement, None).unwrap();
+        assert!(validate_balance_proof_signature(
+            statement.balance_proof.as_ref().unwrap(),
+            &statement.inputs_statement,
+            &statement.outputs_statement,
+            &statement.covenant_claims,
+        ));
+    }
+
+    /// A covenant partition's cleartext outflow sums its input values, so it can exceed `u64::MAX` when the
+    /// partition spends more than one input.
+    #[test]
+    fn covenant_revealed_amount_above_u64_max_balances() {
+        let inputs = [
+            MaskAndValue::new(u64::MAX, create_key_pair_from_seed(1).0),
+            MaskAndValue::new(u64::MAX, create_key_pair_from_seed(2).0),
+        ];
+        let input_commitments = inputs
+            .iter()
+            .map(|input| input.to_commitment().to_byte_type())
+            .collect::<Vec<_>>();
+        let agg_input_mask = &inputs[0].mask + &inputs[1].mask;
+        let revealed_amount = Amount::from_u64(u64::MAX).checked_mul(Amount::from_u64(2)).unwrap();
+        let condition_root = Hash32::from_array([7u8; 32]);
+
+        let signature = generate_covenant_balance_proof_signature(
+            &condition_root,
+            &agg_input_mask,
+            &RistrettoSecretKey::default(),
+            revealed_amount,
+            &input_commitments,
+            &[],
+        );
+
+        assert!(crypto::validate_covenant_balance_proof(
+            &condition_root,
+            revealed_amount,
+            &input_commitments,
+            &[],
+            &signature,
+        ));
     }
 
     /// Each claim proves its own partition, but nothing outside the aux digest binds the list itself, so stripping

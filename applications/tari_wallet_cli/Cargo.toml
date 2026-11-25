@@ -24,7 +24,6 @@ anyhow = { workspace = true }
 base64 = { workspace = true }
 clap = { workspace = true, features = ["derive", "env"] }
 dirs-next = { workspace = true }
-humantime = { workspace = true }
 log = { workspace = true }
 multiaddr = { workspace = true }
 reqwest = { workspace = true, features = ["json"] }

@@ -29,6 +29,23 @@ const DROPPED_PROPOSALS: u64 = 3;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_replica_behind_a_proposal_catches_up_without_leader_timeouts() {
+    catch_up_behind_a_proposal(tari_consensus::hotstuff::DEFAULT_CATCH_UP_PAGE_BYTES).await;
+}
+
+/// With a budget below any block, every page carries one block, so catching up takes a page per block and each page
+/// says where the next starts.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_replica_catches_up_through_one_block_pages() {
+    let pages = catch_up_behind_a_proposal(1).await;
+    assert!(
+        pages > 1,
+        "a one-block page budget must take several pages, took {pages}"
+    );
+}
+
+/// Withholds a window of proposals from a replica, asserts it catches up within two leader timeouts of the first
+/// proposal ahead of it, and returns how many catch-up pages it received.
+async fn catch_up_behind_a_proposal(page_bytes: usize) -> usize {
     setup_logger();
 
     let block_time = Duration::from_secs(2);
@@ -41,16 +58,20 @@ async fn a_replica_behind_a_proposal_catches_up_without_leader_timeouts() {
     // First height of the withheld window; 0 until armed.
     let drop_from = Arc::new(AtomicU64::new(0));
     let dropped = Arc::new(AtomicUsize::new(0));
+    // Catch-up pages the target received once the window is armed.
+    let pages = Arc::new(AtomicUsize::new(0));
     // When the target received the first proposal above the window, and the height that proposal justifies.
     let delivered = Arc::new(Mutex::new(None::<(Instant, NodeHeight)>));
 
     let drop_from_f = drop_from.clone();
     let dropped_f = dropped.clone();
+    let pages_f = pages.clone();
     let delivered_f = delivered.clone();
     let target_f = target.clone();
 
     let mut test = Test::builder()
         .with_test_timeout(Duration::from_secs(120))
+        .modify_config(|config| config.catch_up_page_bytes = page_bytes)
         .modify_consensus_constants(|c| {
             c.pacemaker_block_time = block_time;
             c.missed_proposal_suspend_threshold = 50;
@@ -59,6 +80,9 @@ async fn a_replica_behind_a_proposal_catches_up_without_leader_timeouts() {
             let start = drop_from_f.load(Ordering::SeqCst);
             if start == 0 || *to != target_f || *from == target_f {
                 return true;
+            }
+            if matches!(msg, HotstuffMessage::CatchUpPage(_)) {
+                pages_f.fetch_add(1, Ordering::SeqCst);
             }
             let HotstuffMessage::Proposal(proposal) = msg else {
                 return true;
@@ -123,6 +147,11 @@ async fn a_replica_behind_a_proposal_catches_up_without_leader_timeouts() {
         dropped.load(Ordering::SeqCst) > 0,
         "test premise: proposals to the target must have been withheld"
     );
+    assert!(
+        pages.load(Ordering::SeqCst) > 0,
+        "the target must catch up through catch-up pages"
+    );
     test.stop();
     test.assert_clean_shutdown().await;
+    pages.load(Ordering::SeqCst)
 }

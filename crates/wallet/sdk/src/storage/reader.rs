@@ -57,7 +57,6 @@ use crate::{
 pub trait WalletStoreReader {
     // Key manager
     fn key_manager_get_all(&mut self, branch: &str) -> Result<Vec<(u64, bool)>, WalletStorageError>;
-    fn key_manager_get_active_index(&mut self, branch: &str) -> Result<u64, WalletStorageError>;
     fn key_manager_get_last_index(&mut self, branch: &str) -> Result<u64, WalletStorageError>;
     fn key_manager_get_raw_imported_key(&mut self, id: u64) -> Result<(KeyType, Box<[u8]>), WalletStorageError>;
     /// Returns the hex-encoded public key of an imported key, without decrypting the secret.
@@ -233,6 +232,12 @@ pub trait WalletStoreReader {
     /// chain, and has no proof of any version.
     fn stealth_outputs_get_unproven_held(&mut self) -> Result<Vec<StealthOutputModel>, WalletStorageError>;
 
+    /// The resources of which `account` holds a stealth output unspent, locked for spending or locked unconfirmed.
+    fn stealth_outputs_get_live_resources(
+        &mut self,
+        account: &ComponentAddress,
+    ) -> Result<HashSet<ResourceAddress>, WalletStorageError>;
+
     // Output Locks
     /// Every lock linked to `transaction_id`, in creation order. Empty when none is.
     fn locks_get_by_transaction_id(
@@ -333,6 +338,15 @@ pub trait WalletStoreReader {
     ) -> Result<UtxoProcessQueueBatch, WalletStorageError>;
     /// Whether every one of `entries` is still queued at its generation.
     fn utxo_process_queue_is_current(&mut self, entries: &[QueuedEntry]) -> Result<bool, WalletStorageError>;
+    /// The position of the last recorded unheld spend, or 0 when none is recorded.
+    fn utxo_unheld_spends_watermark(&mut self) -> Result<u64, WalletStorageError>;
+    /// Whether a spend of any of `commitments` of the resource was recorded after `watermark`.
+    fn utxo_unheld_spends_any_after(
+        &mut self,
+        resource_address: &ResourceAddress,
+        watermark: u64,
+        commitments: &[PedersenCommitmentBytes],
+    ) -> Result<bool, WalletStorageError>;
     /// Whether the account has any UTXO of the resource queued for recovery.
     fn utxo_process_queue_has_entries(
         &mut self,

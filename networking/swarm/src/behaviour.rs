@@ -40,28 +40,38 @@ use crate::{
 
 pub type PeerData = ();
 
-#[derive(NetworkBehaviour)]
-pub struct TariNodeBehaviour<TCodec>
-where TCodec: messaging::Codec + Send + Clone + 'static
-{
-    pub ping: ping::Behaviour,
-    pub dcutr: dcutr::Behaviour,
-    pub connection_limits: connection_limits::Behaviour,
-    pub inbound_limits: inbound_limits::Behaviour,
+pub use node_behaviour::{TariNodeBehaviour, TariNodeBehaviourEvent};
 
-    pub relay: Toggle<relay::Behaviour>,
-    pub relay_client: relay::client::Behaviour,
-    pub autonat: autonat::Behaviour,
+mod node_behaviour {
+    // `connection_limits` and `inbound_limits` emit `Infallible` events, so the event-forwarding code the derive
+    // generates for them is unreachable.
+    #![allow(unreachable_code)]
 
-    pub identify: identify::Behaviour,
-    pub mdns: Toggle<mdns::tokio::Behaviour>,
-    pub rendezvous_server: Toggle<rendezvous::server::Behaviour>,
-    pub rendezvous_client: rendezvous::client::Behaviour,
-    pub peer_store: peer_store::Behaviour<MemoryStore<PeerData>>,
+    use super::*;
 
-    pub substream: substream::Behaviour,
-    pub messaging: Toggle<messaging::Behaviour<TCodec>>,
-    pub gossipsub: gossipsub::Behaviour,
+    #[derive(NetworkBehaviour)]
+    pub struct TariNodeBehaviour<TCodec>
+    where TCodec: messaging::Codec + Send + Clone + 'static
+    {
+        pub ping: ping::Behaviour,
+        pub dcutr: dcutr::Behaviour,
+        pub connection_limits: connection_limits::Behaviour,
+        pub inbound_limits: inbound_limits::Behaviour,
+
+        pub relay: Toggle<relay::Behaviour>,
+        pub relay_client: relay::client::Behaviour,
+        pub autonat: autonat::Behaviour,
+
+        pub identify: identify::Behaviour,
+        pub mdns: Toggle<mdns::tokio::Behaviour>,
+        pub rendezvous_server: Toggle<rendezvous::server::Behaviour>,
+        pub rendezvous_client: rendezvous::client::Behaviour,
+        pub peer_store: peer_store::Behaviour<MemoryStore<PeerData>>,
+
+        pub substream: substream::Behaviour,
+        pub messaging: Toggle<messaging::Behaviour<TCodec>>,
+        pub gossipsub: gossipsub::Behaviour,
+    }
 }
 
 /// Returns true if the given Multiaddr is supported by the Tari swarm, otherwise false.
@@ -130,11 +140,14 @@ where
                 None
             };
 
-            // Identify
+            // Identify. Its address cache is disabled because it would offer every listen address a peer reports as a
+            // dial candidate, including loopback and private addresses that reach a different host from here. The
+            // networking worker adds the reported addresses that are dialable from this node instead.
             let identify = identify::Behaviour::new(
                 identify::Config::new(config.protocol_version.to_string(), keypair.public())
                     .with_interval(config.identify_interval)
-                    .with_agent_version(config.user_agent),
+                    .with_agent_version(config.user_agent)
+                    .with_cache_size(0),
             );
 
             // Messaging

@@ -326,7 +326,7 @@ impl PartialTransaction {
             resolved: Vec::new(),
             stealth_input_witnesses: Vec::new(),
             agg_input_mask: tari_crypto::ristretto::RistrettoSecretKey::default(),
-            must_sign_with_account_key: intent.revealed_input_amount > 0 || intent.pay_fee_from_revealed,
+            must_sign_with_account_key: !intent.revealed_input_amount.is_zero() || intent.pay_fee_from_revealed,
             seal_signer: None,
             required_signers: Vec::new(),
             stealth_ctx: Some(ctx),
@@ -1000,6 +1000,7 @@ mod tests {
                 access_rules: ComponentAccessRules::new(),
                 entity_id: EntityId::from_array([0u8; EntityId::LENGTH]),
                 upgrade_rule: Default::default(),
+                rules_updater: None,
             },
             body: ComponentBody::from_cbor_value(state),
         };

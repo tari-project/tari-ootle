@@ -128,6 +128,12 @@ pub enum AuthError {
          or remove the UpdateComponentTemplate instruction"
     )]
     ComponentUpgradeRequiresAdmin { component: String, new_template: String },
+    #[error(
+        "Access denied. The transaction replaces the {rules} of component {component}, and only an admin credential \
+         may submit a component rules change. Review the change and submit it from an admin session, or remove the \
+         SetComponentAccessRules and SetComponentOwnerRule instructions"
+    )]
+    ComponentRulesChangeRequiresAdmin { component: String, rules: &'static str },
     #[error("Invalid expiry")]
     InvalidExpiry,
 }

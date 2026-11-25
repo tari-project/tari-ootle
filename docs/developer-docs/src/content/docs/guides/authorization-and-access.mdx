@@ -3,6 +3,8 @@ title: Authorization and Access
 description: Control who can interact with your Tari Ootle Components and Resources.
 ---
 
+import { Aside } from "@astrojs/starlight/components";
+
 ### Covered in this guide
 
 In this guide, you will:
@@ -64,16 +66,47 @@ Ownership is configured separately with `.with_owner_rule(OwnerRule::...)`; the 
 call any method. `OwnerRule` defaults to `OwnedBySigner`, meaning the transaction signer that created the
 component owns it.
 
-Upgrades are configured with `.with_upgrade_rule(UpdateRule::...)`, fixed at creation. The rule decides who may
-migrate the component to a new template with `UpdateComponentTemplate`:
+Who may replace the method access rules and the owner rule is configured with
+`.with_rules_updater(RulesUpdater::...)`, fixed at creation. It governs every change, whether it comes from a
+`SetComponentAccessRules` / `SetComponentOwnerRule` transaction instruction or from the component's own code through
+`ComponentManager::set_access_rules` / `set_owner_rule`:
 
-- `UpdateRule::Locked` (the default): nobody. The component's code never changes.
-- `UpdateRule::Owner`: whoever satisfies the component's owner rule at the time of the upgrade.
-- `UpdateRule::AccessRule(rule)`: anyone satisfying `rule`, independent of the owner rule — for example a
-  multisig or DAO badge. `component(..)`/`template(..)` requirements are rejected here.
+- `RulesUpdater::Locked` (the default): nobody, the component's own code included. The rules never change.
+- `RulesUpdater::Owner`: whoever satisfies the component's owner rule, by instruction or from the component's code.
+- `RulesUpdater::AccessRule(rule)`: anyone satisfying `rule`, independent of the owner rule.
+  `component(..)`/`template(..)` requirements are rejected here.
+- `RulesUpdater::TemplateManaged`: only the component's own code, and only while the caller satisfies the owner rule.
+  The instructions are refused. Use it only when the template must run logic of its own around every rule change,
+  such as a confirmed handover. Components created before the setting existed also behave this way.
 
-The upgrade rule is part of the component header, so wallets and explorers can show callers whether a
-component's code can change and who controls it.
+For a component whose rules should change, choose `Owner` or `AccessRule` and change them with the instructions:
+the template needs no role-management methods of its own.
+
+<Aside type="caution" title="Choose the rules updater when you create the component">
+A component whose rules are meant to change must be created with `.with_rules_updater(..)`. Under the default
+`Locked`, the instructions and `set_access_rules` / `set_owner_rule` all fail with `ComponentRulesLocked`. The setting
+is fixed at creation, so a component created `Locked` keeps its rules for good: it cannot be unlocked, only replaced
+by a new component.
+</Aside>
+
+The instructions take the whole replacement: `SetComponentAccessRules` replaces every method rule and the default,
+and `SetComponentOwnerRule` replaces the owner rule (`OwnerRule::OwnedBySigner` names the transaction's main signer).
+They are checked in the transaction's own scope: its signer keys, plus any badge proofs it opened an `authorize!`
+window over.
+
+```rust
+let tx = Transaction::builder(network, max_epoch)
+    .set_component_access_rules(component, ComponentAccessRules::new().method("mint", rule!(non_fungible(new_minter))))
+    .build_and_seal(&owner_secret);
+```
+
+In a transaction manifest, `set_access_rules!` and `set_owner_rule!` write the rules in `rule!` syntax:
+
+```rust
+set_access_rules!(component, default = deny_all, mint = non_fungible(new_minter), burn = resource(admin_badge));
+set_owner_rule!(component, public_key(new_owner_pk));
+```
+
 
 The `rule!` macro builds an `AccessRule`. The base rules are `rule!(allow_all)` and `rule!(deny_all)`; a
 restricted rule wraps one or more **requirements**:
@@ -142,9 +175,8 @@ a vault, or forged by a template.
 **Caution:** `caller_component` / `direct_caller_template` match the immediate caller's identity, which is only as
 trustworthy as the code that makes the call. A method that forwards a caller-supplied component/template and
 method (a "proxy" method) delegates that identity, so anyone who can call the proxy can act as the proxied
-caller. `caller_component(address)` also trusts whoever satisfies that component's upgrade rule, not only its current
-code: unless the component is `UpdateRule::Locked`, they can migrate it to any template. A locked component pins
-its code, not its behaviour — it can still proxy calls or act on configuration its owner controls.
+caller. A component's code is fixed, not its behaviour: it can still proxy calls or act on configuration its owner
+controls.
 
 The same applies to resource auth hooks: the engine invokes the hook with the acting component as the
 caller, and any resource may bind any hook-shaped method. A caller gate on a hook method is therefore never
@@ -222,12 +254,8 @@ instructions, so no window crosses the fee boundary. The built-in account follow
 `deposit`, `withdraw_approved` and the `create_proof_*` methods are reached inside a window when the resource or
 approval names a badge the account does not carry on its own.
 
-Hook and migration frames are lent nothing and carry no signer badges, however the action reached them: a resource
-auth hook runs with the acting frame's identity but none of its windows, and a component's upgrade rule is evaluated
-in the scope of the `UpdateComponentTemplate` instruction before the migration frame is pushed. A migration frame is
-confined exactly as a hook frame is: it may rewrite its component's own state and nothing else, so a migration that
-needs a vault, funds, a proof, an address allocation or a call into another component does that work in an ordinary
-method call after the upgrade.
+Hook frames are lent nothing and carry no signer badges, however the action reached them: a resource auth hook
+runs with the acting frame's identity but none of its windows.
 
 Signer badges are not proofs: they are stamped into every frame a top-level instruction pushes, so a rule naming
 the transaction's signer needs no window. A signer badge authorizes only the frame it is stamped into, and no
@@ -271,6 +299,7 @@ use tari_template_lib::prelude::*;
 
 #[template]
 mod template {
+    use super::*;
 
     pub struct MyComponent {
         resource: ResourceManager,
@@ -279,11 +308,10 @@ mod template {
     impl MyComponent {
         pub fn create_with_restricted_resource(
             minter_badge: NonFungibleAddress,
-        ) -> ResourceAddress {
+        ) -> Component<Self> {
             let resource_address = ResourceBuilder::public_fungible()
                 .with_token_symbol("RTK")
                 .with_divisibility(10)
-                .initial_supply(amount!["1000000000000000000000"])
                 // Only the minter badge can mint, and only the owner may
                 // change who can mint later.
                 .mintable(rule!(non_fungible(minter_badge)), OWNER)
@@ -291,7 +319,10 @@ mod template {
                 .burnable(rule!(deny_all), LOCKED)
                 .build();
 
-            MyComponent { resource: resource_address.into() }.create()
+            Component::new(Self {
+                resource: resource_address.into(),
+            })
+            .create()
         }
     }
 }

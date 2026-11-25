@@ -56,7 +56,6 @@ use tari_ootle_wallet_crypto::{
     viewable_balance_proof::generate_elgamal_viewable_balance_proof_seeded,
 };
 use tari_template_lib_types::{
-    Amount,
     EncryptedData,
     ResourceAddress,
     access_rules::AccessRule,
@@ -218,6 +217,13 @@ pub(crate) fn build_stealth_outputs_statement_from_entropy(
     let mut witnesses = Vec::with_capacity(intent.outputs.len());
     let mut agg_output_mask = RistrettoSecretKey::default();
     for (spec, per_entropy) in intent.outputs.iter().zip(entropy.per_output.iter()) {
+        if spec.resource_address != intent.resource_address {
+            return Err(OotleSdkError::Validation(format!(
+                "output resource_address ('{}') does not match intent.resource_address ('{}')",
+                spec.resource_address.as_str(),
+                intent.resource_address.as_str()
+            )));
+        }
         let witness = build_stealth_output_witness(network, spec, per_entropy)?;
         agg_output_mask = agg_output_mask + &witness.witness.mask;
         witnesses.push((witness, per_entropy));
@@ -280,8 +286,8 @@ pub(crate) fn build_stealth_outputs_statement_from_entropy(
         .map_err(|e| OotleSdkError::Stealth(format!("range proof failed: {e}")))?;
 
     let revealed_output = match (intent.revealed_output_amount, revealed_receiver) {
-        (0, _) => None,
-        (amount, Some(receiver)) => Some(RevealedOutput::new(Amount::from_u64(amount), receiver)),
+        (amount, _) if amount.is_zero() => None,
+        (amount, Some(receiver)) => Some(RevealedOutput::new(amount.to_amount(), receiver)),
         (_, None) => {
             return Err(OotleSdkError::Validation(
                 "a revealed output must name the receiver authorised to take it".to_string(),
@@ -329,10 +335,7 @@ pub fn build_stealth_outputs_statement(
 
 #[cfg(test)]
 mod tests {
-    use tari_crypto::{
-        keys::PublicKey as _,
-        ristretto::{RistrettoPublicKey, RistrettoSecretKey},
-    };
+    use tari_crypto::ristretto::{RistrettoPublicKey, RistrettoSecretKey};
     use tari_engine_types::stealth::validate_stealth_outputs_statement;
 
     use super::*;
@@ -372,7 +375,7 @@ mod tests {
             destination_account_pk: pk_bytes(3),
             destination_view_pk: pk_bytes(4),
             amount,
-            revealed_amount: 0,
+            revealed_amount: crate::types::U128::ZERO,
             resource_address: tari_resource(),
             resource_view_key: with_view_key.then(|| pk_bytes(5)),
             memo: None,
@@ -411,8 +414,8 @@ mod tests {
             fee: BoundaryAmount::new(2000),
             inputs: Vec::<StealthInputSpec>::new(),
             outputs,
-            revealed_input_amount: 0,
-            revealed_output_amount: revealed_output,
+            revealed_input_amount: crate::types::U128::ZERO,
+            revealed_output_amount: crate::types::U128::from_u64(revealed_output),
             min_epoch: None,
             max_epoch: 1,
             dry_run: false,
@@ -607,6 +610,19 @@ mod tests {
         let err =
             build_stealth_outputs_statement_with_seed(Network::LocalNet, &it, &BuildSeed::from_array([0u8; 32]), None)
                 .unwrap_err();
+        assert_eq!(err.code(), "VALIDATION");
+    }
+
+    #[test]
+    fn rejects_output_resource_address_mismatch() {
+        use tari_template_lib_types::ObjectKey;
+
+        let mut spec = output_spec(1000, false);
+        spec.resource_address =
+            ResourceAddressStr::parse(ResourceAddress::new(ObjectKey::from_array([0x99; 32])).to_string()).unwrap();
+        let it = intent(vec![spec], 0);
+        let e = entropy_for(&[(10, false)]);
+        let err = build_stealth_outputs_statement_from_entropy(Network::LocalNet, &it, &e, None).unwrap_err();
         assert_eq!(err.code(), "VALIDATION");
     }
 }

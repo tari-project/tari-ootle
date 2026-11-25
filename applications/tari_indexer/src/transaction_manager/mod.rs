@@ -334,7 +334,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        network_client::tests::{Answer, FakeCommittee, FakeEpochManager, aborted, network},
+        network_client::tests::{Answer, FakeCommittee, FakeEpochManager, aborted_of, network},
         network_state_sync::ShardWatermarks,
         storage_sqlite::{SqliteIndexerStore, temp_store},
         store::IndexerStoreReader,
@@ -392,9 +392,9 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn an_abort_is_answered_while_the_store_cannot_write() {
         let (_dir, store) = temp_store().await;
-        let manager = manager_answering(store.clone(), aborted());
         let transaction = transaction(7);
         let id = transaction.calculate_id();
+        let manager = manager_answering(store.clone(), aborted_of(id));
         store
             .with_write_tx(move |tx| tx.upsert_submitted_transaction(&transaction, Epoch(100)))
             .await

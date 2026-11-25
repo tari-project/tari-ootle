@@ -214,24 +214,33 @@ function Validators() {
   const [error, setError] = useState<string | null>(null);
   const [nowSec, setNowSec] = useState<number>(() => Math.floor(Date.now() / 1000));
   const mountedRef = useRef(false);
+  const inFlightRef = useRef(false);
 
   const fetch = useCallback(async () => {
-    try {
-      const validatorsResp = await listValidators();
-      setEpoch(validatorsResp.epoch);
-      setRoster(validatorsResp.validators);
-      setError(null);
-    } catch (e) {
-      console.error(e);
-      setError("Failed to load validators");
+    if (inFlightRef.current) {
       return;
     }
+    inFlightRef.current = true;
     try {
-      const statsResp = await getNetworkStats();
-      setStatuses(statsResp.validators);
-    } catch (e) {
-      // The roster renders without liveness snapshots; just log
-      console.error(e);
+      try {
+        const validatorsResp = await listValidators();
+        setEpoch(validatorsResp.epoch);
+        setRoster(validatorsResp.validators);
+        setError(null);
+      } catch (e) {
+        console.error(e);
+        setError("Failed to load validators");
+        return;
+      }
+      try {
+        const statsResp = await getNetworkStats();
+        setStatuses(statsResp.validators);
+      } catch (e) {
+        // The roster renders without liveness snapshots; just log
+        console.error(e);
+      }
+    } finally {
+      inFlightRef.current = false;
     }
   }, []);
 

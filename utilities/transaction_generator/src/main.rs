@@ -9,6 +9,7 @@ use std::{
     fs,
     io,
     io::{BufRead, Seek, SeekFrom, Write, stdout},
+    path::Path,
 };
 
 use anyhow::anyhow;
@@ -38,7 +39,7 @@ use transaction_generator::{
 use url::Url;
 
 use crate::{
-    cli::{Flood, SubCommand, WriteArgs},
+    cli::{AccountsArgs, Flood, SubCommand, WriteArgs},
     transaction_writer::write_transactions,
 };
 
@@ -53,12 +54,11 @@ fn main() -> anyhow::Result<()> {
             let timer = std::time::Instant::now();
             println!("Generating and writing {} transactions", args.num_transactions,);
 
-            let mut file = std::fs::File::create(&args.output_file)?;
-
             let max_epoch = resolve_max_epoch(&args)?;
             println!("Transactions are valid until epoch {max_epoch}");
 
             let builder = get_transaction_builder(&args, max_epoch)?;
+            let mut file = std::fs::File::create(&args.output_file)?;
             write_transactions(
                 args.num_transactions,
                 builder,
@@ -90,6 +90,7 @@ fn main() -> anyhow::Result<()> {
                 println!("Read transaction: {}", transaction.calculate_id());
             }
         },
+        SubCommand::Accounts(args) => list_accounts(&args)?,
     }
 
     Ok(())
@@ -139,18 +140,7 @@ fn get_transaction_builder(args: &WriteArgs, max_epoch: Epoch) -> anyhow::Result
                 .transpose()
                 .map_err(|_| anyhow!("Failed to parse secret"))?
                 .unwrap_or_else(|| RistrettoSecretKey::random(&mut rand::rng()));
-            let mut manifest_args = parse_args(&args.manifest_args)?;
-            if let Some(args_file) = &args.manifest_args_file {
-                let file = io::BufReader::new(fs::File::open(args_file)?);
-                for ln in file.lines() {
-                    let ln = ln?;
-                    let line = ln.trim();
-                    if line.is_empty() || line.starts_with('#') {
-                        continue;
-                    }
-                    manifest_args.extend(parse_arg(line));
-                }
-            }
+            let manifest_args = load_manifest_args(&args.manifest_args, args.manifest_args_file.as_deref())?;
             let templates = parse_templates(&args.templates)?;
             let inputs = parse_inputs(&args.inputs)?;
             let blobs = parse_blobs(&args.blobs)?;
@@ -185,13 +175,86 @@ fn get_transaction_builder(args: &WriteArgs, max_epoch: Epoch) -> anyhow::Result
     }
 }
 
+fn list_accounts(args: &AccountsArgs) -> anyhow::Result<()> {
+    let seed = args.account_seed;
+    let client = IndexerRestApiClient::connect(args.indexer_url.clone())?;
+    let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
+    let vaults = fetch_account_vaults(&client, &runtime, &args.indexer_url, seed, args.num_accounts)?;
+
+    let held = vaults.iter().flatten().copied().collect::<Vec<_>>();
+    let mut balances = HashMap::with_capacity(held.len());
+    for chunk in held.chunks(MAX_SUBSTATES_PER_FETCH) {
+        let requests = BoundedVec::<_, 1, 50>::from_vec(chunk.iter().map(|&vault| SubstateId::Vault(vault)).collect())
+            .map_err(|e| anyhow!("Could not batch vault lookups: {e}"))?;
+        let response = runtime
+            .block_on(client.fetch_substates(GetSubstatesRequest {
+                requests,
+                cached_only: false,
+                include_proofs: false,
+            }))
+            .map_err(|e| {
+                anyhow!(
+                    "Could not read the vaults of seed {seed} from indexer {}: {e}",
+                    args.indexer_url
+                )
+            })?;
+        for &vault in chunk {
+            let value = response
+                .substates
+                .get(&SubstateId::Vault(vault))
+                .ok_or_else(|| anyhow!("Indexer {} does not serve vault {vault}", args.indexer_url))?
+                .value()
+                .decode()
+                .map_err(|e| anyhow!("Could not decode vault {vault}: {e}"))?;
+            let balance = value
+                .vault()
+                .ok_or_else(|| anyhow!("Substate {vault} is not a vault"))?
+                .balance();
+            balances.insert(vault, balance);
+        }
+    }
+
+    let mut out = stdout().lock();
+    for (index, vault) in (0..args.num_accounts).zip(&vaults) {
+        let (_, public_key) = account_keypair(seed, index);
+        let address = account_address(&public_key);
+        let balance = vault.map_or_else(|| "-".to_string(), |vault| balances[&vault].to_string());
+        writeln!(out, "{index} {} {address} {balance}", public_key.to_hex())?;
+    }
+    Ok(())
+}
+
 /// The TARI vault of each of the first `count` accounts derived from `seed`, in account order.
-///
-/// A vault id is allocated from the hash of the transaction that created it, so it is read from the indexer rather
-/// than derived. A faucet-funded account holds exactly one vault.
 fn resolve_account_vaults(indexer_url: &Url, seed: u64, count: u64) -> anyhow::Result<Vec<VaultId>> {
     let client = IndexerRestApiClient::connect(indexer_url.clone())?;
     let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
+    fetch_account_vaults(&client, &runtime, indexer_url, seed, count)?
+        .into_iter()
+        .enumerate()
+        .map(|(index, vault)| {
+            vault.ok_or_else(|| {
+                anyhow!(
+                    "Account {index} of seed {seed} does not exist. Fund the accounts first, with a faucet flood of \
+                     at least {count} transactions and `--account-seed {seed}`, or by depositing to the addresses \
+                     `accounts --account-seed {seed}` lists."
+                )
+            })
+        })
+        .collect()
+}
+
+/// The TARI vault of each of the first `count` accounts derived from `seed`, in account order, or `None` for an
+/// account the network does not hold.
+///
+/// A vault id is allocated from the hash of the transaction that created it, so it is read from the indexer rather
+/// than derived. A funded account holds exactly one vault.
+fn fetch_account_vaults(
+    client: &IndexerRestApiClient,
+    runtime: &tokio::runtime::Runtime,
+    indexer_url: &Url,
+    seed: u64,
+    count: u64,
+) -> anyhow::Result<Vec<Option<VaultId>>> {
     let indices = (0..count).collect::<Vec<_>>();
     let mut vaults = Vec::with_capacity(indices.len());
     for chunk in indices.chunks(MAX_SUBSTATES_PER_FETCH) {
@@ -221,21 +284,22 @@ fn resolve_account_vaults(indexer_url: &Url, seed: u64, count: u64) -> anyhow::R
                 .map(|substate| substate.value().decode())
                 .transpose()
                 .map_err(|e| anyhow!("Could not decode account {index} of seed {seed} ({address}): {e}"))?;
-            let component = value.as_ref().and_then(|value| value.component()).ok_or_else(|| {
-                anyhow!(
-                    "Account {index} of seed {seed} ({address}) does not exist. Fund the accounts first with \
-                     `--account-seed {seed}` and at least {count} faucet transactions."
-                )
-            })?;
+            let Some(value) = value else {
+                vaults.push(None);
+                continue;
+            };
+            let component = value
+                .component()
+                .ok_or_else(|| anyhow!("Account {index} of seed {seed} ({address}) is not a component"))?;
             let indexed = component
                 .body
                 .to_indexed_well_known_types()
                 .map_err(|e| anyhow!("Could not read the vaults of account {index} ({address}): {e}"))?;
             match indexed.vault_ids() {
-                [vault] => vaults.push(*vault),
+                [vault] => vaults.push(Some(*vault)),
                 found => anyhow::bail!(
                     "Account {index} of seed {seed} ({address}) holds {} vaults, but a transfers flood spends only \
-                     the TARI vault the faucet funded",
+                     its TARI vault",
                     found.len()
                 ),
             }
@@ -290,6 +354,26 @@ fn parse_templates(items: &[String]) -> anyhow::Result<HashMap<String, TemplateA
         .collect()
 }
 
+fn load_manifest_args(
+    cli_args: &[String],
+    args_file: Option<&Path>,
+) -> Result<HashMap<String, ManifestValue>, anyhow::Error> {
+    let mut manifest_args = parse_args(cli_args)?;
+    if let Some(args_file) = args_file {
+        let file = io::BufReader::new(fs::File::open(args_file)?);
+        for ln in file.lines() {
+            let ln = ln?;
+            let line = ln.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let (key, value) = parse_arg(line)?;
+            manifest_args.insert(key, value);
+        }
+    }
+    Ok(manifest_args)
+}
+
 fn parse_args(globals: &[String]) -> Result<HashMap<String, ManifestValue>, anyhow::Error> {
     globals.iter().map(|s| parse_arg(s)).collect()
 }
@@ -301,4 +385,39 @@ fn parse_arg(arg: &str) -> Result<(String, ManifestValue), anyhow::Error> {
         .parse()
         .map_err(|err| anyhow!("Failed to parse arg '{}': {}", name, err))?;
     Ok((name.trim().to_string(), value))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        path::PathBuf,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    use super::*;
+
+    struct TempFile(PathBuf);
+
+    impl Drop for TempFile {
+        fn drop(&mut self) {
+            let _unused = fs::remove_file(&self.0);
+        }
+    }
+
+    #[test]
+    fn load_manifest_args_propagates_errors_from_args_file() {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock after epoch")
+            .as_nanos();
+        let temp = TempFile(std::env::temp_dir().join(format!("tx_gen_args_{}_{}.txt", std::process::id(), nanos)));
+
+        fs::write(&temp.0, "# comment\n\ncount = 42\n").unwrap();
+        let parsed = load_manifest_args(&[], Some(&temp.0)).unwrap();
+        assert!(parsed.contains_key("count"));
+
+        fs::write(&temp.0, "count = 42\nmalformed_line_without_equals\n").unwrap();
+        let err = load_manifest_args(&[], Some(&temp.0)).unwrap_err();
+        assert!(err.to_string().contains("Invalid arg"));
+    }
 }

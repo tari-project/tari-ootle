@@ -5,6 +5,7 @@ use std::{cmp, fs::File, io::Write, path::Path, time::Duration};
 
 use anyhow::bail;
 use tari_indexer_client::{
+    error::IndexerRestClientError,
     rest_api_client::IndexerRestApiClient,
     types::{
         GetTransactionResultRequest,
@@ -69,20 +70,17 @@ async fn stress_test(args: StressTestArgs) -> anyhow::Result<Option<StressTestRe
         args.transaction_file.display(),
         num_transactions
     );
-    if args
-        .num_transactions
-        .map(|n| n.saturating_add(args.skip_transactions.unwrap_or(0)) > num_transactions)
-        .unwrap_or(false)
-    {
+    let skip = args.skip_transactions.unwrap_or(0);
+    let requested = args.num_transactions.map_or(skip, |n| n.saturating_add(skip));
+    if requested > num_transactions {
         bail!(
             "The transaction file only contains {} transactions, but you requested {}",
             num_transactions,
-            args.num_transactions
-                .unwrap_or(num_transactions)
-                .saturating_add(args.skip_transactions.unwrap_or(0))
+            requested
         );
     }
-    let num_transactions = cmp::min(num_transactions, args.num_transactions.unwrap_or(num_transactions));
+    let available = num_transactions - skip;
+    let num_transactions = cmp::min(available, args.num_transactions.unwrap_or(available));
     if !args.no_confirm {
         print!("{} transactions will be submitted. Continue? [y/N]: ", num_transactions);
         std::io::stdout().flush()?;
@@ -122,12 +120,8 @@ async fn stress_test(args: StressTestArgs) -> anyhow::Result<Option<StressTestRe
                         return;
                     },
                 };
-                match client
-                    .client
-                    .submit_transaction(SubmitTransactionRequest { transaction: envelope })
-                    .await
-                {
-                    Ok(SubmitTransactionResponse { transaction_id, .. }) => {
+                match submit_transaction(&client, envelope).await {
+                    Ok(transaction_id) => {
                         submitted_tx.send(transaction_id).unwrap();
                     },
                     Err(e) => {
@@ -296,6 +290,9 @@ async fn fetch_result_summary(
                             );
                             sleep(Duration::from_secs(1)).await;
                         },
+                        Err(e) if is_rate_limited(&e) => {
+                            sleep(Duration::from_secs(1)).await;
+                        },
                         Err(e) => {
                             println!("Failed to get transaction result: {}", e);
                             results_tx
@@ -318,6 +315,43 @@ async fn fetch_result_summary(
     // Drop the remaining sender handle so that the result collector ends when all results have been received
     drop(results_tx);
     results_handle.await.unwrap()
+}
+
+/// Retries of one submission a rate-limited indexer answers with HTTP 429. The backoff grows by a second per attempt
+/// up to [`MAX_RATE_LIMITED_BACKOFF`], so the retries span about 75 seconds, enough for the submit bucket to refill.
+const MAX_RATE_LIMITED_RETRIES: u32 = 12;
+const MAX_RATE_LIMITED_BACKOFF: Duration = Duration::from_secs(10);
+
+async fn submit_transaction(
+    client: &IndexerClient,
+    envelope: TransactionEnvelope,
+) -> Result<TransactionId, IndexerRestClientError> {
+    let mut attempt = 0u32;
+    loop {
+        match client
+            .client
+            .submit_transaction(SubmitTransactionRequest {
+                transaction: envelope.clone(),
+            })
+            .await
+        {
+            Ok(SubmitTransactionResponse { transaction_id, .. }) => return Ok(transaction_id),
+            Err(e) if is_rate_limited(&e) && attempt < MAX_RATE_LIMITED_RETRIES => {
+                attempt += 1;
+                sleep(cmp::min(Duration::from_secs(attempt.into()), MAX_RATE_LIMITED_BACKOFF)).await;
+            },
+            Err(e) => return Err(e),
+        }
+    }
+}
+
+fn is_rate_limited(err: &IndexerRestClientError) -> bool {
+    match err {
+        IndexerRestClientError::ErrorResponse { source, .. } | IndexerRestClientError::RequestFailed { source } => {
+            source.status().is_some_and(|s| s.as_u16() == 429)
+        },
+        _ => false,
+    }
 }
 
 #[derive(Clone)]
@@ -431,11 +465,13 @@ async fn check_validity_window(client: &IndexerClient, transaction_file: &Path, 
 }
 
 fn print_summary(summary: &StressTestResultSummary) {
-    println!("Summary:");
-    println!(
-        "  Success rate: {:.2}%",
+    let success_rate = if summary.num_transactions == 0 {
+        0.0
+    } else {
         summary.num_committed as f64 / summary.num_transactions as f64 * 100.0
-    );
+    };
+    println!("Summary:");
+    println!("  Success rate: {:.2}%", success_rate);
     println!("  Transactions submitted: {}", summary.num_transactions);
     println!("  Fully committed: {}", summary.num_committed);
     println!("  Fee charged, execution rejected: {}", summary.num_execution_rejected);
@@ -451,12 +487,16 @@ fn print_summary(summary: &StressTestResultSummary) {
         .map(|n| Duration::from_nanos(n.try_into().unwrap_or(u64::MAX)))
         .map(|n| format!("{:.2?}", n))
         .unwrap_or_else(|| "--".to_string());
+    let fastest = if summary.num_executed() == 0 {
+        "--".to_string()
+    } else {
+        format!("{:.2?}", summary.fastest_execution_time)
+    };
 
     println!(
-        "  Execution time over {} executed: total {:.2?} (slowest: {:.2?}, fastest: {:.2?}, Avg: {avg})",
+        "  Execution time over {} executed: total {:.2?} (slowest: {:.2?}, fastest: {fastest}, Avg: {avg})",
         summary.num_executed(),
         summary.total_execution_time,
         summary.slowest_execution_time,
-        summary.fastest_execution_time
     );
 }

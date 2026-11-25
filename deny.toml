@@ -67,6 +67,12 @@ together with a crafted `-wal` file of a different page size. The fix ships only
 `tari_common_sqlite`. Exploiting it needs local write access to a wallet or validator node data
 directory: every SQLite database these binaries open is their own. Remove once `diesel` releases
 with `libsqlite3-sys` 0.39 allowed and the workspace moves to it.""" },
+    { id = "RUSTSEC-2026-0542", reason = """
+`humantime` 2.3.0 is flagged unmaintained, with no patched release. Every path to it is transitive
+(`log4rs`, `env_logger`, `console-subscriber`, `cucumber`, walletd's `humantime-serde`), so
+`unmaintained = "workspace"` already keeps it out of this check. It is listed so
+`rustsec/audit-check` follows the same policy. Remove once those dependencies move off
+`humantime`.""" },
 ]
 
 [licenses]

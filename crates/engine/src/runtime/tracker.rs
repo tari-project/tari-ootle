@@ -51,7 +51,7 @@ use tari_template_lib::{
         Metadata,
         SubstateOwnerRule,
         TemplateAddress,
-        access_rules::{ComponentAccessRules, UpdateRule},
+        access_rules::{ComponentAccessRules, RulesUpdater, UpdateRule},
     },
 };
 
@@ -332,6 +332,7 @@ impl<TStore: StateReader> StateTracker<TStore> {
         access_rules: ComponentAccessRules,
         address_allocation: Option<ComponentAddressAllocation>,
         upgrade_rule: UpdateRule,
+        rules_updater: RulesUpdater,
     ) -> Result<ComponentAddress, RuntimeError> {
         self.write_with(|state| {
             let template_address = *state.current_template()?;
@@ -365,6 +366,7 @@ impl<TStore: StateReader> StateTracker<TStore> {
                 owner_rule,
                 entity_id: component_address.entity_id(),
                 upgrade_rule,
+                rules_updater: Some(rules_updater),
             };
 
             let component = Component { header, body };
@@ -564,7 +566,10 @@ impl<TStore: StateReader> StateTracker<TStore> {
         let failure = match failure {
             Some(reason) => Some(reason),
             None => self
-                .write_with(|state| state.enforce_output_size_limit())
+                .write_with(|state| {
+                    state.enforce_substate_output_limit()?;
+                    state.enforce_output_size_limit()
+                })
                 .err()
                 .map(|err| err.to_reject_reason(None)),
         };
@@ -844,6 +849,7 @@ impl<TStore: StateReader + Clone> StateTracker<TStore> {
             // Check that the checkpoint is in a valid state. It is what commits if the main intent
             // fails, so it is held to every limit a full commit is.
             state.validate_finalized()?;
+            state.enforce_substate_output_limit()?;
             state.enforce_output_size_limit()?;
             let checkpoint_state = state.clone();
 

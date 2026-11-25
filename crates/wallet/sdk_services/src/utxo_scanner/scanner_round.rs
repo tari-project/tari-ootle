@@ -441,7 +441,7 @@ where TSpec: WalletSdkSpec
         self.stats.num_potential_recoveries += num_recovered;
         self.sdk.store().with_write_tx(|tx| {
             // Mark UTXOs as spent (if they exist)
-            let mut spends_unheld = false;
+            let mut spends_unheld = Vec::new();
             for spent in self.utxos_to_spend.drain(..) {
                 match Self::spend(tx, self.resource_address, &spent)? {
                     Spend::Marked => {
@@ -451,7 +451,7 @@ where TSpec: WalletSdkSpec
                         });
                         num_spent += 1;
                     },
-                    Spend::NotHeld => spends_unheld = true,
+                    Spend::NotHeld => spends_unheld.push(spent.id.into_commitment_bytes()),
                     Spend::Unchanged => {},
                 }
             }
@@ -473,11 +473,9 @@ where TSpec: WalletSdkSpec
                 tx.utxo_process_queue_extend(self.resource_address, self.utxos_to_recover.drain(..))?;
             }
             // A spend of an output the wallet does not hold may be of one that recovery has looked up unspent and not
-            // stored yet. Recovery stores an output only while its lookup is current, so every lookup made before is
-            // made again, and then shows the spend.
-            if spends_unheld {
-                tx.utxo_process_queue_invalidate(self.resource_address)?;
-            }
+            // stored yet. Recovery does not store an output with a spend recorded after its lookup, and looks it up
+            // again.
+            tx.utxo_unheld_spends_record(self.resource_address, &spends_unheld)?;
 
             let bound = &self.stored_cursor_bound;
             let mut cursors = Vec::new();
@@ -549,7 +547,7 @@ where TSpec: WalletSdkSpec
             };
             let Some(held) = held else {
                 // Recovery may store the output before the round commits. Recorded as a spend, the burn then takes it
-                // down, and otherwise invalidates recovery's lookups (see `Self::spend`).
+                // down, and otherwise is recorded for recovery's lookups to check (see `Self::spend`).
                 self.checked_spends.push(reported);
                 continue;
             };

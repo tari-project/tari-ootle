@@ -27,6 +27,7 @@ import { TARI_TOKEN } from "@tari-project/ootle-ts-bindings";
 import { XTR_CURRENCY } from "@utils/currency";
 import { formatCurrency } from "@utils/helpers";
 import { PoolRateInfo, SendMoneyFormState } from "./FormStep";
+import { getOutputPrivacyDisplay } from "./outputPrivacy";
 
 interface ConfirmationStepProps {
   resource_address?: ResourceAddress;
@@ -53,6 +54,7 @@ export default function ConfirmationStep({
 }: ConfirmationStepProps) {
   const currency = { symbol: token_symbol, decimals: divisibility };
   const isMissingSwapAmount = !!transferFormState.swapPoolAddress && !transferFormState.swapInputAmount;
+  const outputPrivacy = getOutputPrivacyDisplay(resource_type, transferFormState.outputToRevealed);
 
   return (
     <Stack spacing={3} sx={{ py: 2 }}>
@@ -94,12 +96,14 @@ export default function ConfirmationStep({
           <Typography variant="body1">{resource_address}</Typography>
         </Box>
 
-        {resource_type === "Confidential" && (
+        {outputPrivacy && (
           <Box>
             <Typography variant="subtitle2" color="text.secondary">
-              Send Confidential Outputs:
+              {outputPrivacy.label}
             </Typography>
-            <Typography variant="body1">{transferFormState.outputToRevealed ? "Yes" : "No"}</Typography>
+            <Typography variant="body1" color={outputPrivacy.isRevealed ? "warning.main" : undefined}>
+              {outputPrivacy.value}
+            </Typography>
           </Box>
         )}
 

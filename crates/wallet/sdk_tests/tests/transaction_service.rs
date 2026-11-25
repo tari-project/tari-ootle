@@ -4,7 +4,7 @@
 mod support;
 
 use std::{
-    collections::{HashSet, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     sync::{
         Arc,
         Mutex,
@@ -179,6 +179,13 @@ impl WalletNetworkInterface for ScriptedNetwork {
         panic!("ScriptedNetwork::get_substates called")
     }
 
+    async fn get_substate_versions(
+        &self,
+        _: &[SubstateId],
+    ) -> Result<HashMap<SubstateId, SubstateVersion>, Self::Error> {
+        panic!("ScriptedNetwork::get_substate_versions called")
+    }
+
     async fn submit_transaction(&self, transaction: Transaction) -> Result<TransactionId, Self::Error> {
         self.submit_count.fetch_add(1, Ordering::SeqCst);
         if self
@@ -191,7 +198,7 @@ impl WalletNetworkInterface for ScriptedNetwork {
         }
         if self
             .failing_submits
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
             .is_ok()
         {
             return Err(ScriptedError("the submission failed"));

@@ -89,6 +89,8 @@ impl TransactionStatusResponseError for FakeError {
 struct OneUtxoNetwork {
     utxo: Arc<Mutex<Option<UtxoUnspent>>>,
     failing_substate_queries: Arc<AtomicUsize>,
+    utxo_stream_calls: Arc<AtomicUsize>,
+    fail_utxo_streams_from_call: Arc<Mutex<Option<usize>>>,
 }
 
 impl OneUtxoNetwork {
@@ -99,6 +101,11 @@ impl OneUtxoNetwork {
     /// Makes the next `count` substate queries fail as if the indexer were unavailable.
     fn fail_substate_queries(&self, count: usize) {
         self.failing_substate_queries.store(count, Ordering::SeqCst);
+    }
+
+    /// Makes every stealth UTXO stream request starting from `call_index` (0-based) fail with `Unavailable`.
+    fn fail_utxo_streams_from_call(&self, call_index: usize) {
+        *self.fail_utxo_streams_from_call.lock().unwrap() = Some(call_index);
     }
 }
 
@@ -164,6 +171,15 @@ impl WalletNetworkInterface for OneUtxoNetwork {
         shard_state_versions: Vec<(Shard, StateVersion)>,
         _unspent_only: bool,
     ) -> Result<UtxoUpdateStream<Self::Error>, Self::Error> {
+        let call_index = self.utxo_stream_calls.fetch_add(1, Ordering::SeqCst);
+        if self
+            .fail_utxo_streams_from_call
+            .lock()
+            .unwrap()
+            .is_some_and(|fail_from| call_index >= fail_from)
+        {
+            return Err(FakeError::Unavailable);
+        }
         let shard = Shard::from(0u32);
         let already_synced = shard_state_versions
             .iter()
@@ -287,7 +303,8 @@ async fn run_recovery(test: &TestWithNetwork<OneUtxoNetwork>) {
         utxo_scanner_handle,
         ABANDON_AFTER_NOT_FOUND,
         seed_birthday,
-    );
+    )
+    .with_retry_delay(Duration::from_millis(1));
     tokio::time::timeout(Duration::from_secs(120), recovery.scan())
         .await
         .expect("recovery did not finish");
@@ -375,6 +392,97 @@ async fn recovery_retries_a_key_that_fails_to_scan() {
     network.fail_substate_queries(1);
     run_recovery(&test).await;
     assert_recovered_only_key_1(&test);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn recovery_cleans_up_unused_accounts_when_a_key_fails_all_attempts() {
+    let (test, network) = new_test();
+    // Key 0 (unused) and key 1 (holds UTXO) succeed; key 2 fails every stealth UTXO stream attempt.
+    network.fail_utxo_streams_from_call(2);
+    run_recovery(&test).await;
+
+    let sdk = test.sdk();
+    let accounts_api = sdk.accounts_api();
+    for index in [0, 2] {
+        assert!(
+            !accounts_api
+                .exists_by_address(&account_address_for_key_index(&test, index))
+                .unwrap(),
+            "unused account at key index {index} was not removed on aborted recovery"
+        );
+    }
+    let recovered = accounts_api
+        .get_account_by_address(&account_address_for_key_index(&test, 1))
+        .unwrap();
+    assert!(recovered.account.is_default());
+    assert!(sdk.config_api().get::<bool>(ConfigKey::RecoveryNeeded).unwrap());
+    assert_eq!(
+        sdk.config_api()
+            .get::<u64>(ConfigKey::RecoveryMaxProbedKeyIndex)
+            .unwrap(),
+        2
+    );
+
+    let created = accounts_api.create_next_account(Some("new"), false).unwrap();
+    assert_eq!(created.account.owner_key_id.and_then(|id| id.derived_index()), Some(0));
+    assert_eq!(
+        created.account.birthday_epoch,
+        sdk.key_manager_api().get_cipher_seed_birthday_epoch().unwrap()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn recovery_keeps_key_zero_when_key_one_fails_before_any_account_is_found() {
+    let (test, network) = new_test();
+    network.fail_utxo_streams_from_call(1);
+    run_recovery(&test).await;
+
+    let sdk = test.sdk();
+    let accounts_api = sdk.accounts_api();
+    let key_0 = accounts_api
+        .get_account_by_address(&account_address_for_key_index(&test, 0))
+        .unwrap();
+    assert!(key_0.account.is_default());
+    assert!(
+        !accounts_api
+            .exists_by_address(&account_address_for_key_index(&test, 1))
+            .unwrap()
+    );
+    let created = accounts_api.create_next_account(Some("new"), false).unwrap();
+    assert_eq!(created.account.owner_key_id.and_then(|id| id.derived_index()), Some(1));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn recovery_removes_unused_key_zero_when_a_later_failed_key_is_kept() {
+    let (test, network) = new_test();
+    let sdk = test.sdk();
+    let key_1 = sdk.key_manager_api().derive_account_key(1).unwrap();
+    sdk.accounts_api()
+        .add_account(
+            Some("recovered-account-1"),
+            &account_address_for_key_index(&test, 1),
+            KeyId::derived(KeyBranch::ViewOnlyKey, 1),
+            key_1.as_key_id(),
+            Epoch::zero(),
+            true,
+            false,
+        )
+        .unwrap();
+
+    network.fail_utxo_streams_from_call(1);
+    run_recovery(&test).await;
+
+    let accounts_api = sdk.accounts_api();
+    assert!(
+        !accounts_api
+            .exists_by_address(&account_address_for_key_index(&test, 0))
+            .unwrap()
+    );
+    let kept = accounts_api
+        .get_account_by_address(&account_address_for_key_index(&test, 1))
+        .unwrap();
+    assert!(kept.account.is_default());
+    assert!(sdk.config_api().get::<bool>(ConfigKey::RecoveryNeeded).unwrap());
 }
 
 #[tokio::test(flavor = "multi_thread")]

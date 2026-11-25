@@ -73,6 +73,13 @@ with `libsqlite3-sys` 0.39 allowed and the workspace moves to it.""" },
 `unmaintained = "workspace"` already keeps it out of this check. It is listed so
 `rustsec/audit-check` follows the same policy. Remove once those dependencies move off
 `humantime`.""" },
+    { id = "RUSTSEC-2026-0186", reason = """
+Unchecked pointer offset in crate memmap2, patched in 0.9.11. Direct workspace dependencies specify
+`memmap2 = "0.9"` in the workspace Cargo.toml and resolve to 0.9.11. The vulnerable 0.6.2 release is
+pulled in transitively by `wasmer` 7.5.0 (`wasmer-compiler`, `wasmer-vm`) via `shared-buffer` 0.1.4.
+`shared-buffer` 0.1.4 is the latest release on crates.io and only invokes `Mmap::map()` to map
+immutable memory regions, never calling `advise_range`, `flush_async_range`, or mutable offset APIs.
+Remove once `wasmer` drops `shared-buffer` or `shared-buffer` updates to `memmap2` >= 0.9.""" },
 ]
 
 [licenses]

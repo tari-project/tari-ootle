@@ -1846,3 +1846,255 @@ fn finalize_confirms_unconfirmed_output_relocked_via_lock_smallest_amount() {
     let vault = tx.vaults_get(&stealth_vault).unwrap();
     assert_eq!(vault.confidential_balance, Amount::from(850u64));
 }
+
+#[test]
+fn lock_finalize_releases_untouched_revealed_vault_on_fee_only_accept() {
+    let (store, fee_vault, _, first_resource, _) = setup_store();
+    let spend_resource = resource_address(3);
+    let spend_vault = vault_address(6);
+    let account = account_address();
+    let transaction = build_transaction(21);
+    let transaction_id = transaction.calculate_id();
+
+    let mut tx = store.create_write_tx().unwrap();
+    upsert_stealth_resource(&mut tx, &spend_resource);
+    tx.vaults_update(
+        fee_vault,
+        SubstateVersion::new(1),
+        Amount::from(10_000u64),
+        Amount::zero(),
+    )
+    .unwrap();
+    tx.vaults_insert(VaultModel {
+        account_address: account,
+        id: spend_vault,
+        vault_version: SubstateVersion::new(1),
+        resource_address: spend_resource,
+        resource_type: ResourceType::Stealth,
+        confidential_balance: Amount::zero(),
+        revealed_balance: Amount::from(50_000u64),
+        locked_revealed_balance: Amount::zero(),
+        token_symbol: Some("STEALTH".to_string()),
+        divisibility: 6,
+    })
+    .unwrap();
+    tx.transactions_insert(&transaction, None, &[account], false).unwrap();
+
+    let lock_id = tx.locks_create(None, LockOwner::Wallet).unwrap();
+    tx.locks_link_transaction(lock_id, transaction_id).unwrap();
+    tx.vaults_lock_revealed_funds(lock_id, &fee_vault, Amount::from(500u64))
+        .unwrap();
+    tx.vaults_lock_revealed_funds(lock_id, &spend_vault, Amount::from(50_000u64))
+        .unwrap();
+
+    // Simulate `AcceptFeeRejectRest`: `fee_vault` pays 250 in fees, while `spend_vault` is rolled back and
+    // absent from the committed diff.
+    let mut fee_diff = SubstateDiff::new();
+    fee_diff.up(
+        SubstateId::Vault(fee_vault),
+        Substate::new(
+            SubstateVersion::new(2),
+            Vault::new(ResourceContainer::public_fungible(
+                first_resource,
+                Amount::from(9_750u64),
+            )),
+        ),
+    );
+    tx.locks_unlock_finalized(lock_id, &fee_diff).unwrap();
+    tx.commit().unwrap();
+
+    let mut tx = store.create_read_tx().unwrap();
+    let fee_after = tx.vaults_get(&fee_vault).unwrap();
+    assert_eq!(fee_after.revealed_balance, Amount::from(9_750u64));
+    assert_eq!(fee_after.locked_revealed_balance, Amount::zero());
+    assert_eq!(fee_after.vault_version, SubstateVersion::new(2));
+
+    let spend_after = tx.vaults_get(&spend_vault).unwrap();
+    assert_eq!(spend_after.revealed_balance, Amount::from(50_000u64));
+    assert_eq!(spend_after.locked_revealed_balance, Amount::zero());
+    assert_eq!(spend_after.vault_version, SubstateVersion::new(1));
+
+    let page = tx
+        .balance_changes_get_page_by_account(&account, 0, 10, None, Some(&transaction_id), None)
+        .unwrap();
+    assert_eq!(page.total, 1);
+    assert_eq!(page.changes[0].vault_address, Some(fee_vault));
+    assert_eq!(page.changes[0].revealed_delta, "-250");
+}
+
+#[test]
+fn lock_finalize_preserves_revealed_balance_and_updates_version_on_net_zero_diff() {
+    let (store, first_vault, _, first_resource, _) = setup_store();
+    let account = account_address();
+    let tx_net_zero = build_transaction(22);
+    let tx_net_zero_id = tx_net_zero.calculate_id();
+
+    let mut tx = store.create_write_tx().unwrap();
+    tx.vaults_update(
+        first_vault,
+        SubstateVersion::new(1),
+        Amount::from(10_000u64),
+        Amount::zero(),
+    )
+    .unwrap();
+    tx.transactions_insert(&tx_net_zero, None, &[account], false).unwrap();
+
+    let lock_zero = tx.locks_create(None, LockOwner::Wallet).unwrap();
+    tx.locks_link_transaction(lock_zero, tx_net_zero_id).unwrap();
+    tx.vaults_lock_revealed_funds(lock_zero, &first_vault, Amount::from(500u64))
+        .unwrap();
+
+    let mut diff_zero = SubstateDiff::new();
+    diff_zero.up(
+        SubstateId::Vault(first_vault),
+        Substate::new(
+            SubstateVersion::new(2),
+            Vault::new(ResourceContainer::public_fungible(
+                first_resource,
+                Amount::from(10_000u64),
+            )),
+        ),
+    );
+    tx.locks_unlock_finalized(lock_zero, &diff_zero).unwrap();
+    tx.commit().unwrap();
+
+    let mut tx = store.create_read_tx().unwrap();
+    let after_zero = tx.vaults_get(&first_vault).unwrap();
+    assert_eq!(after_zero.revealed_balance, Amount::from(10_000u64));
+    assert_eq!(after_zero.locked_revealed_balance, Amount::zero());
+    assert_eq!(after_zero.vault_version, SubstateVersion::new(2));
+    assert_eq!(
+        tx.balance_changes_get_page_by_account(&account, 0, 10, None, Some(&tx_net_zero_id), None)
+            .unwrap()
+            .total,
+        0
+    );
+}
+
+#[test]
+fn lock_finalize_after_same_version_scan_does_not_double_deduct() {
+    let (store, first_vault, _, first_resource, _) = setup_store();
+    let account = account_address();
+    let tx_same = build_transaction(24);
+    let tx_same_id = tx_same.calculate_id();
+
+    let mut tx = store.create_write_tx().unwrap();
+    tx.vaults_update(
+        first_vault,
+        SubstateVersion::new(1),
+        Amount::from(10_000u64),
+        Amount::zero(),
+    )
+    .unwrap();
+    tx.transactions_insert(&tx_same, None, &[account], false).unwrap();
+    let lock_same = tx.locks_create(None, LockOwner::Wallet).unwrap();
+    tx.locks_link_transaction(lock_same, tx_same_id).unwrap();
+    tx.vaults_lock_revealed_funds(lock_same, &first_vault, Amount::from(500u64))
+        .unwrap();
+    tx.commit().unwrap();
+
+    // `AccountScanner` refreshes `first_vault` at `v2` before `lock_same` finalizes.
+    record_change(
+        &store,
+        first_vault,
+        SubstateVersion::new(2),
+        Amount::from(9_750u64),
+        Amount::zero(),
+        BalanceChangeSource::Scan,
+    );
+
+    let mut diff_v2 = SubstateDiff::new();
+    diff_v2.up(
+        SubstateId::Vault(first_vault),
+        Substate::new(
+            SubstateVersion::new(2),
+            Vault::new(ResourceContainer::public_fungible(
+                first_resource,
+                Amount::from(9_750u64),
+            )),
+        ),
+    );
+    let mut tx = store.create_write_tx().unwrap();
+    tx.locks_unlock_finalized(lock_same, &diff_v2).unwrap();
+    tx.commit().unwrap();
+
+    let mut tx = store.create_read_tx().unwrap();
+    let after_same = tx.vaults_get(&first_vault).unwrap();
+    assert_eq!(after_same.revealed_balance, Amount::from(9_750u64));
+    assert_eq!(after_same.locked_revealed_balance, Amount::zero());
+    assert_eq!(after_same.vault_version, SubstateVersion::new(2));
+    assert_eq!(
+        tx.balance_changes_get_page_by_account(&account, 0, 10, None, Some(&tx_same_id), None)
+            .unwrap()
+            .total,
+        1
+    );
+}
+
+#[test]
+fn lock_finalize_after_newer_scan_does_not_regress_vault_version() {
+    let (store, first_vault, _, first_resource, _) = setup_store();
+    let account = account_address();
+    let tx_older = build_transaction(25);
+    let tx_older_id = tx_older.calculate_id();
+
+    let mut tx = store.create_write_tx().unwrap();
+    tx.vaults_update(
+        first_vault,
+        SubstateVersion::new(2),
+        Amount::from(9_750u64),
+        Amount::zero(),
+    )
+    .unwrap();
+    tx.transactions_insert(&tx_older, None, &[account], false).unwrap();
+    let lock_older = tx.locks_create(None, LockOwner::Wallet).unwrap();
+    tx.locks_link_transaction(lock_older, tx_older_id).unwrap();
+    tx.vaults_lock_revealed_funds(lock_older, &first_vault, Amount::from(500u64))
+        .unwrap();
+    tx.commit().unwrap();
+
+    // `AccountScanner` scans both `v3` (our spend) and `v4` (a subsequent deposit) before `lock_older` finalizes.
+    record_change(
+        &store,
+        first_vault,
+        SubstateVersion::new(3),
+        Amount::from(9_400u64),
+        Amount::zero(),
+        BalanceChangeSource::Scan,
+    );
+    record_change(
+        &store,
+        first_vault,
+        SubstateVersion::new(4),
+        Amount::from(12_400u64),
+        Amount::zero(),
+        BalanceChangeSource::Scan,
+    );
+
+    let mut diff_v3 = SubstateDiff::new();
+    diff_v3.up(
+        SubstateId::Vault(first_vault),
+        Substate::new(
+            SubstateVersion::new(3),
+            Vault::new(ResourceContainer::public_fungible(
+                first_resource,
+                Amount::from(9_400u64),
+            )),
+        ),
+    );
+    let mut tx = store.create_write_tx().unwrap();
+    tx.locks_unlock_finalized(lock_older, &diff_v3).unwrap();
+    tx.commit().unwrap();
+
+    let mut tx = store.create_read_tx().unwrap();
+    let after_older = tx.vaults_get(&first_vault).unwrap();
+    assert_eq!(after_older.revealed_balance, Amount::from(12_400u64));
+    assert_eq!(after_older.locked_revealed_balance, Amount::zero());
+    assert_eq!(after_older.vault_version, SubstateVersion::new(4));
+    assert_eq!(
+        tx.balance_changes_get_page_by_account(&account, 0, 10, None, Some(&tx_older_id), None)
+            .unwrap()
+            .total,
+        1
+    );
+}

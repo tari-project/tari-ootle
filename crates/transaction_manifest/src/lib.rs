@@ -152,14 +152,14 @@ mod size_cap_tests {
             .collect::<Vec<_>>()
             .join(", ");
         let at_limit = format!(
-            "fn fee_main() {{ let c = new_component_addr!(); set_access_rules!(c, {methods}); }} \
-             fn main() {{ let c = new_component_addr!(); set_access_rules!(c, {methods}); }}"
+            "fn main() {{ let c = new_component_addr!(); set_access_rules!(c, {methods}); set_access_rules!(c, \
+             {methods}); }}"
         );
         assert!(parse_manifest(&at_limit, HashMap::new(), Default::default(), Default::default()).is_ok());
 
         let over_limit = format!(
-            "fn fee_main() {{ let c = new_component_addr!(); set_access_rules!(c, {methods}); }} \
-             fn main() {{ let c = new_component_addr!(); set_access_rules!(c, {methods}, extra = allow_all); }}"
+            "fn main() {{ let c = new_component_addr!(); set_access_rules!(c, {methods}); set_access_rules!(c, \
+             {methods}, extra = allow_all); }}"
         );
         let res = parse_manifest(&over_limit, HashMap::new(), Default::default(), Default::default());
         assert!(matches!(res, Err(ManifestError::InvalidInstruction { reason })

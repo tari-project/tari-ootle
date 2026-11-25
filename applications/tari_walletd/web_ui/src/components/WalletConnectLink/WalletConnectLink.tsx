@@ -61,15 +61,26 @@ import "./ConnectorLink.css";
 
 const projectId: string = import.meta.env.VITE_WALLET_CONNECT_PROJECT_ID || "78f3485d08b9640a087cbcea000e1f8b";
 
+const formatErrorMessage = (error: unknown): string => {
+  if (typeof error === "string") {
+    return error;
+  }
+  if (error instanceof Error) {
+    return error.message || error.name;
+  }
+  return String(error);
+};
+
 const ConnectorDialog = () => {
   const [page, setPage] = useState(1);
-  const [error, setError] = useState<any | undefined>(undefined);
+  const [error, setError] = useState<string | undefined>(undefined);
   const [isOpen, setIsOpen] = useState(false);
   const [linkDetected, setLinkDetected] = useState(false);
   const [link, setLink] = useState("");
   const [proposal, setProposal] = useState<any | undefined>(undefined);
   const [isLoading, setIsLoading] = useState(false);
   const linkRef = useRef<HTMLInputElement>(null);
+  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const accountStore = useAccountStore();
   const theme = useTheme();
   const isMd = useMediaQuery(theme.breakpoints.up("sm"));
@@ -173,6 +184,10 @@ const ConnectorDialog = () => {
   }
 
   const handleOpen = async () => {
+    if (closeTimerRef.current !== null) {
+      clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
     await getClipboardContent();
     setIsOpen(true);
   };
@@ -180,10 +195,22 @@ const ConnectorDialog = () => {
   const handleClose = () => {
     setError(undefined);
     setIsOpen(false);
-    setTimeout(() => {
+    if (closeTimerRef.current !== null) {
+      clearTimeout(closeTimerRef.current);
+    }
+    closeTimerRef.current = setTimeout(() => {
+      closeTimerRef.current = null;
       setPage(1);
     }, 500);
   };
+
+  useEffect(() => {
+    return () => {
+      if (closeTimerRef.current !== null) {
+        clearTimeout(closeTimerRef.current);
+      }
+    };
+  }, []);
 
   const handleConnect = () => {
     linkRef.current && setLink(linkRef.current.value);
@@ -191,39 +218,31 @@ const ConnectorDialog = () => {
   };
 
   const handleConnectWithLink = async () => {
+    setError(undefined);
     let wallet = web3wallet;
     if (!wallet) {
       try {
         wallet = await createWallet();
-      } catch (error) {
-        if (typeof error === "string") {
-          setError(error);
-          return;
-        }
-
-        const err = error as Error;
-        setError(err.message || err);
-      }
-      console.log({ wallet });
-      setWeb3wallet(wallet);
-
-      setIsLoading(true);
-      try {
-        const result = await wallet.pair({ uri: link });
-        console.log({ result });
-      } catch (error) {
-        setIsLoading(false);
-        if (typeof error === "string") {
-          setError(error);
-          return;
-        }
-
-        const err = error as Error;
-        setError(err.message || err);
+      } catch (err) {
+        setError(formatErrorMessage(err));
         return;
       }
+      if (!wallet) {
+        setError("Failed to initialize WalletConnect client");
+        return;
+      }
+      setWeb3wallet(wallet);
     }
-    setPage(page + 1);
+
+    setIsLoading(true);
+    try {
+      await wallet.pair({ uri: link });
+    } catch (err) {
+      setIsLoading(false);
+      setError(formatErrorMessage(err));
+      return;
+    }
+    setPage((currentPage) => currentPage + 1);
   };
 
   const handleApprove = async () => {
@@ -233,6 +252,10 @@ const ConnectorDialog = () => {
     }
     if (!web3wallet) {
       console.error("Web3Wallet not initialized");
+      return;
+    }
+    if (!proposal) {
+      setError("No active WalletConnect session proposal");
       return;
     }
 
@@ -256,7 +279,7 @@ const ConnectorDialog = () => {
               "tari_getNftsList",
             ],
             chains: ["tari:devnet"],
-            events: ['chainChanged", "accountsChanged'],
+            events: ["chainChanged", "accountsChanged"],
             accounts,
           },
         },
@@ -272,22 +295,20 @@ const ConnectorDialog = () => {
 
       // respond to the dapp request with the approved session's topic and response
       await web3wallet.respondSessionRequest({ topic: session.topic, response });
-    } catch (error) {
-      console.error("USER_REJECTED:", error);
-      await web3wallet.rejectSession({
-        id: proposal.id,
-        reason: getSdkError("USER_REJECTED"),
-      });
+      setPage((currentPage) => currentPage + 1);
+    } catch (err) {
+      console.error("USER_REJECTED:", err);
+      setError(formatErrorMessage(err));
+      try {
+        await web3wallet.rejectSession({
+          id: proposal.id,
+          reason: getSdkError("USER_REJECTED"),
+        });
+      } catch (rejectErr) {
+        console.error("Failed to reject session:", rejectErr);
+      }
     }
-
-    setPage(page + 1);
   };
-
-  useEffect(() => {
-    if (isOpen) {
-      getClipboardContent();
-    }
-  }, [isOpen, getClipboardContent]);
 
   let permissions: any[] = [];
   let optionalPermissions: any[] = [];

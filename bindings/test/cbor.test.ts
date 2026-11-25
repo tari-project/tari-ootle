@@ -58,6 +58,21 @@ describe("convertCborValue", () => {
     expect(convertCborValue(input)).toBe(`utxo_${RESOURCE_HEX}_${idHex}`);
   });
 
+  it("decodes ConfidentialOutput address from resource tag and commitment bytes", () => {
+    const commitmentHex = "78".repeat(32);
+    const input = {
+      "@cbor": "tag",
+      "tag": TariTypeTag.ConfidentialOutput,
+      "value": [RESOURCE_TAG, { "@cbor": "bytes", "hex": commitmentHex }],
+    };
+    expect(convertCborValue(input)).toBe(`coutput_${RESOURCE_HEX}_${commitmentHex}`);
+  });
+
+  it("exposes BucketId and ConfidentialOutput discriminants matching Rust BinaryTag", () => {
+    expect(TariTypeTag.BucketId).toBe(133);
+    expect(TariTypeTag.ConfidentialOutput).toBe(142);
+  });
+
   it("decodes ValidatorNodeFeePool address tag as vnfp_<hex>", () => {
     const poolHex = "34".repeat(32);
     const input = {
@@ -110,10 +125,21 @@ describe("convertCborValue", () => {
       tag: TariTypeTag.Utxo,
       value: [`resource_${RESOURCE_HEX}`, "not-bytes"],
     });
+    expect(
+      convertCborValue({
+        "@cbor": "tag",
+        "tag": TariTypeTag.ConfidentialOutput,
+        "value": [RESOURCE_TAG, "not-bytes"],
+      }),
+    ).toEqual({
+      tag: TariTypeTag.ConfidentialOutput,
+      value: [`resource_${RESOURCE_HEX}`, "not-bytes"],
+    });
   });
 
   it("decodes Metadata maps containing nested address tags", () => {
     const compHex = "aa".repeat(32);
+    const commitHex = "bb".repeat(32);
     const input = {
       "@cbor": "tag",
       "tag": TariTypeTag.Metadata,
@@ -128,11 +154,17 @@ describe("convertCborValue", () => {
           "tag": TariTypeTag.NonFungibleAddress,
           "value": [RESOURCE_TAG, [1, ["badge"]]],
         },
+        coutput: {
+          "@cbor": "tag",
+          "tag": TariTypeTag.ConfidentialOutput,
+          "value": [RESOURCE_TAG, { "@cbor": "bytes", "hex": commitHex }],
+        },
       },
     };
     expect(convertCborValue(input)).toEqual({
       owner: `component_${compHex}`,
       nft: `nft_${RESOURCE_HEX}_str_badge`,
+      coutput: `coutput_${RESOURCE_HEX}_${commitHex}`,
     });
   });
 });

@@ -73,7 +73,7 @@ pub struct PrunedUnsignedTransactionV1 {
     )]
     #[cfg_attr(
         feature = "serde",
-        serde(deserialize_with = "tari_ootle_common_types::deserialize_input_declarations")
+        serde(deserialize_with = "crate::v1::unsigned::deserialize_inputs")
     )]
     pub inputs: IndexSet<InputDeclaration>,
     #[n(4)]
@@ -587,6 +587,51 @@ mod tests {
         // Replace the stored blob_hashes with hashes of different data.
         pruned.body.transaction.blob_hashes = Blobs::from_vec(vec![Blob::from(vec![9, 9, 9])]).hashes();
         assert!(!pruned.verify_all_signatures(SchemaVersion::CURRENT));
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn serde_rejects_more_inputs_than_max_transaction_inputs() {
+        // Distinct substates: a repeated one is refused as a duplicate whatever the count.
+        fn distinct_inputs(len: usize) -> serde_json::Value {
+            let inputs = (0..len)
+                .map(|i| {
+                    let mut bytes = [0u8; 32];
+                    bytes[..8].copy_from_slice(&(i as u64).to_le_bytes());
+                    InputDeclaration::read(SubstateId::Component(ComponentAddress::from_array(bytes)))
+                })
+                .collect::<Vec<_>>();
+            serde_json::to_value(inputs).unwrap()
+        }
+
+        let secret = RistrettoSecretKey::random(&mut rand::rng());
+        let transaction = sealed(sample_unsigned_with_blobs(Blobs::empty()), &secret);
+        let unsealed = serde_json::to_value(transaction.unsealed_transaction()).unwrap();
+        let pruned = serde_json::to_value(PrunedUnsealedTransactionV1::from(
+            transaction.unsealed_transaction().clone(),
+        ))
+        .unwrap();
+
+        for (len, accepted) in [
+            (crate::MAX_TRANSACTION_INPUTS, true),
+            (crate::MAX_TRANSACTION_INPUTS + 1, false),
+        ] {
+            let mut json = unsealed.clone();
+            json["transaction"]["inputs"] = distinct_inputs(len);
+            assert_eq!(
+                serde_json::from_value::<UnsealedTransactionV1>(json).is_ok(),
+                accepted,
+                "UnsealedTransactionV1 with {len} inputs"
+            );
+
+            let mut json = pruned.clone();
+            json["transaction"]["inputs"] = distinct_inputs(len);
+            assert_eq!(
+                serde_json::from_value::<PrunedUnsealedTransactionV1>(json).is_ok(),
+                accepted,
+                "PrunedUnsealedTransactionV1 with {len} inputs"
+            );
+        }
     }
 
     #[cfg(feature = "serde")]

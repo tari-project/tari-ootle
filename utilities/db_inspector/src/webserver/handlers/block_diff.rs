@@ -57,14 +57,14 @@ pub async fn list(
     for result in iter {
         let (block_id, changes) = result?;
         let encoded_key = hex::encode(cf.encode_key(&block_id));
-        for change in changes {
+        for (i, change) in changes.into_iter().enumerate() {
             total += 1;
             if total <= skip || total > skip.saturating_add(page_size) {
                 continue;
             }
             let versioned = change.versioned_substate_id();
             table.add_row(json!({
-                "id": encoded_key,
+                "id": format!("{}-{}", encoded_key, i),
                 "block_id": block_id,
                 "substate_id": versioned.substate_id(),
                 "version": versioned.version(),

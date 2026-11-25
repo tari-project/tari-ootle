@@ -98,48 +98,72 @@ pub async fn handle_list(
     let offset = req.offset.unwrap_or(0);
 
     // When filtering by resource pair, we need to over-fetch because not all pools will match.
-    // Fetch up to 50 pools and filter down to the requested limit.
+    // Page through watched pools from the beginning, skip `offset` matching pools, and collect up to `limit`.
     let fetch_limit = if req.resource_pair.is_some() {
         50u64
     } else {
         limit as u64
     };
-
-    let watched = sdk
-        .get_network_interface()
-        .list_watched_substates(Some(LIQUIDITY_POOL_TEMPLATE_ADDRESS), Some(fetch_limit), Some(offset))
-        .await?;
-
+    let mut watched_offset = if req.resource_pair.is_some() { 0 } else { offset };
+    let mut skipped_matches = 0u64;
     let mut pools = Vec::with_capacity(limit);
-    for item in watched {
-        if pools.len() >= limit {
+
+    loop {
+        let watched = sdk
+            .get_network_interface()
+            .list_watched_substates(
+                Some(LIQUIDITY_POOL_TEMPLATE_ADDRESS),
+                Some(fetch_limit),
+                Some(watched_offset),
+            )
+            .await?;
+        let batch_len = watched.len();
+        if batch_len == 0 {
             break;
         }
 
-        let pool_address = match item.component_address {
-            SubstateId::Component(addr) => addr,
-            other => {
-                warn!(target: LOG_TARGET, "Unexpected substate type in watched substates: {other}");
-                continue;
-            },
-        };
+        for item in watched {
+            if pools.len() >= limit {
+                break;
+            }
 
-        match fetch_pool_info(context, pool_address).await {
-            Ok(info) => {
-                // If a resource pair filter is set, only include pools that contain both resources
-                if let Some((ref r1, ref r2)) = req.resource_pair {
-                    let has_pair = (info.resource_a == *r1 && info.resource_b == *r2) ||
-                        (info.resource_a == *r2 && info.resource_b == *r1);
-                    if !has_pair {
-                        continue;
+            let pool_address = match item.component_address {
+                SubstateId::Component(addr) => addr,
+                other => {
+                    warn!(target: LOG_TARGET, "Unexpected substate type in watched substates: {other}");
+                    continue;
+                },
+            };
+
+            match fetch_pool_info(context, pool_address).await {
+                Ok(info) => {
+                    // If a resource pair filter is set, only include pools that contain both resources
+                    if let Some((ref r1, ref r2)) = req.resource_pair {
+                        let has_pair = (info.resource_a == *r1 && info.resource_b == *r2) ||
+                            (info.resource_a == *r2 && info.resource_b == *r1);
+                        if !has_pair {
+                            continue;
+                        }
+                        if skipped_matches < offset {
+                            skipped_matches += 1;
+                            continue;
+                        }
                     }
-                }
-                pools.push(info);
-            },
-            Err(e) => {
-                warn!(target: LOG_TARGET, "Failed to fetch pool info for {pool_address}: {e}");
-            },
+                    pools.push(info);
+                },
+                Err(e) => {
+                    warn!(target: LOG_TARGET, "Failed to fetch pool info for {pool_address}: {e}");
+                },
+            }
         }
+
+        if req.resource_pair.is_none() || pools.len() >= limit || (batch_len as u64) < fetch_limit {
+            break;
+        }
+        watched_offset = match watched_offset.checked_add(batch_len as u64) {
+            Some(next) => next,
+            None => break,
+        };
     }
 
     Ok(SwapPoolsListResponse { pools })
@@ -165,11 +189,46 @@ async fn fetch_pool_info(
 
 #[cfg(test)]
 mod tests {
+    use std::{collections::HashMap, sync::Arc};
+
+    use axum::{
+        Json,
+        Router,
+        extract::{Path, Query, State},
+        http::StatusCode,
+        routing::{get, post},
+    };
     use axum_jrpc::error::{JsonRpcError, JsonRpcErrorReason};
-    use tari_template_lib_types::{ObjectKey, ResourceAddress};
+    use tari_engine_types::{
+        component::{Component, ComponentBody, ComponentHeader},
+        encoded::Encoded,
+        resource_container::ResourceContainer,
+        substate::{EncodedSubstate, Substate, SubstateValue},
+        vault::Vault,
+    };
+    use tari_indexer_client::types::{
+        GetSubstateResponse,
+        GetSubstatesRequest,
+        GetSubstatesResponse,
+        ListWatchedSubstatesRequest,
+        ListWatchedSubstatesResponse,
+        SubstateState,
+        WatchedSubstateItem,
+    };
+    use tari_ootle_common_types::SubstateVersion;
+    use tari_ootle_wallet_sdk::IndexerTrust;
+    use tari_template_lib_types::{
+        EntityId,
+        ObjectKey,
+        ResourceAddress,
+        SubstateOwnerRule,
+        VaultId,
+        access_rules::{ComponentAccessRules, RulesUpdater, UpdateRule},
+    };
+    use url::Url;
 
     use super::*;
-    use crate::handlers::test_support::TestDaemon;
+    use crate::handlers::test_support::{FakeIndexer, TestDaemon};
 
     #[tokio::test]
     async fn exchange_rate_rejects_zero_desired_output_and_list_short_circuits_zero_limit() {
@@ -200,5 +259,163 @@ mod tests {
             .unwrap();
             assert!(resp.pools.is_empty());
         }
+    }
+
+    #[derive(Clone)]
+    struct MockPoolIndexer {
+        watched: Vec<WatchedSubstateItem>,
+        components: HashMap<SubstateId, Encoded<SubstateValue>>,
+        vaults: HashMap<SubstateId, EncodedSubstate>,
+    }
+
+    impl MockPoolIndexer {
+        fn new() -> Self {
+            Self {
+                watched: Vec::new(),
+                components: HashMap::new(),
+                vaults: HashMap::new(),
+            }
+        }
+
+        fn add_pool(&mut self, seed: u8, resource_a: ResourceAddress, resource_b: ResourceAddress) -> ComponentAddress {
+            let pool_addr = ComponentAddress::from_array([seed; 32]);
+            let vault_a_id = VaultId::new(ObjectKey::from_array([seed.wrapping_add(100); ObjectKey::LENGTH]));
+            let vault_b_id = VaultId::new(ObjectKey::from_array([seed.wrapping_add(200); ObjectKey::LENGTH]));
+
+            let state = tari_bor::to_value(&(vault_a_id, vault_b_id)).unwrap();
+            let component = Component {
+                header: ComponentHeader {
+                    template_address: LIQUIDITY_POOL_TEMPLATE_ADDRESS,
+                    owner_rule: SubstateOwnerRule::None,
+                    access_rules: ComponentAccessRules::allow_all(),
+                    entity_id: EntityId::default(),
+                    upgrade_rule: UpdateRule::Locked,
+                    rules_updater: Some(RulesUpdater::Locked),
+                },
+                body: ComponentBody { state },
+            };
+
+            let pool_id = SubstateId::Component(pool_addr);
+            self.watched.push(WatchedSubstateItem {
+                component_address: pool_id.clone(),
+                template_address: LIQUIDITY_POOL_TEMPLATE_ADDRESS,
+            });
+            self.components
+                .insert(pool_id, Encoded::encode(&SubstateValue::Component(component)).unwrap());
+
+            let vault_a = Vault::new(ResourceContainer::public_fungible(resource_a, Amount::from(100u64)));
+            let vault_b = Vault::new(ResourceContainer::public_fungible(resource_b, Amount::from(200u64)));
+            self.vaults.insert(
+                SubstateId::Vault(vault_a_id),
+                EncodedSubstate::encode(&Substate::new(0, SubstateValue::Vault(vault_a))).unwrap(),
+            );
+            self.vaults.insert(
+                SubstateId::Vault(vault_b_id),
+                EncodedSubstate::encode(&Substate::new(0, SubstateValue::Vault(vault_b))).unwrap(),
+            );
+
+            pool_addr
+        }
+
+        async fn spawn(self) -> Url {
+            let state = Arc::new(self);
+            let router = Router::new()
+                .route("/substates/watched", get(Self::list_watched))
+                .route("/substates/fetch", post(Self::fetch_substates))
+                .route("/substates/{id}", get(Self::get_substate))
+                .with_state(state);
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let url = Url::parse(&format!("http://{}/", listener.local_addr().unwrap())).unwrap();
+            tokio::spawn(async move { axum::serve(listener, router).await });
+            url
+        }
+
+        async fn list_watched(
+            State(state): State<Arc<Self>>,
+            Query(req): Query<ListWatchedSubstatesRequest>,
+        ) -> Json<ListWatchedSubstatesResponse> {
+            let offset = req.offset.unwrap_or(0) as usize;
+            let limit = req.limit.unwrap_or(50) as usize;
+            let substates = state.watched.iter().skip(offset).take(limit).cloned().collect();
+            Json(ListWatchedSubstatesResponse { substates })
+        }
+
+        async fn get_substate(
+            State(state): State<Arc<Self>>,
+            Path(id): Path<SubstateId>,
+        ) -> Result<Json<GetSubstateResponse>, StatusCode> {
+            let substate = state.components.get(&id).cloned().ok_or(StatusCode::NOT_FOUND)?;
+            Ok(Json(GetSubstateResponse {
+                version: SubstateVersion::ZERO,
+                state: SubstateState::Up { substate },
+                verified: true,
+                proof: None,
+            }))
+        }
+
+        async fn fetch_substates(
+            State(state): State<Arc<Self>>,
+            Json(req): Json<GetSubstatesRequest>,
+        ) -> Json<GetSubstatesResponse> {
+            let mut substates = HashMap::new();
+            for id in req.requests.as_slice() {
+                if let Some(substate) = state.vaults.get(id) {
+                    substates.insert(id.clone(), substate.clone());
+                }
+            }
+            Json(GetSubstatesResponse::new(substates, []))
+        }
+    }
+
+    #[tokio::test]
+    async fn handle_list_applies_offset_to_filtered_resource_pair_matches() {
+        let r1 = ResourceAddress::new(ObjectKey::from_array([1; ObjectKey::LENGTH]));
+        let r2 = ResourceAddress::new(ObjectKey::from_array([2; ObjectKey::LENGTH]));
+        let r3 = ResourceAddress::new(ObjectKey::from_array([3; ObjectKey::LENGTH]));
+
+        let mut mock = MockPoolIndexer::new();
+        // Watched pool 0 does not match (r1, r2); pools 1 and 2 match.
+        let _unmatched = mock.add_pool(10, r1, r3);
+        let match_first = mock.add_pool(11, r1, r2);
+        let match_second = mock.add_pool(12, r2, r1);
+        let url = mock.spawn().await;
+
+        let fake = FakeIndexer::spawn().await;
+        let daemon = TestDaemon::start_with_indexer(&fake, IndexerTrust::Trust).await;
+        daemon
+            .context
+            .wallet_sdk()
+            .get_network_interface()
+            .set_endpoints(vec![url])
+            .unwrap();
+
+        let page_0 = handle_list(&daemon.context, Some(&daemon.session), SwapPoolsListRequest {
+            limit: Some(1),
+            offset: Some(0),
+            resource_pair: Some((r1, r2)),
+        })
+        .await
+        .unwrap();
+        assert_eq!(page_0.pools.len(), 1);
+        assert_eq!(page_0.pools[0].pool_address, match_first);
+
+        let page_1 = handle_list(&daemon.context, Some(&daemon.session), SwapPoolsListRequest {
+            limit: Some(1),
+            offset: Some(1),
+            resource_pair: Some((r1, r2)),
+        })
+        .await
+        .unwrap();
+        assert_eq!(page_1.pools.len(), 1);
+        assert_eq!(page_1.pools[0].pool_address, match_second);
+
+        let page_2 = handle_list(&daemon.context, Some(&daemon.session), SwapPoolsListRequest {
+            limit: Some(1),
+            offset: Some(2),
+            resource_pair: Some((r1, r2)),
+        })
+        .await
+        .unwrap();
+        assert!(page_2.pools.is_empty());
     }
 }

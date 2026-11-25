@@ -88,6 +88,7 @@ impl Instance {
         &self.base_path
     }
 
+    #[cfg(test)]
     pub fn process_dir(&self) -> &PathBuf {
         &self.process_dir
     }

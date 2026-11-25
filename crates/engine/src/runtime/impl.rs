@@ -1400,19 +1400,20 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
             .map_err(|e| RuntimeError::SpendScriptRejected { details: Box::new(e) })
     }
 
-    /// Charges for `ids` non-fungible ids an engine call moved from one container to another. The
-    /// count is read off the container that moved, so the charge follows the move it pays for, and
-    /// a transaction that cannot cover it fails out of compute having made that one move.
-    fn charge_non_fungible_ids_moved(&self, ids: usize) -> Result<(), RuntimeError> {
+    /// Charges for `items` discrete items (non-fungible ids or confidential commitments, see
+    /// [`ResourceContainer::discrete_items_held`]) an engine call moved from one container to another.
+    /// The count is read off the container that moved, so the charge follows the move it pays for,
+    /// and a transaction that cannot cover it fails out of compute having made that one move.
+    fn charge_discrete_items_moved(&self, items: usize) -> Result<(), RuntimeError> {
         self.tracker
-            .charge_native_execution(tari_engine_types::limits::non_fungible_move_points(ids as u64))
+            .charge_native_execution(tari_engine_types::limits::non_fungible_move_points(items as u64))
     }
 
-    /// Charges for `ids` non-fungible ids an engine call locked into a new proof. They move twice:
+    /// Charges for `items` discrete items an engine call locked into a new proof. They move twice:
     /// into the proof now, and back when the proof is dropped, explicitly or with its frame. Both
     /// moves are charged here, since a frame's proofs can be dropped where no engine call is made.
-    fn charge_non_fungible_ids_locked(&self, ids: usize) -> Result<(), RuntimeError> {
-        self.charge_non_fungible_ids_moved(ids.saturating_mul(2))
+    fn charge_discrete_items_locked(&self, items: usize) -> Result<(), RuntimeError> {
+        self.charge_discrete_items_moved(items.saturating_mul(2))
     }
 
     /// Charges [`Self::charge_engine_arg`] for an argument's CBOR, then decodes it into the `Value`
@@ -2216,7 +2217,7 @@ where
                     )?;
                     Self::emit_std_event("resource", "recall", resource_address, payload, state_mut)?;
 
-                    let moved = resource.non_fungible_token_ids().len();
+                    let moved = resource.discrete_items_held();
                     let bucket_id = state_mut.id_provider()?.new_bucket_id()?;
                     state_mut.new_bucket(bucket_id, resource)?;
 
@@ -2225,7 +2226,7 @@ where
                     let bucket = tari_template_lib::models::Bucket::from_id(bucket_id);
                     Ok::<_, RuntimeError>((InvokeResult::encode(&bucket)?, moved))
                 })?;
-                self.charge_non_fungible_ids_moved(moved)?;
+                self.charge_discrete_items_moved(moved)?;
 
                 Ok(result)
             },
@@ -2879,14 +2880,14 @@ where
 
                     let vault_mut = state_mut.get_vault_mut(&vault_lock)?;
 
-                    let moved = bucket.non_fungible_ids().len();
+                    let moved = bucket.discrete_items_held();
                     vault_mut.deposit(bucket)?;
 
                     state_mut.unlock_substate(vault_lock)?;
 
                     Ok::<_, RuntimeError>(moved)
                 })?;
-                self.charge_non_fungible_ids_moved(moved)?;
+                self.charge_discrete_items_moved(moved)?;
 
                 Ok(InvokeResult::unit())
             },
@@ -2975,7 +2976,7 @@ where
 
                     Self::emit_std_event("vault", "withdraw", vault_id, payload, state)?;
 
-                    let moved = resource_container.non_fungible_token_ids().len();
+                    let moved = resource_container.discrete_items_held();
                     let bucket_id = state.id_provider()?.new_bucket_id()?;
                     state.new_bucket(bucket_id, resource_container)?;
 
@@ -2984,7 +2985,7 @@ where
                     let bucket = tari_template_lib::models::Bucket::from_id(bucket_id);
                     Ok::<_, RuntimeError>((InvokeResult::encode(&bucket)?, moved))
                 })?;
-                self.charge_non_fungible_ids_moved(moved)?;
+                self.charge_discrete_items_moved(moved)?;
 
                 Ok(result)
             },
@@ -3171,14 +3172,14 @@ where
                     let proof_id = state.id_provider()?.new_proof_id()?;
                     let vault_mut = state.get_vault_mut(&vault_lock)?;
                     let locked_funds = vault_mut.lock_all(vault_id)?;
-                    let locked = locked_funds.non_fungible_token_ids().len();
+                    let locked = locked_funds.discrete_items_held();
                     state.new_proof(proof_id, locked_funds)?;
 
                     state.unlock_substate(vault_lock)?;
 
                     Ok::<_, RuntimeError>((InvokeResult::encode(&proof_id)?, locked))
                 })?;
-                self.charge_non_fungible_ids_locked(locked)?;
+                self.charge_discrete_items_locked(locked)?;
 
                 Ok(result)
             },
@@ -3196,14 +3197,14 @@ where
                     let proof_id = state.id_provider()?.new_proof_id()?;
                     let vault_mut = state.get_vault_mut(&vault_lock)?;
                     let locked_funds = vault_mut.lock_by_amount(vault_id, arg.amount)?;
-                    let locked = locked_funds.non_fungible_token_ids().len();
+                    let locked = locked_funds.discrete_items_held();
                     state.new_proof(proof_id, locked_funds)?;
 
                     state.unlock_substate(vault_lock)?;
 
                     Ok::<_, RuntimeError>((InvokeResult::encode(&proof_id)?, locked))
                 })?;
-                self.charge_non_fungible_ids_locked(locked)?;
+                self.charge_discrete_items_locked(locked)?;
 
                 Ok(result)
             },
@@ -3221,14 +3222,14 @@ where
                     let proof_id = state.id_provider()?.new_proof_id()?;
                     let vault_mut = state.get_vault_mut(&vault_lock)?;
                     let locked_funds = vault_mut.lock_by_non_fungible_ids(vault_id, arg.ids)?;
-                    let locked = locked_funds.non_fungible_token_ids().len();
+                    let locked = locked_funds.discrete_items_held();
                     state.new_proof(proof_id, locked_funds)?;
 
                     state.unlock_substate(vault_lock)?;
 
                     Ok::<_, RuntimeError>((InvokeResult::encode(&proof_id)?, locked))
                 })?;
-                self.charge_non_fungible_ids_locked(locked)?;
+                self.charge_discrete_items_locked(locked)?;
 
                 Ok(result)
             },
@@ -3344,12 +3345,12 @@ where
                 let (result, moved) = self.tracker.write_with(|state| {
                     let bucket = state.get_bucket_mut(bucket_id)?;
                     let resource = bucket.take(amount)?;
-                    let moved = resource.non_fungible_token_ids().len();
+                    let moved = resource.discrete_items_held();
                     let bucket_id = state.new_bucket_id()?;
                     state.new_bucket(bucket_id, resource)?;
                     Ok::<_, RuntimeError>((InvokeResult::encode(&bucket_id)?, moved))
                 })?;
-                self.charge_non_fungible_ids_moved(moved)?;
+                self.charge_discrete_items_moved(moved)?;
 
                 Ok(result)
             },
@@ -3418,12 +3419,12 @@ where
                 let (result, moved) = self.tracker.write_with(|state| {
                     let other_bucket = state.take_bucket(other_bucket_id)?;
                     Self::check_bucket_is_unlocked("join", other_bucket_id, &other_bucket)?;
-                    let moved = other_bucket.non_fungible_ids().len();
+                    let moved = other_bucket.discrete_items_held();
                     let bucket = state.get_bucket_mut(bucket_id)?;
                     bucket.join(other_bucket)?;
                     Ok::<_, RuntimeError>((InvokeResult::encode(&bucket_id)?, moved))
                 })?;
-                self.charge_non_fungible_ids_moved(moved)?;
+                self.charge_discrete_items_moved(moved)?;
 
                 Ok(result)
             },
@@ -3539,14 +3540,14 @@ where
 
                 let (result, locked) = self.tracker.write_with(|state| {
                     let locked_funds = state.get_bucket_mut(bucket_id)?.lock_all()?;
-                    let locked = locked_funds.non_fungible_token_ids().len();
+                    let locked = locked_funds.discrete_items_held();
 
                     let proof_id = state.id_provider()?.new_proof_id()?;
                     state.new_proof(proof_id, locked_funds)?;
 
                     Ok::<_, RuntimeError>((InvokeResult::encode(&proof_id)?, locked))
                 })?;
-                self.charge_non_fungible_ids_locked(locked)?;
+                self.charge_discrete_items_locked(locked)?;
 
                 Ok(result)
             },

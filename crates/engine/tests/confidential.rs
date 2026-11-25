@@ -4,16 +4,21 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use ootle_byte_type::ToByteType;
+use tari_bor::encoded_len;
 use tari_crypto::{
     keys::PublicKey as _,
     ristretto::{RistrettoPublicKey, RistrettoSecretKey},
 };
-use tari_engine::runtime::{ArgumentValidationError, RuntimeError};
+use tari_engine::{
+    runtime::{ArgumentValidationError, RuntimeError},
+    state_store::StateWriter,
+};
 use tari_engine_types::{
     crypto::{ElgamalVerifiableBalance, OutputBody, ValueLookup, commit_range_provable_amount},
-    limits::CONFIDENTIAL_LIMITS,
+    limits::{self, CONFIDENTIAL_LIMITS},
     resource_container::{ResourceContainer, ResourceError},
-    substate::SubstateId,
+    substate::{Substate, SubstateId, SubstateValue},
+    vault::Vault,
 };
 use tari_ootle_common_types::substate_type::SubstateType;
 use tari_ootle_transaction::{Epoch, Transaction, args};
@@ -25,6 +30,7 @@ use tari_template_lib::{
         ComponentAddress,
         ConfidentialOutputAddress,
         OwnerRule,
+        ResourceAddress,
         confidential::{ConfidentialOutputStatement, ConfidentialWithdrawProof},
         constants::TARI_TOKEN,
         crypto::{CommitmentValueProof, PedersenCommitmentBytes, RistrettoPublicKeyBytes},
@@ -1061,5 +1067,80 @@ fn withdraw_rejects_a_change_commitment_the_container_holds_locked() {
     assert!(
         matches!(&err, ResourceError::InvariantError(msg) if msg.contains("change commitment")),
         "unexpected error: {err:?}"
+    );
+}
+
+/// Overwrites `account`'s vault of `resource` with one holding `count` commitments, keeping its substate version.
+fn seed_confidential_vault(test: &mut TemplateTest, account: ComponentAddress, resource: ResourceAddress, count: u32) {
+    let vault_id = *test
+        .read_only_state_store()
+        .get_vaults_for_component(account)
+        .unwrap()
+        .iter()
+        .find(|(_, vault)| *vault.resource_address() == resource)
+        .expect("the account holds a vault for the confidential resource")
+        .0;
+    let version = test
+        .read_only_state_store()
+        .get_substate(&SubstateId::Vault(vault_id))
+        .unwrap()
+        .version();
+
+    let commitments = (0..count).map(|i| {
+        let mut bytes = [0u8; 32];
+        bytes[..4].copy_from_slice(&i.to_le_bytes());
+        PedersenCommitmentBytes::from_array(bytes)
+    });
+    let value = SubstateValue::Vault(Vault::new(ResourceContainer::confidential(
+        resource,
+        commitments,
+        Amount::zero(),
+    )));
+    assert!(encoded_len(&value) <= limits::ENGINE_LIMITS.max_substate_size);
+    test.get_state_store_mut()
+        .set_state(SubstateId::Vault(vault_id), Substate::new(version, value))
+        .unwrap();
+}
+
+/// Locking a vault's commitments into a proof and unlocking them when it is dropped runs on the host for every
+/// commitment moved, as it does for non-fungible ids. So each commitment a proof moves is charged twice, at the
+/// non-fungible id price.
+#[test]
+fn moving_confidential_commitments_is_charged_per_commitment() {
+    let (confidential_proof, mask, value_proofs) = mint_statement(100, None);
+    let (mut test, faucet, faucet_resx) = setup(confidential_proof, value_proofs, None);
+    let resource = faucet_resx.as_resource_address().unwrap();
+    let (account, owner_proof, key) = test.create_empty_account();
+
+    let withdraw_proof = generate_withdraw_proof(&mask, 100, None, 0u64);
+    test.execute_expect_success(
+        Transaction::builder_localnet(Epoch(1))
+            .call_method(faucet, "take_free_coins", args![withdraw_proof.proof])
+            .put_last_instruction_output_on_workspace("coins")
+            .call_method(account, "deposit", args![Workspace("coins")])
+            .build_and_seal(&key),
+        vec![owner_proof.clone()],
+    );
+
+    let (small, large) = (1_000u32, 10_000u32);
+    let mut proof_round_trip_points = |count: u32| {
+        seed_confidential_vault(&mut test, account, resource, count);
+        test.execute_expect_success(
+            Transaction::builder_localnet(Epoch(1))
+                .call_method(account, "create_proof_for_resource", args![resource])
+                .put_last_instruction_output_on_workspace("proof")
+                .drop_all_proofs_in_workspace()
+                .build_and_seal(&key),
+            vec![owner_proof.clone()],
+        )
+        .native_execution_points
+    };
+    let small_proof = proof_round_trip_points(small);
+    let large_proof = proof_round_trip_points(large);
+
+    assert_eq!(
+        large_proof - small_proof,
+        limits::non_fungible_move_points(2 * u64::from(large - small)),
+        "proving {large} commitments rather than {small} must cost exactly the difference in moves"
     );
 }

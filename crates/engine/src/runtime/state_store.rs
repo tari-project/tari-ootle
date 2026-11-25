@@ -377,20 +377,6 @@ impl<TStore: StateReader> WorkingStateStore<TStore> {
         })
     }
 
-    /// The current value of a component this transaction has already loaded, read without taking a lock.
-    pub fn get_loaded_component(&self, address: ComponentAddress) -> Result<&Component, RuntimeError> {
-        let value = self
-            .get_ref(&SubstateId::Component(address))
-            .map_err(|_| RuntimeError::InvariantError {
-                function: "get_loaded_component",
-                details: format!("Component {} has not been loaded by this transaction", address),
-            })?;
-        value.component().ok_or_else(|| RuntimeError::InvariantError {
-            function: "get_loaded_component",
-            details: format!("Substate at address {} is not a component", address),
-        })
-    }
-
     pub(super) fn get_unmodified_substate(&self, id: &SubstateId) -> Result<&Substate, RuntimeError> {
         match self.loaded_substates.get(id) {
             Some(substate) => Ok(substate),

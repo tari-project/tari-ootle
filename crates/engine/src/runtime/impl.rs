@@ -22,6 +22,7 @@
 
 use std::{cell::RefCell, rc::Rc, sync::Arc};
 
+use indexmap::IndexSet;
 use log::{warn, *};
 use tari_bor::{MaybeTagged, decode_exact};
 use tari_crypto::{ristretto::RistrettoPublicKey, tari_utilities::ByteArray};
@@ -697,13 +698,20 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
         .into_iter()
         .collect();
 
-        let acting_component = auth_caller.component().copied();
-        if let Some(component) = acting_component {
+        // The acting component's vaults are indexed once here, in the pass over its state that
+        // `charge_component_load` pays for, so each vault read the hook makes is a lookup.
+        let mut acting_component_vaults = IndexSet::new();
+        if let Some(component) = auth_caller.component().copied() {
             self.invoke_modules_on_runtime_call("load_component")?;
             self.charge_component_load(component)?;
             let state = self.tracker.write_with(|state_mut| {
                 Ok::<_, RuntimeError>(state_mut.load_and_cache_component(component)?.state().clone())
             })?;
+            acting_component_vaults = IndexedWellKnownTypes::from_value(&state)?
+                .vault_ids()
+                .iter()
+                .copied()
+                .collect();
             auth_caller.with_component_state(state);
         }
 
@@ -725,8 +733,7 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
 
         // The acting component never chose the hook code, so the hook's frame is confined to its own component
         // state: it cannot act on any vault or resource it was handed, nor call out to a frame that could. It may
-        // read the vaults the acting component owns, which `check_component_scope` resolves through the acting
-        // component's loaded state.
+        // read the vaults the acting component owns, which `check_component_scope` resolves through the index above.
         let ret = self.invoke_component_method(
             auth_hook.component_address,
             &auth_hook.method,
@@ -734,7 +741,7 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
             Some(FrameWriteMode::OwnComponent),
             Some(HookFrame {
                 arg_scope: hook_arg_scope,
-                acting_component,
+                acting_component_vaults,
             }),
         );
         if !resource_was_in_scope {
@@ -5651,7 +5658,7 @@ mod tests {
                     component_lock,
                     arg_scope: Box::new(arg_scope),
                     entity_id,
-                    acting_component: None,
+                    acting_component_vaults: IndexSet::new(),
                 },
                 None,
             )
@@ -5856,7 +5863,7 @@ mod tests {
                     component_lock: other_lock,
                     arg_scope: Box::new(IndexedWellKnownTypes::new()),
                     entity_id: f.other_entity,
-                    acting_component: None,
+                    acting_component_vaults: IndexSet::new(),
                 },
                 None,
             )
@@ -5895,7 +5902,7 @@ mod tests {
                     component_lock: owner_lock,
                     arg_scope: Box::new(IndexedWellKnownTypes::new()),
                     entity_id: f.owner_entity,
-                    acting_component: None,
+                    acting_component_vaults: IndexSet::new(),
                 },
                 None,
             )
@@ -5970,8 +5977,17 @@ mod tests {
         f.runtime.pop_call_frame(&IndexedWellKnownTypes::new()).unwrap();
     }
 
-    /// Pushes a resource auth hook frame on `hook_component`, triggered by `acting_component`.
+    /// Pushes a resource auth hook frame on `hook_component`, triggered by `acting_component`, with the acting
+    /// component's vaults indexed from its current state as `invoke_resource_access_hook` indexes them.
     fn push_hook_frame(f: &VaultScopeFixture, hook_component: ComponentAddress, acting_component: ComponentAddress) {
+        let acting_component_vaults = f.runtime.tracker.write_with(|state| {
+            IndexedWellKnownTypes::from_value(state.load_and_cache_component(acting_component).unwrap().state())
+                .unwrap()
+                .vault_ids()
+                .iter()
+                .copied()
+                .collect()
+        });
         let hook_lock = f.runtime.lock_component(hook_component, LockFlag::Read).unwrap();
         f.runtime
             .push_call_frame(
@@ -5982,7 +5998,7 @@ mod tests {
                     component_lock: hook_lock,
                     arg_scope: Box::new(IndexedWellKnownTypes::new()),
                     entity_id: f.other_entity,
-                    acting_component: Some(acting_component),
+                    acting_component_vaults,
                 },
                 Some(FrameWriteMode::OwnComponent),
             )
@@ -6010,6 +6026,34 @@ mod tests {
             .decode()
             .unwrap();
         assert_eq!(balance, Amount::new(42));
+        f.runtime.pop_call_frame(&IndexedWellKnownTypes::new()).unwrap();
+    }
+
+    /// A hook vault read resolves against the acting component's vaults as they were indexed when the hook frame was
+    /// pushed, which that load paid for, and never reads the acting component's state again: the read is the same
+    /// cost however large that state is. Clearing the state behind the frame's back makes any per-read state access
+    /// fail the read.
+    #[test]
+    fn hook_frame_reads_acting_vaults_without_reading_the_acting_state() {
+        let f = setup_vault_scope_fixture();
+        let owner_write_lock = f.runtime.lock_component(f.owner_component, LockFlag::Write).unwrap();
+        push_hook_frame(&f, f.other_component, f.owner_component);
+
+        f.runtime.tracker.write_with(|state| {
+            state
+                .store_mut()
+                .mutate_locked_substate_with(owner_write_lock.lock_id(), |_, substate| {
+                    substate.component_mut().unwrap().body.state = tari_bor::Value::Null;
+                    Ok(Some(()))
+                })
+                .unwrap();
+        });
+
+        for action in VAULT_READ_ACTIONS {
+            f.runtime
+                .vault_invoke(VaultRef::Ref(f.vault_id), action, EngineArgs::default())
+                .unwrap_or_else(|err| panic!("hook read {action:?} of the acting component's vault failed: {err:?}"));
+        }
         f.runtime.pop_call_frame(&IndexedWellKnownTypes::new()).unwrap();
     }
 
@@ -6130,7 +6174,7 @@ mod tests {
                     component_lock: caller_lock,
                     arg_scope: Box::new(IndexedWellKnownTypes::new()),
                     entity_id,
-                    acting_component: None,
+                    acting_component_vaults: IndexSet::new(),
                 },
                 None,
             )
@@ -6163,7 +6207,7 @@ mod tests {
                     component_lock: caller_lock,
                     arg_scope: Box::new(arg_scope),
                     entity_id,
-                    acting_component: None,
+                    acting_component_vaults: IndexSet::new(),
                 },
                 None,
             )
@@ -6209,7 +6253,7 @@ mod tests {
                     component_lock: caller_lock,
                     arg_scope: Box::new(IndexedWellKnownTypes::new()),
                     entity_id,
-                    acting_component: None,
+                    acting_component_vaults: IndexSet::new(),
                 },
                 None,
             )
@@ -6281,7 +6325,7 @@ mod tests {
                     component_lock: caller_lock,
                     arg_scope: Box::new(arg_scope),
                     entity_id,
-                    acting_component: None,
+                    acting_component_vaults: IndexSet::new(),
                 },
                 None,
             )

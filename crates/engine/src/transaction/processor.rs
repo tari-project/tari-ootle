@@ -22,6 +22,7 @@
 
 use std::{collections::HashSet, sync::Arc, time::Instant};
 
+use indexmap::IndexSet;
 use log::*;
 use ootle_network::Network;
 use tari_engine_types::{
@@ -957,18 +958,18 @@ where
         let resolved_args = runtime
             .interface()
             .resolve_args(Some(InstructionArg::from_type(&component.address)?), &args)?;
-        let (arg_scope, acting_component) = match hook_frame {
+        let (arg_scope, acting_component_vaults) = match hook_frame {
             Some(HookFrame {
                 arg_scope,
-                acting_component,
-            }) => (arg_scope, acting_component),
+                acting_component_vaults,
+            }) => (arg_scope, acting_component_vaults),
             None => (
                 resolved_args
                     .iter()
                     .skip(1)
                     .map(IndexedWellKnownTypes::from_value)
                     .collect::<Result<_, _>>()?,
-                None,
+                IndexSet::new(),
             ),
         };
 
@@ -980,7 +981,7 @@ where
                 component_lock,
                 arg_scope: Box::new(arg_scope),
                 entity_id: component.entity_id,
-                acting_component,
+                acting_component_vaults,
             },
             restrict_frame_to,
         )?;

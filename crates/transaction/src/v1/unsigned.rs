@@ -47,25 +47,6 @@ pub(crate) fn decode_inputs<'b, C>(
     tari_bor::adapters::indexset_codec::decode_bounded(d, ctx, MAX_TRANSACTION_INPUTS)
 }
 
-/// The serde counterpart of [`decode_inputs`]: at most [`MAX_TRANSACTION_INPUTS`] declarations, none of them
-/// naming a substate twice.
-#[cfg(feature = "serde")]
-pub(crate) fn deserialize_inputs<'de, D>(deserializer: D) -> Result<IndexSet<InputDeclaration>, D::Error>
-where D: serde::Deserializer<'de> {
-    let decls = ootle_serde::bounded_seq::deserialize::<MAX_TRANSACTION_INPUTS, InputDeclaration, D>(deserializer)?;
-    let mut inputs = IndexSet::<InputDeclaration>::with_capacity(decls.len());
-    for decl in decls {
-        if let Some(existing) = inputs.get(decl.substate_id()) {
-            return Err(serde::de::Error::custom(format!(
-                "input {} is declared more than once",
-                existing.substate_id()
-            )));
-        }
-        inputs.insert(decl);
-    }
-    Ok(inputs)
-}
-
 #[derive(Debug, Clone, borsh::BorshSerialize, minicbor::Encode, minicbor::Decode, minicbor::CborLen)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
@@ -100,7 +81,8 @@ pub struct UnsignedTransactionV1 {
     )]
     #[cfg_attr(
         feature = "serde",
-        serde(deserialize_with = "crate::v1::unsigned::deserialize_inputs")
+        serde(deserialize_with = "tari_ootle_common_types::deserialize_input_declarations::<{ \
+                                  crate::MAX_TRANSACTION_INPUTS }, _>")
     )]
     pub inputs: IndexSet<InputDeclaration>,
     #[n(4)]

@@ -12,6 +12,8 @@ import { addressBookAdd, addressBookDelete, addressBookList, addressBookUpdate }
 
 const ADDRESS_BOOK_QUERY_KEY = ["address_book"];
 
+const refetchAddressBook = () => queryClient.invalidateQueries({ queryKey: ADDRESS_BOOK_QUERY_KEY });
+
 export const useAddressBookList = () => {
   return useQuery({
     queryKey: ADDRESS_BOOK_QUERY_KEY,
@@ -22,26 +24,20 @@ export const useAddressBookList = () => {
 export const useAddressBookAdd = () => {
   return useMutation({
     mutationFn: (params: AddressBookAddRequest) => addressBookAdd(params),
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: ADDRESS_BOOK_QUERY_KEY });
-    },
+    onSettled: refetchAddressBook,
   });
 };
 
 export const useAddressBookUpdate = () => {
   return useMutation({
     mutationFn: (params: AddressBookUpdateRequest) => addressBookUpdate(params),
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: ADDRESS_BOOK_QUERY_KEY });
-    },
+    onSettled: refetchAddressBook,
   });
 };
 
 export const useAddressBookDelete = () => {
   return useMutation({
     mutationFn: (params: AddressBookDeleteRequest) => addressBookDelete(params),
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: ADDRESS_BOOK_QUERY_KEY });
-    },
+    onSettled: refetchAddressBook,
   });
 };

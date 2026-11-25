@@ -936,9 +936,10 @@ where TSpec: WalletSdkSpec
         }
 
         let non_fungibles_api = self.wallet_sdk.non_fungible_api();
-        for (nft_addr, nft) in diff.up_iter().filter_map(|(id, s)| {
-            Some((id.as_non_fungible_address()?, s.substate_value().non_fungible()?))
-        }) {
+        for (nft_addr, nft) in diff
+            .up_iter()
+            .filter_map(|(id, s)| Some((id.as_non_fungible_address()?, s.substate_value().non_fungible()?)))
+        {
             let Some(stored_nft) = non_fungibles_api
                 .get(*nft_addr.resource_address(), nft_addr.id().clone())
                 .optional()?

@@ -279,11 +279,7 @@ async fn process_result_updates_existing_nft_mutable_data_and_notifies_account_c
         .await
         .unwrap();
 
-    let updated = test
-        .sdk()
-        .non_fungible_api()
-        .get(resource_address(), nft_id)
-        .unwrap();
+    let updated = test.sdk().non_fungible_api().get(resource_address(), nft_id).unwrap();
     assert_eq!(updated.mutable_data, tari_bor::Value::Integer(4.into()));
     assert!(matches!(sub.try_recv().unwrap(), WalletEvent::AccountChangedOnChain(_)));
 }

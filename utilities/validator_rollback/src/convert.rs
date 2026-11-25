@@ -212,7 +212,12 @@ mod tests {
         assert_eq!(parsed["footer"]["blocks_deleted"], 5);
 
         let mut jsonl_out = Vec::new();
-        convert_records(AuditReader::new(bytes.as_slice()).unwrap(), Format::Jsonl, &mut jsonl_out).unwrap();
+        convert_records(
+            AuditReader::new(bytes.as_slice()).unwrap(),
+            Format::Jsonl,
+            &mut jsonl_out,
+        )
+        .unwrap();
         let lines: Vec<&str> = std::str::from_utf8(&jsonl_out).unwrap().lines().collect();
         assert_eq!(lines.len(), 2);
     }
@@ -261,11 +266,9 @@ mod tests {
 
     #[test]
     fn does_not_create_output_file_when_input_is_truncated() {
-        let dir = std::env::temp_dir();
-        let pid = std::process::id();
-        let audit_path = dir.join(format!("tari_rollback_truncated_{pid}.audit"));
-        let out_path = dir.join(format!("tari_rollback_truncated_{pid}.jsonl"));
-        let _ = std::fs::remove_file(&out_path);
+        let dir = tempfile::tempdir().unwrap();
+        let audit_path = dir.path().join("truncated.audit");
+        let out_path = dir.path().join("truncated.jsonl");
 
         let truncated = encode_records(&[sample_header()]);
         std::fs::write(&audit_path, &truncated).unwrap();
@@ -280,6 +283,5 @@ mod tests {
             assert!(!out_path.exists());
             assert!(!TempFileGuard::new(&out_path).path.exists());
         }
-        let _ = std::fs::remove_file(&audit_path);
     }
 }

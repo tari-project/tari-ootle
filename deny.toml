@@ -73,6 +73,21 @@ with `libsqlite3-sys` 0.39 allowed and the workspace moves to it.""" },
 `unmaintained = "workspace"` already keeps it out of this check. It is listed so
 `rustsec/audit-check` follows the same policy. Remove once those dependencies move off
 `humantime`.""" },
+    { id = "RUSTSEC-2024-0449", reason = """
+`unsafe-libyaml` 0.2.11 is flagged unmaintained, with no patched release. Every path to it is
+transitive (`serde_yaml` -> `libwild` -> `wasmer-compiler` -> `wasmer` 7.5.0), so
+`unmaintained = "workspace"` already keeps it out of this check. It is listed so
+`rustsec/audit-check` follows the same policy. Remove once `wasmer`/`libwild` drop `serde_yaml`.""" },
+    { id = "RUSTSEC-2026-0173", reason = """
+`proc-macro-error2` 2.0.1 is flagged unmaintained, with no patched release. Every path to it is
+transitive (`wasmer-derive` -> `wasmer` 7.5.0 and `getset` 0.1.6), so `unmaintained = "workspace"`
+already keeps it out of this check. It is listed so `rustsec/audit-check` follows the same policy.
+Remove once `wasmer` and `getset` move off `proc-macro-error2`.""" },
+    { id = "RUSTSEC-2026-0441", reason = """
+`pin-utils` 0.1.0 is flagged unmaintained (archived upstream), with no patched release. Every path to
+it is transitive (`hyper` 1.8.1 and `nix` 0.26.4; macro helpers only), so `unmaintained = "workspace"`
+already keeps it out of this check. It is listed so `rustsec/audit-check` follows the same policy.
+Remove once `hyper` and `nix` move off `pin-utils`.""" },
 ]
 
 [licenses]

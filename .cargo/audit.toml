@@ -13,4 +13,10 @@ ignore = [
     "RUSTSEC-2026-0459",
     # humantime 2.3.0 unmaintained; transitive only (log4rs, env_logger, console-subscriber, cucumber, humantime-serde).
     "RUSTSEC-2026-0542",
+    # unsafe-libyaml 0.2.11 unmaintained; transitive only (serde_yaml -> libwild -> wasmer-compiler -> wasmer 7.5.0).
+    "RUSTSEC-2024-0449",
+    # proc-macro-error2 2.0.1 unmaintained; transitive only (wasmer-derive -> wasmer 7.5.0, getset 0.1.6).
+    "RUSTSEC-2026-0173",
+    # pin-utils 0.1.0 unmaintained (archived upstream); transitive only (hyper 1.8.1, nix 0.26.4).
+    "RUSTSEC-2026-0441",
 ]

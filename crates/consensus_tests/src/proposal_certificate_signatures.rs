@@ -41,18 +41,37 @@ const HEIGHT: NodeHeight = NodeHeight(5);
 
 /// Four members of one vote power each, so three signers reach quorum.
 fn committee() -> Committee<TestAddress> {
-    ["1", "2", "3", "4"]
-        .into_iter()
-        .map(|name| {
-            let address = TestAddress::new(name);
+    weighted_committee(&[("1", 1), ("2", 1), ("3", 1), ("4", 1)])
+}
+
+fn weighted_committee(members: &[(&str, u64)]) -> Committee<TestAddress> {
+    members
+        .iter()
+        .map(|(name, power)| {
+            let address = TestAddress::new(*name);
             let (_, public_key) = derive_keypair_from_address(&address);
             CommitteeMember {
                 address,
                 public_key: RistrettoPublicKeyBytes::from_bytes(public_key.as_bytes()).unwrap(),
-                vote_power: VotePower::of(1),
+                vote_power: VotePower::of(*power),
             }
         })
         .collect()
+}
+
+/// The committee indices of the members named `names`, ascending as a signer bitmap lists them.
+fn indices_of(committee: &Committee<TestAddress>, names: &[&str]) -> Vec<usize> {
+    let mut indices = names
+        .iter()
+        .map(|name| {
+            committee
+                .address_iter()
+                .position(|address| *address == TestAddress::new(*name))
+                .unwrap()
+        })
+        .collect::<Vec<_>>();
+    indices.sort_unstable();
+    indices
 }
 
 fn certificate(signatures: QcSignatures) -> ProposalCertificate {
@@ -118,6 +137,27 @@ fn signers_short_of_quorum_are_rejected() {
         matches!(err, ProposalValidationError::QuorumWasNotReached { .. }),
         "{err}"
     );
+}
+
+#[test]
+fn quorum_is_counted_in_vote_power_not_signers() {
+    // n = 8, f = 2, quorum_threshold = 6
+    let committee = weighted_committee(&[("heavy", 5), ("1", 1), ("2", 1), ("3", 1)]);
+    assert_eq!(committee.quorum_threshold(), VotePower::of(6));
+
+    for short in [&["1", "2", "3"][..], &["heavy"]] {
+        let err = check(&committee, signed_by(&committee, &indices_of(&committee, short))).unwrap_err();
+        assert!(
+            matches!(err, ProposalValidationError::QuorumWasNotReached { .. }),
+            "{short:?}: {err}"
+        );
+    }
+
+    check(
+        &committee,
+        signed_by(&committee, &indices_of(&committee, &["heavy", "2"])),
+    )
+    .unwrap();
 }
 
 #[test]

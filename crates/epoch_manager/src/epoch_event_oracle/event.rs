@@ -3,7 +3,7 @@
 
 use std::fmt::Display;
 
-use tari_ootle_common_types::{Epoch, SubstateAddress, SubstateVersion, displayable::Displayable};
+use tari_ootle_common_types::{Epoch, SubstateAddress, SubstateVersion, VotePower, displayable::Displayable};
 use tari_sidechain::FixedHash;
 use tari_template_lib_types::{Hash32, crypto::RistrettoPublicKeyBytes};
 
@@ -14,10 +14,14 @@ pub enum EpochEvent {
         epoch: Epoch,
         node_changes: Vec<ValidatorNodeChange>,
     },
+    /// A registration detected ahead of its activation. Speculative: the validator joins committees only through
+    /// `ActiveValidatorNodeSetChanged`, so this event must never feed committee assignment.
     NewValidatorRegistered {
         epoch: Epoch,
         claim_public_key: RistrettoPublicKeyBytes,
         validator_node_public_key: RistrettoPublicKeyBytes,
+        activation_epoch: Epoch,
+        shard_key: SubstateAddress,
     },
     NewValidatorNodeExit {
         epoch: Epoch,
@@ -55,11 +59,14 @@ impl Display for EpochEvent {
                 epoch,
                 claim_public_key,
                 validator_node_public_key,
+                activation_epoch,
+                shard_key,
             } => {
                 write!(
                     f,
-                    "NewValidatorRegistered {{ epoch: {}, claim_public_key: {}, validator_node_public_key: {} }}",
-                    epoch, claim_public_key, validator_node_public_key
+                    "NewValidatorRegistered {{ epoch: {}, claim_public_key: {}, validator_node_public_key: {}, \
+                     activation_epoch: {}, shard_key: {} }}",
+                    epoch, claim_public_key, validator_node_public_key, activation_epoch, shard_key
                 )
             },
             EpochEvent::NewValidatorNodeExit {
@@ -89,7 +96,10 @@ pub enum ValidatorNodeChange {
         claim_public_key: RistrettoPublicKeyBytes,
         validator_node_public_key: RistrettoPublicKeyBytes,
         activation_epoch: Epoch,
+        /// The registration's L1 value promise, in microtari.
         minimum_value_promise: u64,
+        /// The validator's consensus weight, in stake units.
+        vote_power: VotePower,
         // TODO: replace with ValidatorShardKey type
         shard_key: SubstateAddress,
     },
@@ -117,6 +127,8 @@ impl TryFrom<minotari_app_grpc::tari_rpc::ValidatorNodeChange> for ValidatorNode
                     validator_node_public_key,
                     activation_epoch: Epoch(add.activation_epoch),
                     minimum_value_promise: add.minimum_value_promise,
+                    // The L1 registration carries no stake units, so every L1-registered validator weighs 1.
+                    vote_power: VotePower::of(1),
                     shard_key: {
                         let hash = Hash32::try_from(add.shard_key.as_slice()).context("Invalid shard key hash")?;
                         SubstateAddress::from_hash_and_version(hash, SubstateVersion::ZERO)
@@ -142,12 +154,18 @@ impl Display for ValidatorNodeChange {
                 validator_node_public_key,
                 activation_epoch,
                 minimum_value_promise,
+                vote_power,
                 shard_key,
             } => write!(
                 f,
                 "Add {{ claim_public_key: {}, validator_node_public_key: {}, activation_epoch: {}, \
-                 minimum_value_promise: {}, shard_key: {} }}",
-                claim_public_key, validator_node_public_key, activation_epoch, minimum_value_promise, shard_key
+                 minimum_value_promise: {}, vote_power: {}, shard_key: {} }}",
+                claim_public_key,
+                validator_node_public_key,
+                activation_epoch,
+                minimum_value_promise,
+                vote_power.value(),
+                shard_key
             ),
             ValidatorNodeChange::Remove { public_key } => write!(f, "Remove {{ public_key: {} }}", public_key),
         }

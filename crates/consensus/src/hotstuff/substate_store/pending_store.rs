@@ -60,6 +60,8 @@ pub struct PendingSubstateStore<'store, TTx: StateStoreReadTransaction> {
     pledge_bytes: usize,
     /// The most bytes [`Self::pledge_inputs`] lets this block pledge, if it is being proposed.
     max_pledge_bytes: Option<usize>,
+    /// Encoded bytes of the input substates loaded for this block's transactions, every load counted.
+    input_load: InputLoadTally,
     new_locks: IndexMap<SubstateId, Vec<SubstateLock>>,
 }
 
@@ -72,6 +74,7 @@ impl<'a, TTx: StateStoreReadTransaction> PendingSubstateStore<'a, TTx> {
             pledged_inputs: HashSet::new(),
             pledge_bytes: 0,
             max_pledge_bytes: None,
+            input_load: InputLoadTally::default(),
             new_locks: IndexMap::new(),
         })
     }
@@ -81,6 +84,14 @@ impl<'a, TTx: StateStoreReadTransaction> PendingSubstateStore<'a, TTx> {
     /// the whole block is evaluated.
     pub fn with_pledge_budget(mut self, max_bytes: usize) -> Self {
         self.max_pledge_bytes = Some(max_bytes);
+        self
+    }
+
+    /// Makes [`Self::load_inputs`] stop at the first input that would take the bytes loaded for this block past
+    /// `max_bytes`. A proposer and a validator both set this: the proposer defers the transaction, and the validator
+    /// withholds its vote from the block, so neither loads more than the budget for one block.
+    pub fn with_input_load_budget(mut self, max_bytes: usize) -> Self {
+        self.input_load.max_bytes = Some(max_bytes);
         self
     }
 
@@ -220,6 +231,8 @@ impl<'store, TTx: StateStoreReadTransaction> PendingSubstateStore<'store, TTx> {
         Ok(true)
     }
 
+    /// Attempts to grant every lock in `id_locks` to `transaction_id`, or none of them: if any lock fails, all
+    /// locks granted to `transaction_id` in this block are released before returning.
     pub fn try_lock_all<I, L>(
         &mut self,
         transaction_id: TransactionId,
@@ -244,10 +257,29 @@ impl<'store, TTx: StateStoreReadTransaction> PendingSubstateStore<'store, TTx> {
                             let index = lock_status.add_failed(err);
                             lock_status.hard_conflict_idx = Some(index);
                         },
-                        err @ LockFailedError::LockConflict { .. } => {
-                            let index = lock_status.add_failed(err);
-                            // If the requested lock is for a specific version, the transaction must be ABORTED
-                            if lock.requested_version().is_some() {
+                        LockFailedError::LockConflict {
+                            ref substate_id,
+                            ref conflict,
+                        } => {
+                            let is_hard = if lock.lock_type().is_output() {
+                                true
+                            } else if let Some(req_v) = lock.requested_version() {
+                                let (existing_version, existing_is_local_only) =
+                                    self.get_latest_lock_by_id(substate_id.substate_id())?.map_or_else(
+                                        || (substate_id.version(), conflict.is_local_only),
+                                        |existing| (existing.version(), existing.is_local_only()),
+                                    );
+                                is_versioned_lock_conflict_hard(
+                                    conflict.existing_lock,
+                                    existing_is_local_only,
+                                    existing_version,
+                                    req_v,
+                                )
+                            } else {
+                                false
+                            };
+                            let index = lock_status.add_failed(error);
+                            if is_hard {
                                 lock_status.hard_conflict_idx = Some(index);
                             }
                         },
@@ -259,6 +291,9 @@ impl<'store, TTx: StateStoreReadTransaction> PendingSubstateStore<'store, TTx> {
                 // If there are hard conflicts, there is no need to continue as this transaction will be ABORTED
                 break;
             }
+        }
+        if lock_status.is_any_failed() {
+            self.release_new_locks(&transaction_id);
         }
         Ok(lock_status)
     }
@@ -285,25 +320,34 @@ impl<'store, TTx: StateStoreReadTransaction> PendingSubstateStore<'store, TTx> {
             if existing.transaction_id() == transaction_id {
                 continue;
             }
-            let refuses_every_input = match existing.lock_type() {
+            let refuses_input = match existing.lock_type() {
                 SubstateLockType::Write => true,
                 SubstateLockType::Output => !existing.is_local_only(),
                 SubstateLockType::Read => false,
             };
-            if !refuses_every_input {
+            if !refuses_input {
                 continue;
             }
 
+            let conflict = LockConflict {
+                existing_lock: existing.lock_type(),
+                requested_lock: lock.lock_type(),
+                transaction_id: *existing.transaction_id(),
+                is_local_only: existing.is_local_only(),
+            };
+            let is_hard = lock.requested_version().is_some_and(|req_v| {
+                is_versioned_lock_conflict_hard(
+                    existing.lock_type(),
+                    existing.is_local_only(),
+                    existing.version(),
+                    req_v,
+                )
+            });
             let index = lock_status.add_failed(LockFailedError::LockConflict {
                 substate_id: versioned_substate_id.to_owned(),
-                conflict: LockConflict {
-                    existing_lock: existing.lock_type(),
-                    requested_lock: lock.lock_type(),
-                    transaction_id: *existing.transaction_id(),
-                    is_local_only: existing.is_local_only(),
-                },
+                conflict,
             });
-            if lock.requested_version().is_some() {
+            if is_hard {
                 lock_status.hard_conflict_idx = Some(index);
             }
         }
@@ -580,8 +624,9 @@ impl<'store, TTx: StateStoreReadTransaction> PendingSubstateStore<'store, TTx> {
     /// Grants `lock_type` over `id` to `transaction_id`.
     ///
     /// An OUTPUT lock claims a version that the transaction will create, so it is only valid while that version does
-    /// not exist. A lock already held over the substate says nothing about the requested version, so the assertion
-    /// must run wherever an OUTPUT lock is granted.
+    /// not exist, unless the lock re-marks a validator fee pool version that this block already put UP and that this
+    /// local-only transaction updates in place. A lock already held over the substate says nothing about the requested
+    /// version, so the assertion must run wherever an OUTPUT lock is granted.
     fn grant_lock(
         &mut self,
         transaction_id: TransactionId,
@@ -590,7 +635,14 @@ impl<'store, TTx: StateStoreReadTransaction> PendingSubstateStore<'store, TTx> {
         is_local_only: bool,
     ) -> Result<(), SubstateStoreError> {
         if lock_type.is_output() {
-            self.lock_assert_not_exist(id)?;
+            let is_in_place_fee_pool_update = is_local_only &&
+                id.substate_id().is_validator_fee_pool() &&
+                self.log
+                    .get_pending(&id.to_substate_address())
+                    .is_some_and(SubstateChange::is_up);
+            if !is_in_place_fee_pool_update {
+                self.lock_assert_not_exist(id)?;
+            }
         }
 
         self.add_new_lock(
@@ -671,8 +723,9 @@ impl<'store, TTx: StateStoreReadTransaction> PendingSubstateStore<'store, TTx> {
         self.shard_output_bytes.values().copied().max().unwrap_or(0)
     }
 
-    /// Whether putting `diff` would take any shard past `max_bytes` written in this block.
-    pub fn diff_exceeds_shard_output_bytes(&self, diff: &SubstateDiff, max_bytes: usize) -> bool {
+    /// The bytes written to the first shard that putting `diff` would take past `max_bytes` in this block, or `None`
+    /// if every shard stays within it.
+    pub fn diff_shard_output_bytes_over(&self, diff: &SubstateDiff, max_bytes: usize) -> Option<usize> {
         let downs = diff.down_iter().map(|(id, version)| {
             let shard = VersionedSubstateIdRef::new(id, *version).to_shard(self.chain.num_preshards);
             (shard, tari_bor::encoded_len(id))
@@ -682,12 +735,12 @@ impl<'store, TTx: StateStoreReadTransaction> PendingSubstateStore<'store, TTx> {
             (shard, up_encoded_len(id, substate))
         });
         let mut totals = HashMap::<Shard, usize>::new();
-        downs.chain(ups).any(|(shard, bytes)| {
+        downs.chain(ups).find_map(|(shard, bytes)| {
             let total = totals
                 .entry(shard)
                 .or_insert_with(|| self.shard_output_bytes.get(&shard).copied().unwrap_or(0));
             *total = total.saturating_add(bytes);
-            *total > max_bytes
+            (*total > max_bytes).then_some(*total)
         })
     }
 
@@ -739,8 +792,55 @@ impl<'store, TTx: StateStoreReadTransaction> PendingSubstateStore<'store, TTx> {
         self.pledge_bytes
     }
 
+    /// Loads a transaction's local inputs, counting their encoded bytes toward what this block loads.
+    ///
+    /// The inputs are loaded in order and measured as they load. Loading stops at the first input that takes the
+    /// transaction's own total past `max_transaction_bytes`, or that would take the block past its budget (see
+    /// [`Self::with_input_load_budget`]), and the rest are never read. The bytes loaded for a transaction that is too
+    /// large still count toward the block, since the block's validators load them again to reach the same verdict.
+    /// Every transaction's inputs count, however many of the block's commands load the same substate, because each
+    /// execution decodes and copies its inputs anew.
+    pub fn load_inputs<I>(&mut self, ids: I, max_transaction_bytes: usize) -> Result<InputLoad, SubstateStoreError>
+    where I: IntoIterator<Item = (SubstateRequirement, SubstateVersion)> {
+        let mut substates = HashMap::new();
+        let mut transaction_bytes = 0usize;
+        for (req, version) in ids {
+            let substate = self
+                .log
+                .get(&self.chain, VersionedSubstateIdRef::new(req.substate_id(), version))?;
+            let bytes = up_encoded_len(req.substate_id(), &substate);
+            transaction_bytes = transaction_bytes.saturating_add(bytes);
+            let total_bytes = self.input_load.bytes.saturating_add(transaction_bytes);
+            if transaction_bytes > max_transaction_bytes {
+                self.input_load.bytes = total_bytes;
+                return Ok(InputLoad::TransactionTooLarge {
+                    bytes: transaction_bytes,
+                });
+            }
+            if let Some(max_bytes) = self.input_load.max_bytes &&
+                total_bytes > max_bytes
+            {
+                return Ok(InputLoad::BlockBudgetReached { total_bytes, max_bytes });
+            }
+            substates.insert(req, substate);
+        }
+
+        self.input_load.bytes = self.input_load.bytes.saturating_add(transaction_bytes);
+        Ok(InputLoad::Loaded(substates))
+    }
+
+    /// The encoded bytes of the input substates loaded for this block's transactions so far.
+    pub fn input_load_bytes(&self) -> usize {
+        self.input_load.bytes
+    }
+
     pub fn changes(&self) -> &Vec<SubstateChange> {
         self.log.changes()
+    }
+
+    /// The latest change to `id` made by the block being built.
+    pub fn block_change(&self, id: &SubstateId) -> Option<&SubstateChange> {
+        self.log.get_head(id)
     }
 
     pub fn generate_shard_state_change_bitmap(&self) -> Vec<bool> {
@@ -796,6 +896,25 @@ pub enum InputPledge {
         total_bytes: usize,
         max_bytes: usize,
     },
+}
+
+/// The input bytes loaded for a block's transactions and, if the block is budgeted, the most it may load.
+#[derive(Debug, Default)]
+struct InputLoadTally {
+    bytes: usize,
+    max_bytes: Option<usize>,
+}
+
+/// The outcome of [`PendingSubstateStore::load_inputs`].
+#[derive(Debug)]
+pub enum InputLoad {
+    /// Every input, keyed by the requirement it was loaded for.
+    Loaded(HashMap<SubstateRequirement, Substate>),
+    /// The transaction's inputs alone are more than any transaction may have loaded. `bytes` is what was loaded
+    /// before loading stopped.
+    TransactionTooLarge { bytes: usize },
+    /// The inputs fit a transaction but not alongside what this block has already loaded.
+    BlockBudgetReached { total_bytes: usize, max_bytes: usize },
 }
 
 #[derive(Debug, Default)]
@@ -893,4 +1012,30 @@ impl LatestSubstateVersion {
 
 fn up_encoded_len(id: &SubstateId, substate: &Substate) -> usize {
     tari_bor::encoded_len(id).saturating_add(tari_bor::encoded_len(substate))
+}
+
+/// Whether a `LockConflict` on a versioned input requesting `requested_version` against an existing lock at
+/// `existing_version` is a permanent hard conflict or a transient deferrable conflict.
+///
+/// Every versioned input conflict is hard (`requested_version != existing_version` included) except the two cases
+/// where the existing lock at `existing_version == requested_version` leaves that version UP once its holder commits:
+/// - `SubstateLockType::Read` at `existing_version == requested_version`: a read lock does not down the substate, so a
+///   write at that same version can proceed once the read lock is released;
+/// - a local-only `SubstateLockType::Output` at `existing_version == requested_version`: the local-only transaction is
+///   creating `requested_version` on this chain, so a multishard transaction requesting that version can proceed once
+///   the block creating it commits.
+fn is_versioned_lock_conflict_hard(
+    existing_lock: SubstateLockType,
+    existing_is_local_only: bool,
+    existing_version: SubstateVersion,
+    requested_version: SubstateVersion,
+) -> bool {
+    if requested_version != existing_version {
+        return true;
+    }
+    match existing_lock {
+        SubstateLockType::Write => true,
+        SubstateLockType::Output => !existing_is_local_only,
+        SubstateLockType::Read => false,
+    }
 }

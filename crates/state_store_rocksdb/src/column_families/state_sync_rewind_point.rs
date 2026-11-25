@@ -8,7 +8,7 @@ use crate::{
     codecs::{FixedBytesCodec, KeyPrefix, NumberCodec, ShardCodec},
     column_families::cf_names,
     prefixed,
-    traits::Cf,
+    traits::{Cf, QueryCf},
 };
 
 prefixed!(StateSyncRewindPointPrefix, KeyPrefix::StateSyncRewindPoint);
@@ -44,4 +44,12 @@ impl Cf for StateSyncMissingValueCf {
     fn name() -> &'static str {
         cf_names::STATE_TREE
     }
+}
+
+pub struct StateSyncMissingValueByShardQuery;
+
+impl QueryCf for StateSyncMissingValueByShardQuery {
+    type Cf = StateSyncMissingValueCf;
+    type Key = Shard;
+    type KeyCodec = ShardCodec;
 }

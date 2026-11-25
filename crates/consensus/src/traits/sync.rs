@@ -3,7 +3,7 @@
 
 use std::future::Future;
 
-use tari_ootle_common_types::Epoch;
+use tari_ootle_common_types::{Epoch, ShardGroup};
 
 pub trait SyncManager {
     type Error: std::error::Error + Send + Sync + 'static;
@@ -14,6 +14,22 @@ pub trait SyncManager {
     /// finalised epoch the network has reached (e.g. via a stall-recovery probe). `None` means
     /// "use your usual fallback" — typically the oracle's current epoch.
     fn sync(&mut self, target_epoch: Option<Epoch>) -> impl Future<Output = Result<(), Self::Error>> + Send;
+
+    /// Synchronise `shard_group`'s state, for a node that joins its committee after `epoch`, to the checkpoint that
+    /// ends the epoch before `epoch`. Repeating it in a later epoch extends the state already synced.
+    fn presync(
+        &mut self,
+        shard_group: ShardGroup,
+        epoch: Epoch,
+    ) -> impl Future<Output = Result<PresyncStatus, Self::Error>> + Send;
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PresyncStatus {
+    Synced,
+    /// No peer holds the checkpoint ending the epoch before the presync's epoch yet. The committee stores it once it
+    /// commits that epoch's end, shortly after the epoch changes, so a later attempt in the same epoch succeeds.
+    CheckpointNotAvailable,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

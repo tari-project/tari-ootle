@@ -54,6 +54,8 @@ use tari_ootle_p2p::{
         GetCommittedBlockProofResponse,
         GetConsensusStateRequest,
         GetConsensusStateResponse,
+        GetEpochOracleConfigRequest,
+        GetEpochOracleConfigResponse,
         GetHighQcRequest,
         GetHighQcResponse,
         GetShardSnapshotRequest,
@@ -110,6 +112,7 @@ use crate::{
                 ShardCursor,
                 StateSyncTask,
                 TipAuthority,
+                TransferPermit,
                 ensure_epoch_reached,
                 ensure_history_values_held,
             },
@@ -138,8 +141,14 @@ pub struct ValidatorNodeRpcServiceImpl<TStateStore> {
     epoch_history_length: u64,
     /// Permits for the batch responses held in memory at once; see [`MAX_BUFFERED_BATCH_RESPONSES`].
     batch_responses: Arc<Semaphore>,
+    /// Permits for the snapshot pages and state sync streams served at once; see [`MAX_STATE_TRANSFER_STREAMS`].
+    state_transfer_streams: Arc<Semaphore>,
+    /// Permits for the bytes of large unary responses held at once; see [`MAX_BUFFERED_RESPONSE_BYTES`].
+    response_bytes: Arc<Semaphore>,
     state_sync_reads: Arc<Semaphore>,
     root_mismatch_log: Arc<RootMismatchLog>,
+    /// The JSON of the configured epoch oracle's config, served to indexers that follow it.
+    epoch_oracle_config_json: Option<Arc<str>>,
 }
 
 impl<TStateStore: StateStore> ValidatorNodeRpcServiceImpl<TStateStore> {
@@ -159,9 +168,18 @@ impl<TStateStore: StateStore> ValidatorNodeRpcServiceImpl<TStateStore> {
             max_transaction_size_bytes,
             epoch_history_length,
             batch_responses: Arc::new(Semaphore::new(MAX_BUFFERED_BATCH_RESPONSES)),
+            state_transfer_streams: Arc::new(Semaphore::new(MAX_STATE_TRANSFER_STREAMS)),
+            response_bytes: Arc::new(Semaphore::new(MAX_BUFFERED_RESPONSE_BYTES / RESPONSE_BUDGET_UNIT_BYTES)),
             state_sync_reads: Arc::new(Semaphore::new(max_concurrent_state_sync_reads())),
             root_mismatch_log: Arc::default(),
+            epoch_oracle_config_json: None,
         }
+    }
+
+    /// Serves `config_json`, the configured epoch oracle's config this node runs, to peers that ask for it.
+    pub fn with_epoch_oracle_config_json(mut self, config_json: Option<Arc<str>>) -> Self {
+        self.epoch_oracle_config_json = config_json;
+        self
     }
 
     /// Resolves which shards' committed history through `epoch` this node holds.
@@ -225,6 +243,109 @@ impl<TStateStore: StateStore> ValidatorNodeRpcServiceImpl<TStateStore> {
             epoch,
             shard_group: self.local_shard_group_at(epoch).await?,
         })
+    }
+
+    /// A permit to serve one state transfer response. A peer that does not read its response holds the permit, so a
+    /// node already serving [`MAX_STATE_TRANSFER_STREAMS`] refuses rather than queueing, and the caller asks another
+    /// member.
+    fn try_acquire_state_transfer(&self, what: &str) -> Result<OwnedSemaphorePermit, RpcStatus> {
+        self.state_transfer_streams.clone().try_acquire_owned().map_err(|_| {
+            debug!(
+                target: LOG_TARGET,
+                "Refusing a {what} request: {MAX_STATE_TRANSFER_STREAMS} state transfers are already being served",
+            );
+            RpcStatus::unavailable(STATE_TRANSFER_BUSY)
+        })
+    }
+
+    /// `message` as a response holding its share of the response byte budget until it is sent. A node whose budget is
+    /// spent refuses rather than queueing, and the caller retries or asks another member.
+    fn budgeted_response<T: prost::Message>(&self, message: T) -> Result<Response<T>, RpcStatus> {
+        let units = message.encoded_len().div_ceil(RESPONSE_BUDGET_UNIT_BYTES).max(1);
+        let permit = u32::try_from(units)
+            .ok()
+            .and_then(|units| self.response_bytes.clone().try_acquire_many_owned(units).ok())
+            .ok_or_else(|| {
+                debug!(
+                    target: LOG_TARGET,
+                    "Refusing a {}-byte response: {MAX_BUFFERED_RESPONSE_BYTES} bytes of responses are already held",
+                    message.encoded_len(),
+                );
+                RpcStatus::unavailable("This node is holding too many responses; retry later or ask another member")
+            })?;
+        Ok(Response::new(message).with_guard(permit))
+    }
+}
+
+impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcServiceImpl<TStateStore> {
+    async fn shard_snapshot(
+        &self,
+        req: GetShardSnapshotRequest,
+    ) -> Result<Response<GetShardSnapshotResponse>, RpcStatus> {
+        let shard = Shard::from_u32(req.shard);
+        if shard > NumPreshards::MAX_SHARD {
+            return Err(RpcStatus::bad_request(format!(
+                "Shard {shard} out of range. Maximum shard is {}",
+                NumPreshards::MAX_SHARD
+            )));
+        }
+        let after = if req.after_leaf_key.is_empty() {
+            None
+        } else {
+            let key = TreeHash::try_from_bytes(&req.after_leaf_key)
+                .map_err(|_| RpcStatus::bad_request("after_leaf_key must be empty or 32 bytes"))?;
+            Some(LeafKey::new(key))
+        };
+        let value_filters = SubstateValueFilterFlags::from_bits_truncate(req.value_filters);
+        if value_filters.is_empty() {
+            return Err(RpcStatus::bad_request(
+                "At least one SubstateValueFilterFlag must be set",
+            ));
+        }
+        let limit = usize::try_from(req.limit)
+            .unwrap_or(usize::MAX)
+            .clamp(1, MAX_SNAPSHOT_PAGE_SUBSTATES);
+
+        let response_permit = self.try_acquire_state_transfer("shard snapshot")?;
+        // A page is a synchronous read like a state sync version's, so it takes the same permits. Any node holding the
+        // tree at the version serves it: the caller checks the leaves against a quorum-signed root.
+        let _permit = self
+            .state_sync_reads
+            .clone()
+            .acquire_owned()
+            .await
+            .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
+        let store = self.state_store.clone();
+        let state_version = req.state_version;
+        let page = task::spawn_blocking(move || {
+            store
+                .with_read_tx(|tx| read_shard_snapshot(tx, shard, state_version, after.as_ref(), limit, value_filters))
+                .map_err(RpcStatus::log_internal_error(LOG_TARGET))
+        })
+        .await
+        .map_err(RpcStatus::log_internal_error(LOG_TARGET))??;
+
+        let response = match page {
+            ShardSnapshotPage::Unavailable => GetShardSnapshotResponse {
+                version_unavailable: true,
+                ..Default::default()
+            },
+            ShardSnapshotPage::Page {
+                substates,
+                is_last,
+                last_leaf_proof,
+            } => GetShardSnapshotResponse {
+                substates,
+                is_last,
+                version_unavailable: false,
+                last_leaf_proof: last_leaf_proof
+                    .map(|proof| tari_bor::serde_codec::to_vec(&proof))
+                    .transpose()
+                    .map_err(RpcStatus::log_internal_error(LOG_TARGET))?
+                    .unwrap_or_default(),
+            },
+        };
+        Ok(Response::new(response).with_guard(response_permit))
     }
 }
 
@@ -328,6 +449,24 @@ const MAX_BATCH_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
 /// dropped. Together with [`MAX_BATCH_RESPONSE_BYTES`] this bounds the memory batch responses can
 /// take, however many sessions peers open.
 const MAX_BUFFERED_BATCH_RESPONSES: usize = 32;
+
+/// How many shard snapshot pages and `sync_state` streams with messages to send the node serves at once. A snapshot
+/// page holds its permit until the server has finished sending it, and a stream holds one while it has messages in
+/// flight (see [`TransferPermit`]). A page holds up to `MAX_SNAPSHOT_PAGE_BYTES`, and a stream a few state sync
+/// batches (one queued, one being sent, and the version being split into them), so this bounds the memory state
+/// transfer responses take however many sessions peers open. A followed stream waiting at the tip holds none.
+const MAX_STATE_TRANSFER_STREAMS: usize = 32;
+
+const STATE_TRANSFER_BUSY: &str = "This node is serving too many state transfers; retry later or ask another member";
+
+/// The most encoded bytes of large unary responses (substates, transaction results, checkpoints, committed block
+/// proofs) the node holds at once, from the read until the server has finished sending them. A peer that does not read
+/// its response holds its share, so this bounds the memory those responses take however many sessions peers open.
+const MAX_BUFFERED_RESPONSE_BYTES: usize = 128 * 1024 * 1024;
+
+/// The bytes one permit of [`MAX_BUFFERED_RESPONSE_BYTES`] stands for. A response takes one permit per unit of its
+/// encoded size, at least one.
+const RESPONSE_BUDGET_UNIT_BYTES: usize = 64 * 1024;
 
 /// Streams `responses` to the peer. The stream holds `permit` until the server has finished sending
 /// the response and drops it.
@@ -461,6 +600,32 @@ fn proven_substate(substate: &SubstateRecord, value_proof: Vec<u8>) -> proto::rp
             destroyed: substate.destroyed().map(Into::into),
         }),
     }
+}
+
+/// The CBOR-encoded proof of the decision this node finalized for `tx_id` and the CBOR-encoded commit proof of the
+/// block it is against, or two empty buffers when the node holds no inclusion for it.
+fn finalized_transaction_proof<TTx: StateStoreReadTransaction>(
+    tx: &TTx,
+    tx_id: &TransactionId,
+) -> Result<(Vec<u8>, Vec<u8>), StorageError> {
+    let Some(inclusion) = tx.finalized_transaction_inclusion_get(tx_id)? else {
+        return Ok((Vec::new(), Vec::new()));
+    };
+    // A stored inclusion cites its block, which keeps the block's commit proof stored by every binary that honours the
+    // citation. One that does not may have deleted it, and the result is then served unproven.
+    let Some(commit_proof) = tx.block_commit_proofs_get(&inclusion.block_id).optional()? else {
+        warn!(
+            target: LOG_TARGET,
+            "No commit proof is stored for block {}, which finalized transaction {tx_id}, so its result is served \
+             without a proof",
+            inclusion.block_id
+        );
+        return Ok((Vec::new(), Vec::new()));
+    };
+    let transaction_proof = tari_bor::serde_codec::to_vec(&inclusion.proof).map_err(|e| StorageError::QueryError {
+        reason: format!("encode the inclusion proof of transaction {tx_id}: {e}"),
+    })?;
+    Ok((transaction_proof, commit_proof))
 }
 
 /// The commit proof for the latest committed block: the quorum-signed anchor for the shard-group
@@ -721,7 +886,7 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
             Self::attach_substate_proof(&tx, info.num_preshards(), anchor_at, &substate, &mut resp)?;
         }
 
-        Ok(Response::new(resp))
+        self.budgeted_response(resp)
     }
 
     async fn get_transaction_result(
@@ -756,7 +921,10 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
             .optional()
             .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
 
-        Ok(Response::new(GetTransactionResultResponse {
+        let (transaction_proof, commit_proof) =
+            finalized_transaction_proof(&tx, &tx_id).map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
+
+        self.budgeted_response(GetTransactionResultResponse {
             status: PayloadResultStatus::Finalized.into(),
 
             final_decision: Some(proto::consensus::Decision::from(execution.decision())),
@@ -767,7 +935,9 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
             abort_details: execution.abort_reason().map(|r| r.to_string()).unwrap_or_default(),
             // For simplicity, we simply encode the whole result as a CBOR blob.
             execution_result: encode(execution.result()).map_err(RpcStatus::log_internal_error(LOG_TARGET))?,
-        }))
+            transaction_proof,
+            commit_proof,
+        })
     }
 
     async fn get_checkpoints(
@@ -821,9 +991,9 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
                         "No checkpoint for epoch {from_epoch} shard group {shard_group}"
                     ))
                 })?;
-            return Ok(Response::new(GetCheckpointsResponse {
+            return self.budgeted_response(GetCheckpointsResponse {
                 checkpoints: vec![checkpoint.into()],
-            }));
+            });
         }
 
         if msg.num_to_return > 100 {
@@ -842,15 +1012,13 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
             .with_read_tx(|tx| EpochCheckpoint::get_all_from_epoch(tx, from_epoch, limit.get()))
             .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
 
-        Ok(Response::new(GetCheckpointsResponse {
+        self.budgeted_response(GetCheckpointsResponse {
             checkpoints: checkpoints.into_iter().map(Into::into).collect(),
-        }))
+        })
     }
 
     async fn sync_state(&self, request: Request<SyncStateRequest>) -> Result<Streaming<SyncStateResponse>, RpcStatus> {
         let req = request.into_message();
-
-        let (sender, receiver) = mpsc::channel(10);
 
         let cursors = ShardCursor::validate_all(req.cursors)?;
 
@@ -934,6 +1102,10 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
             req.follow,
         );
 
+        let response_permit = self.try_acquire_state_transfer("state sync")?;
+        // The task builds the next message only once the last has been taken, so a stream holds one message in the
+        // channel and one being sent.
+        let (sender, receiver) = mpsc::channel(1);
         task::spawn(
             StateSyncTask::new(
                 self.state_store.clone(),
@@ -950,6 +1122,7 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
                 value_filter_flags,
                 req.include_version_proofs,
                 self.state_sync_reads.clone(),
+                TransferPermit::held(self.state_transfer_streams.clone(), response_permit),
             )
             .run(),
         );
@@ -1016,6 +1189,12 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
         let leaf_shards = req.leaf_shards.into_iter().map(Shard::from).collect::<BTreeSet<_>>();
 
         let epoch = self.consensus.current_epoch();
+        let _permit = self
+            .state_sync_reads
+            .clone()
+            .acquire_owned()
+            .await
+            .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
         let store = self.state_store.clone();
         let root_mismatch_log = self.root_mismatch_log.clone();
 
@@ -1042,78 +1221,25 @@ impl<TStateStore: StateStore + Clone + Send + Sync + 'static> ValidatorNodeRpcSe
         let (proof, leaves) =
             maybe_proof.ok_or_else(|| RpcStatus::not_found("No committed block beyond genesis yet"))?;
 
-        Ok(Response::new(GetCommittedBlockProofResponse {
+        self.budgeted_response(GetCommittedBlockProofResponse {
             commit_proof: proof.to_bytes(),
             shard_leaves: leaves,
-        }))
+        })
     }
 
     async fn get_shard_snapshot(
         &self,
         req: Request<GetShardSnapshotRequest>,
     ) -> Result<Response<GetShardSnapshotResponse>, RpcStatus> {
-        let req = req.into_message();
-        let shard = Shard::from_u32(req.shard);
-        if shard > NumPreshards::MAX_SHARD {
-            return Err(RpcStatus::bad_request(format!(
-                "Shard {shard} out of range. Maximum shard is {}",
-                NumPreshards::MAX_SHARD
-            )));
-        }
-        let after = if req.after_leaf_key.is_empty() {
-            None
-        } else {
-            let key = TreeHash::try_from_bytes(&req.after_leaf_key)
-                .map_err(|_| RpcStatus::bad_request("after_leaf_key must be empty or 32 bytes"))?;
-            Some(LeafKey::new(key))
-        };
-        let value_filters = SubstateValueFilterFlags::from_bits_truncate(req.value_filters);
-        if value_filters.is_empty() {
-            return Err(RpcStatus::bad_request(
-                "At least one SubstateValueFilterFlag must be set",
-            ));
-        }
-        let limit = usize::try_from(req.limit)
-            .unwrap_or(usize::MAX)
-            .clamp(1, MAX_SNAPSHOT_PAGE_SUBSTATES);
+        self.shard_snapshot(req.into_message()).await
+    }
 
-        // A page is a synchronous read like a state sync version's, so it takes the same permits. Any node holding the
-        // tree at the version serves it: the caller checks the leaves against a quorum-signed root.
-        let _permit = self
-            .state_sync_reads
-            .clone()
-            .acquire_owned()
-            .await
-            .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
-        let store = self.state_store.clone();
-        let state_version = req.state_version;
-        let page = task::spawn_blocking(move || {
-            store
-                .with_read_tx(|tx| read_shard_snapshot(tx, shard, state_version, after.as_ref(), limit, value_filters))
-                .map_err(RpcStatus::log_internal_error(LOG_TARGET))
-        })
-        .await
-        .map_err(RpcStatus::log_internal_error(LOG_TARGET))??;
-
-        Ok(Response::new(match page {
-            ShardSnapshotPage::Unavailable => GetShardSnapshotResponse {
-                version_unavailable: true,
-                ..Default::default()
-            },
-            ShardSnapshotPage::Page {
-                substates,
-                is_last,
-                last_leaf_proof,
-            } => GetShardSnapshotResponse {
-                substates,
-                is_last,
-                version_unavailable: false,
-                last_leaf_proof: last_leaf_proof
-                    .map(|proof| tari_bor::serde_codec::to_vec(&proof))
-                    .transpose()
-                    .map_err(RpcStatus::log_internal_error(LOG_TARGET))?
-                    .unwrap_or_default(),
-            },
+    async fn get_epoch_oracle_config(
+        &self,
+        _req: Request<GetEpochOracleConfigRequest>,
+    ) -> Result<Response<GetEpochOracleConfigResponse>, RpcStatus> {
+        Ok(Response::new(GetEpochOracleConfigResponse {
+            config_json: self.epoch_oracle_config_json.as_deref().unwrap_or_default().to_string(),
         }))
     }
 
@@ -1809,5 +1935,211 @@ mod tests {
             anchor_for(&store, 5, None).is_none(),
             "a node outside every shard group"
         );
+    }
+
+    fn rpc_service(store: RocksDbStateStore<String>) -> ValidatorNodeRpcServiceImpl<RocksDbStateStore<String>> {
+        let (tx_request, _) = mpsc::channel(1);
+        let (tx_events, _) = tokio::sync::broadcast::channel(1);
+        let epoch_manager = EpochManagerHandle::new(
+            tx_request,
+            tx_events.downgrade(),
+            Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            tari_epoch_manager::service::CommitteeCache::new(),
+        );
+        let (consensus_events, _) = tokio::sync::broadcast::channel(1);
+        ValidatorNodeRpcServiceImpl::new(
+            epoch_manager,
+            store,
+            MempoolHandle::for_test(),
+            ConsensusHandle::for_test(&consensus_events),
+            1024,
+            10,
+        )
+    }
+
+    #[tokio::test]
+    async fn the_epoch_oracle_config_is_served_as_it_was_given() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = RocksDbStateStore::<String>::open(dir.path().join("db"), DatabaseOptions::default()).unwrap();
+        let request = || Request::new(1.into(), GetEpochOracleConfigRequest {});
+
+        let service = rpc_service(store);
+        let unserved = service.get_epoch_oracle_config(request()).await.unwrap().into_message();
+        assert!(unserved.config_json.is_empty());
+
+        let service = service.with_epoch_oracle_config_json(Some(Arc::from(r#"{"validators":[]}"#)));
+        let served = service.get_epoch_oracle_config(request()).await.unwrap().into_message();
+        assert_eq!(served.config_json, r#"{"validators":[]}"#);
+    }
+
+    /// Substate responses hold their share of the response byte budget until they are dropped, which the server does
+    /// once the peer has taken them, so the bytes of unsent responses a node holds stay within
+    /// [`MAX_BUFFERED_RESPONSE_BYTES`] however many sessions its peers open.
+    #[tokio::test]
+    async fn a_node_holding_its_response_budget_refuses_another_response_until_one_is_sent() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = RocksDbStateStore::<String>::open(dir.path().join("db"), DatabaseOptions::default()).unwrap();
+        let record = template_record(1, 512 * 1024);
+        let mut batch = SubstateUpdateBatch::new(Network::LocalNet, Epoch::zero());
+        batch.with_transition(Shard::global(), 1).push(SubstateTransition::Up {
+            id: record.substate_id().clone(),
+            version: SubstateVersion::ZERO,
+            substate_or_hash: SubstateValueOrHash::Value(Box::new(record.substate_value().unwrap().clone())),
+        });
+        store.with_write_tx(|tx| tx.substates_commit_batch(batch)).unwrap();
+        let service = rpc_service(store);
+        let request = || {
+            Request::new(2.into(), GetSubstateRequest {
+                substate_requirement: Some(SubstateRequirement::unversioned(record.substate_id().clone()).into()),
+                include_proof: false,
+            })
+        };
+
+        let mut held = Vec::new();
+        let refused = loop {
+            match service.get_substate(request()).await {
+                Ok(response) => held.push(response),
+                Err(status) => break status,
+            }
+            assert!(
+                held.len() <= MAX_BUFFERED_RESPONSE_BYTES / (512 * 1024),
+                "the budget was never spent"
+            );
+        };
+        assert_eq!(refused.as_status_code(), tari_rpc_framework::RpcStatusCode::Unavailable);
+        let held_bytes = held
+            .iter()
+            .map(|response| response.payload.encoded_len())
+            .sum::<usize>();
+        assert!(
+            held_bytes <= MAX_BUFFERED_RESPONSE_BYTES,
+            "{held_bytes} bytes of responses held"
+        );
+
+        held.pop();
+        service
+            .get_substate(request())
+            .await
+            .expect("a sent response frees its share");
+    }
+
+    fn snapshot_request() -> GetShardSnapshotRequest {
+        GetShardSnapshotRequest {
+            shard: 0,
+            state_version: 1,
+            after_leaf_key: Vec::new(),
+            limit: 1000,
+            value_filters: SubstateValueFilterFlags::all().bits(),
+        }
+    }
+
+    /// A snapshot response holds its permit until it is dropped, which the server does once the peer has taken it, so
+    /// a node holds at most [`MAX_STATE_TRANSFER_STREAMS`] unsent pages however many sessions its peers open.
+    #[tokio::test]
+    async fn a_node_holding_its_most_snapshot_responses_refuses_another_until_one_is_sent() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = RocksDbStateStore::<String>::open(dir.path().join("db"), DatabaseOptions::default()).unwrap();
+        let service = rpc_service(store);
+
+        let mut held = Vec::new();
+        for _ in 0..MAX_STATE_TRANSFER_STREAMS {
+            held.push(service.shard_snapshot(snapshot_request()).await.unwrap());
+        }
+
+        let refused = service
+            .shard_snapshot(snapshot_request())
+            .await
+            .expect_err("a node holding its most snapshot responses served another");
+        assert_eq!(refused.as_status_code(), tari_rpc_framework::RpcStatusCode::Unavailable);
+
+        held.pop();
+        service
+            .shard_snapshot(snapshot_request())
+            .await
+            .expect("a sent response frees its permit");
+    }
+
+    #[tokio::test]
+    async fn a_committed_block_proof_response_holds_its_response_budget_until_sent() {
+        use tari_consensus_types::ShardGroupAccumulatedData;
+        use tari_ootle_common_types::{ExtraData, ProtocolVersion};
+        use tari_sidechain::QuorumDecision;
+        use tari_template_lib_types::crypto::SchnorrSignatureBytes;
+
+        let dir = tempfile::tempdir().unwrap();
+        let store = RocksDbStateStore::<String>::open(dir.path().join("db"), DatabaseOptions::default()).unwrap();
+        let zero = Block::zero_block(Network::LocalNet, NUM_PRESHARDS);
+        let committed = Block::create(
+            Network::LocalNet,
+            ProtocolVersion::V0,
+            *zero.id(),
+            zero.justify().clone(),
+            None,
+            NodeHeight(1),
+            Epoch::zero(),
+            zero.shard_group(),
+            Default::default(),
+            Default::default(),
+            Default::default(),
+            0,
+            SchnorrSignatureBytes::zero(),
+            0,
+            FixedHash::zero(),
+            ShardGroupAccumulatedData::default(),
+            ExtraData::new(),
+        )
+        .unwrap();
+        let commit_qc = ProposalCertificate::new(
+            committed.header().calculate_hash(),
+            *committed.parent(),
+            committed.height(),
+            committed.epoch(),
+            committed.shard_group(),
+            ProposalCertificate::genesis_signatures(),
+            QuorumDecision::Accept,
+        );
+        let commit_qc_id = commit_qc.calculate_id();
+        store
+            .with_write_tx(|tx| {
+                zero.insert(tx)?;
+                committed.insert(tx)?;
+                tx.proposal_certificates_save(zero.justify())?;
+                tx.proposal_certificates_save(&commit_qc)?;
+                tx.blocks_set_qcs(committed.id(), Some(&commit_qc_id), None)?;
+                tx.last_executed_set(&LastExecuted {
+                    height: committed.height(),
+                    block_id: *committed.id(),
+                    epoch: committed.epoch(),
+                })
+            })
+            .unwrap();
+
+        let service = rpc_service(store);
+        let total_units = u32::try_from(MAX_BUFFERED_RESPONSE_BYTES / RESPONSE_BUDGET_UNIT_BYTES).unwrap();
+        let _most_of_budget = service
+            .response_bytes
+            .clone()
+            .try_acquire_many_owned(total_units - 1)
+            .unwrap();
+        let request = || {
+            Request::new(1.into(), GetCommittedBlockProofRequest {
+                leaf_shards: Vec::new(),
+            })
+        };
+
+        let held = service.get_committed_block_proof(request()).await.unwrap();
+        assert_eq!(service.response_bytes.available_permits(), 0);
+
+        let refused = service
+            .get_committed_block_proof(request())
+            .await
+            .expect_err("a node with no remaining response budget served a committed block proof");
+        assert_eq!(refused.as_status_code(), tari_rpc_framework::RpcStatusCode::Unavailable);
+
+        drop(held);
+        service
+            .get_committed_block_proof(request())
+            .await
+            .expect("dropping the response frees its share of the response budget");
     }
 }

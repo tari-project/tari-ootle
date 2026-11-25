@@ -171,6 +171,13 @@ impl ConfidentialResourceBuilder {
         self
     }
 
+    /// Sets up who can update the resource's metadata, and who may later change that rule. The
+    /// token symbol remains immutable once set.
+    pub fn update_metadata<U: Into<UpdateRule>>(mut self, rule: AccessRule, updater: U) -> Self {
+        self.access_rules = self.access_rules.update_metadata(rule, updater);
+        self
+    }
+
     /// Sets up the specified `symbol` as the token symbol in the metadata of the resource
     pub fn with_token_symbol<S: Into<String>>(mut self, symbol: S) -> Self {
         self.token_symbol = Some(symbol.into());
@@ -342,5 +349,21 @@ impl ConfidentialResourceBuilder {
             self.divisibility,
             self.is_total_supply_tracking_enabled,
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tari_template_lib_types::access_rules::ResourceAuthAction;
+
+    use super::*;
+    use crate::resource::builder::ResourceBuilder;
+
+    #[test]
+    fn update_metadata_sets_access_rule_and_updater() {
+        let builder = ResourceBuilder::confidential().update_metadata(AccessRule::AllowAll, UpdateRule::Owner);
+        let action = ResourceAuthAction::UpdateMetadata;
+        assert_eq!(builder.access_rules.get_access_rule(&action), &AccessRule::AllowAll);
+        assert!(matches!(builder.access_rules.get_updater(&action), UpdateRule::Owner));
     }
 }

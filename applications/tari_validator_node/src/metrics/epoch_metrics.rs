@@ -81,7 +81,8 @@ impl PrometheusEpochOracleMetrics {
             ),
             new_validator_registered: Counter::default().register_at(
                 "new_validator_registered",
-                "Number of NewValidatorRegistered events emitted by the epoch oracle",
+                "Number of NewValidatorRegistered events emitted by the epoch oracle, including pending registrations \
+                 announced again on each start",
                 registry,
             ),
             new_validator_exit: Counter::default().register_at(

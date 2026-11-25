@@ -7,7 +7,7 @@
 //! A certificate's id and block id are derived from the block's header hash and parent, so neither covers the
 //! height, epoch or shard group the certificate claims. The stored block is the authority for those fields, and
 //! `CertificateStore::update_highest` checks the certificate against it before writing HighPc, the leaf block or
-//! the certificate record.
+//! the certificate record. A certificate of the zero block is checked against the epoch's genesis block.
 
 use tari_consensus::traits::CertificateStore;
 use tari_consensus_types::{HighPc, LeafBlock, ProposalCertificate};
@@ -164,6 +164,44 @@ fn certificate_claiming_another_shard_group_is_not_installed() {
             Ok::<_, tari_ootle_storage::StorageError>(())
         })
         .unwrap();
+}
+
+#[test]
+fn zero_block_certificate_claiming_another_shard_group_is_not_installed() {
+    let (store, _tmp) = create_store();
+    let genesis = genesis_block();
+    store.with_write_tx(|tx| genesis.insert(tx)).unwrap();
+
+    let relabelled = ProposalCertificate::genesis(genesis.epoch(), ShardGroup::new(0, 63));
+    assert_ne!(relabelled.shard_group(), genesis.shard_group());
+    assert_eq!(relabelled.calculate_id(), genesis.justify().calculate_id());
+
+    store.with_write_tx(|tx| relabelled.update_highest(tx)).expect_err(
+        "a zero-block certificate whose shard group differs from the genesis block's must not be installed",
+    );
+
+    store
+        .with_read_tx(|tx| {
+            assert!(HighPc::get(tx, TEST_EPOCH).optional()?.is_none());
+            assert!(LeafBlock::get(tx, TEST_EPOCH).optional()?.is_none());
+            let stored = ProposalCertificate::get(tx, TEST_EPOCH, &relabelled.calculate_id()).optional()?;
+            assert!(stored.is_none());
+            Ok::<_, tari_ootle_storage::StorageError>(())
+        })
+        .unwrap();
+}
+
+#[test]
+fn zero_block_certificate_matching_the_genesis_block_is_installed() {
+    let (store, _tmp) = create_store();
+    let genesis = genesis_block();
+    store.with_write_tx(|tx| genesis.insert(tx)).unwrap();
+
+    let high_pc = store.with_write_tx(|tx| genesis.justify().update_highest(tx)).unwrap();
+
+    assert_eq!(*high_pc.id(), genesis.justify().calculate_id());
+    let leaf = store.with_read_tx(|tx| LeafBlock::get(tx, TEST_EPOCH)).unwrap();
+    assert_eq!(leaf.shard_group(), genesis.shard_group());
 }
 
 #[test]

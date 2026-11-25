@@ -393,3 +393,216 @@ fn copy_into_writes_a_database_that_opens_with_the_same_contents() {
         "copying over an existing file must fail rather than replace it"
     );
 }
+
+fn is_registered_at(
+    validator_nodes: &mut ValidatorNodeDb<'_, '_, SqliteGlobalDbAdapter<PeerAddress>>,
+    public_key: &RistrettoPublicKey,
+    epoch: Epoch,
+) -> bool {
+    let public_key = public_key.to_byte_type();
+    validator_nodes
+        .get_all_registered_within_start_epoch(epoch)
+        .unwrap()
+        .iter()
+        .any(|vn| vn.public_key == public_key)
+}
+
+/// A validator that leaves and registers again has one row per registration. Deactivating the current registration
+/// closes that row only, so the validator stays out of the set for the gap between its registrations.
+#[test]
+fn deactivating_a_registration_leaves_earlier_registrations_closed() {
+    let db = create_db();
+    let mut tx = db.create_transaction().unwrap();
+    let mut validator_nodes = db.validator_nodes(&mut tx);
+    let pk = new_public_key();
+
+    insert_vn_with_public_key(&mut validator_nodes, pk.clone(), Epoch(1));
+    validator_nodes.deactivate(pk.to_byte_type(), Epoch(5)).unwrap();
+    insert_vn_with_public_key(&mut validator_nodes, pk.clone(), Epoch(10));
+    validator_nodes.deactivate(pk.to_byte_type(), Epoch(20)).unwrap();
+
+    assert!(is_registered_at(&mut validator_nodes, &pk, Epoch(3)));
+    assert!(!is_registered_at(&mut validator_nodes, &pk, Epoch(7)));
+    assert!(is_registered_at(&mut validator_nodes, &pk, Epoch(15)));
+    assert!(!is_registered_at(&mut validator_nodes, &pk, Epoch(20)));
+}
+
+/// A registration deactivated before its start epoch never becomes active.
+#[test]
+fn deactivating_a_registration_before_it_starts_keeps_it_inactive() {
+    let db = create_db();
+    let mut tx = db.create_transaction().unwrap();
+    let mut validator_nodes = db.validator_nodes(&mut tx);
+    let pk = new_public_key();
+
+    insert_vn_with_public_key(&mut validator_nodes, pk.clone(), Epoch(10));
+    validator_nodes.deactivate(pk.to_byte_type(), Epoch(5)).unwrap();
+
+    for epoch in [5, 10, 15] {
+        assert!(
+            !is_registered_at(&mut validator_nodes, &pk, Epoch(epoch)),
+            "epoch {epoch}"
+        );
+    }
+}
+
+#[test]
+fn deactivating_a_reregistered_validator_preserves_prior_exit_epoch() {
+    let db = create_db();
+    let mut tx = db.create_transaction().unwrap();
+    let mut validator_nodes = db.validator_nodes(&mut tx);
+
+    let pk = new_public_key();
+    let pk_bytes = pk.to_byte_type();
+    let shard_key = derived_substate_address(&pk);
+    let first_claim_key = new_public_key().to_byte_type();
+    let second_claim_key = new_public_key().to_byte_type();
+
+    validator_nodes
+        .insert_validator_node(
+            pk.clone().into(),
+            pk_bytes,
+            shard_key,
+            Epoch(10),
+            first_claim_key,
+            VotePower::of(1),
+        )
+        .unwrap();
+    validator_nodes.deactivate(pk_bytes, Epoch(15)).unwrap();
+
+    validator_nodes
+        .insert_validator_node(
+            pk.into(),
+            pk_bytes,
+            shard_key,
+            Epoch(20),
+            second_claim_key,
+            VotePower::of(1),
+        )
+        .unwrap();
+    validator_nodes.deactivate(pk_bytes, Epoch(25)).unwrap();
+
+    for epoch in 10..15 {
+        assert_eq!(validator_nodes.count(Epoch(epoch)).unwrap(), 1, "epoch {epoch}");
+        let vns = validator_nodes
+            .get_all_registered_within_start_epoch(Epoch(epoch))
+            .unwrap();
+        assert_eq!(vns.len(), 1);
+        assert_eq!(vns[0].fee_claim_public_key, first_claim_key);
+    }
+
+    for epoch in 15..20 {
+        assert_eq!(validator_nodes.count(Epoch(epoch)).unwrap(), 0, "epoch {epoch}");
+        assert!(
+            validator_nodes
+                .get_all_registered_within_start_epoch(Epoch(epoch))
+                .unwrap()
+                .is_empty(),
+            "epoch {epoch} falls between the first exit and re-registration"
+        );
+    }
+
+    for epoch in 20..25 {
+        assert_eq!(validator_nodes.count(Epoch(epoch)).unwrap(), 1, "epoch {epoch}");
+        let vns = validator_nodes
+            .get_all_registered_within_start_epoch(Epoch(epoch))
+            .unwrap();
+        assert_eq!(vns.len(), 1);
+        assert_eq!(vns[0].fee_claim_public_key, second_claim_key);
+    }
+
+    assert_eq!(validator_nodes.count(Epoch(25)).unwrap(), 0);
+    assert!(
+        validator_nodes
+            .get_all_registered_within_start_epoch(Epoch(25))
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn same_epoch_reregistration_resolves_to_latest_registration() {
+    let db = create_db();
+    let mut tx = db.create_transaction().unwrap();
+    let mut validator_nodes = db.validator_nodes(&mut tx);
+
+    let pk = new_public_key();
+    let pk_bytes = pk.to_byte_type();
+    let first_shard_key = SubstateAddress::from_array([1u8; SubstateAddress::LENGTH]);
+    let second_shard_key = SubstateAddress::from_array([2u8; SubstateAddress::LENGTH]);
+    let first_claim_key = new_public_key().to_byte_type();
+    let second_claim_key = new_public_key().to_byte_type();
+
+    for (shard_key, claim_key) in [(first_shard_key, first_claim_key), (second_shard_key, second_claim_key)] {
+        validator_nodes
+            .insert_validator_node(
+                pk.clone().into(),
+                pk_bytes,
+                shard_key,
+                Epoch(10),
+                claim_key,
+                VotePower::of(1),
+            )
+            .unwrap();
+    }
+
+    let vns = validator_nodes
+        .get_all_registered_within_start_epoch(Epoch(10))
+        .unwrap();
+    assert_eq!(vns.len(), 1);
+    assert_eq!(vns[0].shard_key, second_shard_key);
+    assert_eq!(vns[0].fee_claim_public_key, second_claim_key);
+}
+
+#[test]
+fn set_committee_shard_selects_latest_active_registration() {
+    for (second_start, second_exit, select_second) in [(10, None, false), (20, Some(25), false), (20, None, true)] {
+        let db = create_db();
+        let mut tx = db.create_transaction().unwrap();
+        let mut validator_nodes = db.validator_nodes(&mut tx);
+
+        let first_pk = new_public_key();
+        let second_pk = new_public_key();
+        let shard_key = derived_substate_address(&first_pk);
+        let first_claim_key = new_public_key().to_byte_type();
+        let second_claim_key = new_public_key().to_byte_type();
+        let shard_group = ShardGroup::all_shards(NumPreshards::P256);
+
+        for (pk, start_epoch, claim_key) in [
+            (&first_pk, Epoch(20), first_claim_key),
+            (&second_pk, Epoch(second_start), second_claim_key),
+        ] {
+            validator_nodes
+                .insert_validator_node(
+                    pk.clone().into(),
+                    pk.to_byte_type(),
+                    shard_key,
+                    start_epoch,
+                    claim_key,
+                    VotePower::of(1),
+                )
+                .unwrap();
+        }
+        if let Some(exit_epoch) = second_exit {
+            validator_nodes
+                .deactivate(second_pk.to_byte_type(), Epoch(exit_epoch))
+                .unwrap();
+        }
+
+        validator_nodes
+            .set_committee_shard(shard_key, shard_group, Epoch(30))
+            .unwrap();
+
+        let expected_pk = if select_second { &second_pk } else { &first_pk };
+        let expected_claim_key = if select_second {
+            second_claim_key
+        } else {
+            first_claim_key
+        };
+        let vn = validator_nodes
+            .get_by_public_key(Epoch(30), &expected_pk.to_byte_type())
+            .unwrap();
+        assert_eq!(vn.start_epoch, Epoch(20));
+        assert_eq!(vn.fee_claim_public_key, expected_claim_key);
+    }
+}

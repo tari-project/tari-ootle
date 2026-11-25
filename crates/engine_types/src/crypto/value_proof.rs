@@ -19,7 +19,7 @@ use tari_template_lib::types::{
 };
 
 use crate::{
-    crypto::{ElgamalVerifiableBalanceBytes, commit_amount, convert_amount_to_secret, messages},
+    crypto::{ElgamalVerifiableBalanceBytes, commit_range_provable_amount, convert_amount_to_secret, messages},
     resource_container::ResourceError,
 };
 
@@ -55,10 +55,11 @@ pub fn validate_value_proof(
 
     match proof.knowledge_proof {
         ValueKnowledgeProof::Commitment { mask_knowledge_proof } => {
-            let Some(commit_amount) = commit_amount(&RistrettoSecretKey::default(), proof.value) else {
+            let Some(value_commitment) = commit_range_provable_amount(&RistrettoSecretKey::default(), proof.value)
+            else {
                 return Err(invalid("Value proof amount is too large".to_string()));
             };
-            let public_mask = commitment.as_public_key() - commit_amount.as_public_key();
+            let public_mask = commitment.as_public_key() - value_commitment.as_public_key();
 
             let sig: RistrettoSchnorr = mask_knowledge_proof
                 .try_from_byte_type()
@@ -100,7 +101,7 @@ fn validate_elgamal_knowledge_proof(
     s_p: &Scalar32Bytes,
 ) -> Result<(), ResourceError> {
     // Viewable balances encrypt a u64 value, so a larger claimed value can never be honest. This also keeps
-    // the bound consistent with the Commitment variant, which inherits it from `commit_amount`.
+    // the bound consistent with the Commitment variant, which inherits it from `commit_range_provable_amount`.
     if value > u64::MAX {
         return Err(ResourceError::InvalidValueProof {
             commitment: *commitment_bytes,
@@ -117,6 +118,27 @@ fn validate_elgamal_knowledge_proof(
         commitment: *commitment_bytes,
         details: "Resource does not have a view key".to_string(),
     })?;
+
+    if *view_key == RistrettoPublicKey::default() {
+        return Err(ResourceError::InvalidValueProof {
+            commitment: *commitment_bytes,
+            details: "View key cannot be the identity point".to_string(),
+        });
+    }
+
+    if elgamal.public_nonce.is_zero() {
+        return Err(ResourceError::InvalidValueProof {
+            commitment: *commitment_bytes,
+            details: "ElGamal public nonce cannot be the identity point".to_string(),
+        });
+    }
+
+    if public_nonce_g.is_zero() || public_nonce_r.is_zero() {
+        return Err(ResourceError::InvalidValueProof {
+            commitment: *commitment_bytes,
+            details: "Proof public nonce cannot be the identity point".to_string(),
+        });
+    }
 
     let encrypted: RistrettoPublicKey =
         elgamal
@@ -207,7 +229,7 @@ mod tests {
         let mut rng = rand::rng();
         let mask = RistrettoSecretKey::random(&mut rng);
         let value = 100_321_123u128.into();
-        let commitment = commit_amount(&mask, value).unwrap();
+        let commitment = commit_range_provable_amount(&mask, value).unwrap();
         let commitment_bytes = commitment.to_byte_type();
 
         // Create the proof of knowledge of the value
@@ -231,7 +253,7 @@ mod tests {
         let mut rng = rand::rng();
         let mask = RistrettoSecretKey::random(&mut rng);
         let value = 100_321_123u128.into();
-        let commitment = commit_amount(&mask, value).unwrap();
+        let commitment = commit_range_provable_amount(&mask, value).unwrap();
         let commitment_bytes = commitment.to_byte_type();
 
         let other_value = value + Amount::ONE;
@@ -278,7 +300,7 @@ mod tests {
             let view_key = RistrettoPublicKey::from_secret_key(&view_secret);
             let elgamal_secret_nonce = RistrettoSecretKey::random(&mut rng);
 
-            let commitment = commit_amount(&mask, value).unwrap();
+            let commitment = commit_range_provable_amount(&mask, value).unwrap();
 
             // E = v.G + r.P, R = r.G
             let encrypted = RistrettoPublicKey::from_secret_key(&convert_amount_to_secret(&value)) +
@@ -407,6 +429,57 @@ mod tests {
                 },
                 _ => panic!("Unexpected error type {err}"),
             }
+        }
+
+        #[test]
+        fn it_rejects_identity_points_in_elgamal_proof() {
+            let value = Amount::from(1000u128);
+            let utxo = new_viewable_utxo(value);
+            let proof = generate_proof(&utxo, value, &utxo.view_secret);
+
+            // Identity view key
+            let identity_pk = RistrettoPublicKey::default();
+            assert!(
+                validate_value_proof(
+                    &utxo.commitment_bytes,
+                    Some(&identity_pk),
+                    Some(&utxo.balance_bytes),
+                    &proof,
+                )
+                .is_err()
+            );
+
+            // Identity ElGamal public nonce
+            let mut zero_nonce_balance = utxo.balance_bytes.clone();
+            zero_nonce_balance.public_nonce = RistrettoPublicKeyBytes::zero();
+            assert!(
+                validate_value_proof(
+                    &utxo.commitment_bytes,
+                    Some(&utxo.view_key),
+                    Some(&zero_nonce_balance),
+                    &proof,
+                )
+                .is_err()
+            );
+
+            // Identity proof nonces
+            let zero_proof = CommitmentValueProof {
+                value,
+                knowledge_proof: ValueKnowledgeProof::ElgamalEncrypted {
+                    public_nonce_g: RistrettoPublicKeyBytes::zero(),
+                    public_nonce_r: RistrettoPublicKeyBytes::zero(),
+                    s_p: Scalar32Bytes::zero(),
+                },
+            };
+            assert!(
+                validate_value_proof(
+                    &utxo.commitment_bytes,
+                    Some(&utxo.view_key),
+                    Some(&utxo.balance_bytes),
+                    &zero_proof,
+                )
+                .is_err()
+            );
         }
     }
 }

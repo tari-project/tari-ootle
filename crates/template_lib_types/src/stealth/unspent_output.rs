@@ -2,7 +2,7 @@
 //    SPDX-License-Identifier: BSD-3-Clause
 
 use minicbor::{CborLen, Decode, Decoder, Encode, decode};
-use tari_bor::adapters::{bounded_vec, boxed_slice};
+use tari_bor::adapters::bounded_vec;
 use tari_template_abi::rust::prelude::*;
 
 use super::ViewableBalanceProof;
@@ -129,10 +129,13 @@ impl StealthUnspentOutput {
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct SpendCondition(
     #[n(0)]
-    #[cbor(
-        encode_with = "boxed_slice::encode",
-        decode_with = "decode_conditions",
-        cbor_len = "boxed_slice::cbor_len"
+    #[cbor(decode_with = "decode_conditions")]
+    #[cfg_attr(
+        feature = "serde",
+        serde(
+            deserialize_with = "ootle_serde::bounded_seq::deserialize_boxed::<{ MAX_CONDITIONS_PER_CONJUNCTION }, _, \
+                                _>"
+        )
     )]
     Box<[AtomicCondition]>,
 );
@@ -271,6 +274,10 @@ pub struct TemplateFunction {
     /// engine's `Vec<Bytes>` call ABI. Baked into the condition at creation; the spender cannot alter them.
     #[n(2)]
     #[cbor(decode_with = "decode_template_function_args")]
+    #[cfg_attr(
+        feature = "serde",
+        serde(deserialize_with = "ootle_serde::bounded_seq::deserialize::<{ MAX_ACCESS_RULE_NODES }, _, _>")
+    )]
     pub args: Vec<Bytes>,
 }
 
@@ -451,5 +458,16 @@ mod tests {
         assert_eq!(at_limit.num_nodes(), MAX_ACCESS_RULE_NODES);
         assert!(roundtrips(&at_limit));
         assert!(!roundtrips(&template_function(MAX_ACCESS_RULE_NODES)));
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn template_function_deserializes_up_to_max_args() {
+        fn deserializes(condition: &SpendCondition) -> bool {
+            let json = serde_json::to_string(condition).unwrap();
+            serde_json::from_str::<SpendCondition>(&json).is_ok()
+        }
+        assert!(deserializes(&template_function(MAX_ACCESS_RULE_NODES)));
+        assert!(!deserializes(&template_function(MAX_ACCESS_RULE_NODES + 1)));
     }
 }

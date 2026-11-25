@@ -78,16 +78,20 @@ impl<R: RocksReader> Iterator for LatestSubstateStateTreeIterator<'_, R> {
         loop {
             match self.state.take() {
                 IterState::NotStarted => {
-                    let iter = self.tree_query.query_range_iterator(
-                        Ordering::Ascending,
-                        (self.shard, self.state_version)..(self.shard, Version::MAX),
-                    );
+                    let iter = self
+                        .tree_query
+                        .query_start_range_iterator(Ordering::Ascending, &(self.shard, self.state_version));
                     self.iter = Some(Box::new(iter));
                     self.state.put(IterState::Iterating);
                 },
                 IterState::Iterating => {
                     match self.iter.as_mut().expect("Iterating state but no iterator").next() {
-                        Some(Ok(((_, node_key), node))) => {
+                        Some(Ok(((shard, node_key), node))) => {
+                            if shard != self.shard {
+                                self.state.put(IterState::Done);
+                                trace!(target: LOG_TARGET, "StateTreeIterator completed (reached next shard {shard})");
+                                return None;
+                            }
                             match node.leaf() {
                                 Some(leaf) => {
                                     let result = self.substate_cf.get(leaf.payload(), OPERATION).optional();

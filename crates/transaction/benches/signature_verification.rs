@@ -25,6 +25,8 @@ use tari_crypto::{
 };
 use tari_ootle_common_types::signature::components;
 use tari_ootle_transaction::{
+    AuthorizationContext,
+    AuthorizerSet,
     Epoch,
     TRANSACTION_SIGNING_CONTEXT,
     TransactionMessage,
@@ -43,12 +45,15 @@ fn transaction(max_epoch: u64) -> UnsignedTransactionV1 {
 /// The authorization message of [`transaction`]`(max_epoch)`.
 fn authorization_message(max_epoch: u64) -> TransactionMessage {
     let seal_signer = RistrettoPublicKey::from_secret_key(&RistrettoSecretKey::random(&mut rand::rng()));
-    TransactionSignature::create_message_v1(&seal_signer.to_byte_type(), &transaction(max_epoch))
+    TransactionSignature::create_message(
+        AuthorizationContext::new(&seal_signer.to_byte_type(), &AuthorizerSet::new()),
+        &transaction(max_epoch),
+    )
 }
 
 /// The seal message of [`transaction`]`(max_epoch)`.
 fn seal_message(max_epoch: u64) -> TransactionMessage {
-    TransactionSealSignature::create_message_v1(&UnsealedTransactionV1::new(transaction(max_epoch), vec![]))
+    TransactionSealSignature::create_message(&UnsealedTransactionV1::new(transaction(max_epoch), vec![]))
 }
 
 /// `n` valid signatures over `message`, each from a distinct key — the shape a multi-input stealth

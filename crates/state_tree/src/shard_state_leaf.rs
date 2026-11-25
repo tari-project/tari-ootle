@@ -29,7 +29,7 @@ pub fn shard_state_leaf(
     transition_acc: &TransitionAccumulator,
 ) -> TreeHash {
     match protocol_version {
-        ProtocolVersion::V0 => {
+        ProtocolVersion::V0 | ProtocolVersion::V1 => {
             let hash = hasher32(EngineHashDomainLabel::ShardStateLeaf)
                 .chain(&shard)
                 .chain(&shard_root.into_array())

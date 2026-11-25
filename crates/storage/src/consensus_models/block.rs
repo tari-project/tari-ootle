@@ -43,7 +43,7 @@ use tari_ootle_common_types::{
 };
 use tari_ootle_transaction::{Network, TransactionId};
 use tari_sidechain::FixedHash;
-use tari_state_tree::{SparseMerkleProofExt, StateTreeError, TreeHash, compute_proof_for_hashes};
+use tari_state_tree::{KeyedProofTree, SparseMerkleProofExt, StateTreeError, TreeHash, compute_proof_for_hashes};
 use tari_template_lib_types::{
     TransactionReceiptAddress,
     crypto::{RistrettoPublicKeyBytes, SchnorrSignatureBytes},
@@ -434,8 +434,9 @@ impl Block {
 
     /// Whether some branch has justified this block.
     ///
-    /// This is stamped by a block carrying a QC over this one, before that block is voted on, and stays
-    /// stamped across the whole block store even where that branch is later abandoned. Work whose result
+    /// This is stamped when a block carrying a QC over this one, or over a descendant reached by walking back
+    /// from it, is accepted and its change set records the evidence of the justification. It stays stamped
+    /// across the whole block store even where that branch is later abandoned. Work whose result
     /// belongs to one branch must therefore key off that branch rather than off this flag.
     pub fn has_justify_qc(&self) -> bool {
         self.justify_qc_id.is_some()
@@ -518,16 +519,7 @@ impl Block {
         &self,
         transaction_id: &TransactionId,
     ) -> Result<(Option<FinalizedTransactionLeaf<'_>>, SparseMerkleProofExt), BlockError> {
-        let header_root = self.header.transaction_merkle_root();
-        let tree = build_finalized_transaction_tree(&self.commands)?;
-        let computed_root = FixedHash::from(tree.root().into_array());
-        if computed_root != *header_root {
-            return Err(BlockError::TransactionMerkleRootMismatch {
-                block_id: *self.id(),
-                header_root: *header_root,
-                computed_root,
-            });
-        }
+        let tree = self.verified_transaction_tree()?;
         let leaf = self
             .commands
             .iter()
@@ -539,6 +531,45 @@ impl Block {
             });
         let (_, proof) = tree.get_proof(&transaction_leaf_key(transaction_id))?;
         Ok((leaf, proof))
+    }
+
+    /// The inclusion proof of every transaction this block finalizes as an abort, against
+    /// [`BlockHeader::transaction_merkle_root`], building the tree once and only for a block that aborts a
+    /// transaction. A commit is proven by its receipt, which commits to its outcome.
+    ///
+    /// Fails as [`Self::compute_transaction_proof`] does when the block aborts a transaction and the header's root
+    /// disagrees with the commands.
+    pub fn compute_abort_proofs(&self) -> Result<HashMap<TransactionId, SparseMerkleProofExt>, BlockError> {
+        let mut aborts = self
+            .commands
+            .iter()
+            .filter_map(Command::finalising)
+            .filter(|atom| atom.decision().is_abort())
+            .peekable();
+        if aborts.peek().is_none() {
+            return Ok(HashMap::new());
+        }
+        let tree = self.verified_transaction_tree()?;
+        aborts
+            .map(|atom| {
+                let (_, proof) = tree.get_proof(&transaction_leaf_key(atom.id()))?;
+                Ok::<_, BlockError>((*atom.id(), proof))
+            })
+            .collect()
+    }
+
+    fn verified_transaction_tree(&self) -> Result<KeyedProofTree, BlockError> {
+        let header_root = self.header.transaction_merkle_root();
+        let tree = build_finalized_transaction_tree(&self.commands)?;
+        let computed_root = FixedHash::from(tree.root().into_array());
+        if computed_root != *header_root {
+            return Err(BlockError::TransactionMerkleRootMismatch {
+                block_id: *self.id(),
+                header_root: *header_root,
+                computed_root,
+            });
+        }
+        Ok(tree)
     }
 
     pub fn set_justify_qc(&mut self, justify_qc_id: PcId) {

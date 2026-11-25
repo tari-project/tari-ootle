@@ -47,6 +47,7 @@ import {
   FinalizeResult,
   getRejectReasonFromTransactionResult,
   rejectReasonToString,
+  transactionBody,
   TransactionResult,
 } from "@tari-project/ootle-ts-bindings";
 import { XTR_CURRENCY } from "@utils/currency";
@@ -139,8 +140,8 @@ export default function TransactionDetails() {
       return rejectReasonToString(reason);
     };
 
-    const seal_signature = data.transaction.V1?.seal_signature;
-    const transaction_body = data.transaction.V1?.body;
+    const seal_signature = transactionBody(data.transaction)?.seal_signature;
+    const transaction_body = transactionBody(data.transaction)?.body;
     const transaction = transaction_body?.transaction;
     const feeReceipt = data.result?.fee_receipt;
 

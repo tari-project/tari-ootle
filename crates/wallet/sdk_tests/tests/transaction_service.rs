@@ -4,7 +4,7 @@
 mod support;
 
 use std::{
-    collections::{HashSet, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     sync::{
         Arc,
         Mutex,
@@ -46,6 +46,7 @@ use tari_ootle_wallet_sdk::{
         UtxoUpdateStream,
         WalletNetworkInterface,
     },
+    storage::{ReadableWalletStore, WalletStoreReader},
 };
 use tari_ootle_wallet_sdk_services::{
     notify::Notify,
@@ -178,6 +179,13 @@ impl WalletNetworkInterface for ScriptedNetwork {
         panic!("ScriptedNetwork::get_substates called")
     }
 
+    async fn get_substate_versions(
+        &self,
+        _: &[SubstateId],
+    ) -> Result<HashMap<SubstateId, SubstateVersion>, Self::Error> {
+        panic!("ScriptedNetwork::get_substate_versions called")
+    }
+
     async fn submit_transaction(&self, transaction: Transaction) -> Result<TransactionId, Self::Error> {
         self.submit_count.fetch_add(1, Ordering::SeqCst);
         if self
@@ -190,7 +198,7 @@ impl WalletNetworkInterface for ScriptedNetwork {
         }
         if self
             .failing_submits
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
             .is_ok()
         {
             return Err(ScriptedError("the submission failed"));
@@ -597,16 +605,17 @@ async fn a_transaction_is_not_stored_when_its_lock_cannot_be_linked() {
     let transaction = build_transaction();
     let transaction_id = transaction.calculate_id();
     let sdk = running.test.sdk();
+    let free_lock = running.test.new_lock().keep_locked();
     // A lock belongs to one transaction, so a lock already linked to another cannot be linked to this one.
-    let lock_id = running.test.new_lock().keep_locked();
+    let linked_lock = running.test.new_lock().keep_locked();
     let other_transaction_id = TransactionId::new([1u8; 32]);
     sdk.transaction_api()
-        .locks_set_transaction_id(lock_id, other_transaction_id)
+        .locks_set_transaction_id(linked_lock, other_transaction_id)
         .unwrap();
 
     running
         .handle
-        .submit_transaction_with_opts(transaction, None, Some(lock_id))
+        .submit_transaction_with_locks(transaction, None, vec![free_lock, linked_lock])
         .await
         .unwrap_err();
 
@@ -616,7 +625,7 @@ async fn a_transaction_is_not_stored_when_its_lock_cannot_be_linked() {
         .unwrap();
     assert_eq!(
         linked,
-        vec![lock_id],
+        vec![linked_lock],
         "the lock stays linked to the transaction it was linked to"
     );
 
@@ -626,5 +635,42 @@ async fn a_transaction_is_not_stored_when_its_lock_cannot_be_linked() {
             .unwrap_err()
             .is_not_found_error()
     );
+    assert_eq!(
+        sdk.store()
+            .with_read_tx(|tx| tx.locks_get(free_lock))
+            .unwrap()
+            .transaction_id,
+        None
+    );
     assert_eq!(network.submit_count(), 0);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_lock_stays_free_when_its_transaction_cannot_be_stored() {
+    let (network, _notifications) = ScriptedNetwork::new(vec![TransactionFinalizedResult::Pending]);
+    let running = start(fast_config(), network.clone()).await;
+    let transaction = build_transaction();
+    let sdk = running.test.sdk();
+    // Storing a transaction id twice fails, after the lock is linked in the same write.
+    sdk.transaction_api()
+        .insert_new_transaction(transaction.clone(), None, &[], false, &[])
+        .unwrap();
+    let lock_id = running.test.new_lock().keep_locked();
+
+    running
+        .handle
+        .submit_transaction_with_opts(transaction, None, Some(lock_id))
+        .await
+        .unwrap_err();
+
+    // A retry seals a new transaction, which takes the same lock.
+    let retry = build_transaction_valid_to(Epoch(101));
+    let retry_id = running
+        .handle
+        .submit_transaction_with_opts(retry, None, Some(lock_id))
+        .await
+        .unwrap();
+    assert_eq!(sdk.locks_api().get_locks_by_transaction_id(retry_id).unwrap(), [
+        lock_id
+    ]);
 }

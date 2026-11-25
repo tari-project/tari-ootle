@@ -33,6 +33,7 @@ function stateColour(state: ValidatorConsensusState): StateColour {
     case "Initialising":
     case "CheckSync":
     case "Syncing":
+    case "Presyncing":
       return "info";
     case "Idle":
     case "Sleeping":

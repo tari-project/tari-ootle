@@ -36,8 +36,6 @@ libp2p-substream = { workspace = true }
 tokio = { workspace = true, default-features = false, features = ["io-util", "macros", "rt", "test-util", "time"] }
 tokio-util = { workspace = true, features = ["compat"] }
 
-[build-dependencies]
-proto_builder = { workspace = true }
 
 [package.metadata.cargo-machete]
 ignored = [

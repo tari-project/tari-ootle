@@ -41,22 +41,29 @@ use crate::{
     value::address_value,
 };
 
-/// A bound on how deeply one literal nests, so that parsing stays shallow. A nested `cbor!` or
-/// `metadata!` starts its own count, and the engine rejects any metadata value nested past
-/// [`tari_bor::MAX_DECODE_DEPTH`] in all.
+/// Bounds how deeply a single literal's syntax may nest during parsing.
 const MAX_DEPTH: usize = tari_bor::MAX_DECODE_DEPTH;
+
+fn check_encoded_depth<T: tari_bor::Encode<()>>(tokens: &impl Spanned, value: &T) -> syn::Result<()> {
+    let bytes = tari_bor::encode(value).map_err(|e| syn::Error::new(tokens.span(), e))?;
+    tari_bor::decode::<Value>(&bytes)
+        .map(|_| ())
+        .map_err(|_| syn::Error::new(tokens.span(), format!("value nested deeper than {MAX_DEPTH} levels")))
+}
 
 /// The value a `cbor!` invocation writes.
 ///
 /// A brace-delimited invocation, `cbor!{"a": 1}`, is the object itself; any other delimiter holds
 /// one value, `cbor!({"a": 1})` or `cbor!([1, 2])`.
 pub(crate) fn cbor_from_macro(mac: &Macro) -> syn::Result<Value> {
-    match mac.delimiter {
-        MacroDelimiter::Brace(_) => (|input: ParseStream| parse_object_body(input, 1)).parse2(mac.tokens.clone()),
+    let value = match mac.delimiter {
+        MacroDelimiter::Brace(_) => (|input: ParseStream| parse_object_body(input, 1)).parse2(mac.tokens.clone())?,
         MacroDelimiter::Paren(_) | MacroDelimiter::Bracket(_) => {
-            (|input: ParseStream| parse_value(input, 0)).parse2(mac.tokens.clone())
+            (|input: ParseStream| parse_value(input, 0)).parse2(mac.tokens.clone())?
         },
-    }
+    };
+    check_encoded_depth(&mac.tokens, &value)?;
+    Ok(value)
 }
 
 /// The metadata a `metadata!` invocation writes: an object whose keys are the metadata keys, each
@@ -90,11 +97,12 @@ pub(crate) fn metadata_from_macro(mac: &Macro) -> syn::Result<Metadata> {
             .map_err(|e| syn::Error::new_spanned(&mac.tokens, format!("Failed to encode metadata value: {e}")))?;
         metadata.insert_raw(key, value);
     }
+    check_encoded_depth(&mac.tokens, &metadata)?;
     Ok(metadata)
 }
 
 fn parse_value(input: ParseStream, depth: usize) -> syn::Result<Value> {
-    if depth > MAX_DEPTH {
+    if depth >= MAX_DEPTH {
         return Err(input.error(format!("value nested deeper than {MAX_DEPTH} levels")));
     }
 
@@ -183,6 +191,7 @@ fn lit_value(lit: Lit) -> syn::Result<Value> {
         },
         Lit::Bool(b) => Ok(Value::Bool(b.value)),
         Lit::ByteStr(b) => Ok(Value::Bytes(b.value())),
+        Lit::Byte(b) => Ok(Value::Integer(i128::from(b.value()))),
         Lit::Char(c) => Ok(Value::Text(c.value().to_string())),
         lit @ Lit::Float(_) => Err(syn::Error::new_spanned(lit, "float literals are not supported")),
         lit => Err(syn::Error::new_spanned(lit, "unsupported literal")),
@@ -190,7 +199,15 @@ fn lit_value(lit: Lit) -> syn::Result<Value> {
 }
 
 pub(crate) fn negative_int_value(lit: &LitInt) -> syn::Result<Value> {
-    let value = -lit.base10_parse::<i128>()?;
+    if matches!(lit.suffix(), "u8" | "u16" | "u32" | "u64" | "u128") {
+        return Err(syn::Error::new_spanned(
+            lit,
+            format!("cannot apply unary `-` to unsigned `{}` literal", lit.suffix()),
+        ));
+    }
+    let mag = lit.base10_parse::<u128>()?;
+    let pos = i128::try_from(mag).map_err(|_| syn::Error::new_spanned(lit, "integer out of CBOR range"))?;
+    let value = -pos;
     check_int_suffix(lit, value)?;
     Value::integer(value).ok_or_else(|| syn::Error::new_spanned(lit, "integer out of CBOR range"))
 }
@@ -327,8 +344,12 @@ mod tests {
     #[test]
     fn a_suffixed_integer_must_fit_its_suffix() {
         assert_eq!(cbor_from_macro(&mac("cbor!(255u8)")).unwrap(), Value::Integer(255));
+        assert_eq!(cbor_from_macro(&mac("cbor!(b'A')")).unwrap(), Value::Integer(65));
         assert!(cbor_from_macro(&mac("cbor!(256u8)")).is_err());
         assert!(cbor_from_macro(&mac("cbor!(-1u32)")).is_err());
+        assert!(cbor_from_macro(&mac("cbor!(-0u8)")).is_err());
+        assert!(cbor_from_macro(&mac("cbor!(-0u64)")).is_err());
+        assert!(cbor_from_macro(&mac("cbor!(-170141183460469231731687303715884105728i128)")).is_err());
     }
 
     #[test]

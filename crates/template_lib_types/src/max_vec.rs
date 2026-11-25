@@ -131,14 +131,15 @@ where T: minicbor::Decode<'b, C>
         let len = d.array()?;
         match len {
             Some(n) => {
-                if n as usize > N {
+                if n > N as u64 {
                     return Err(minicbor::decode::Error::message(format!(
                         "sequence length exceeds maximum of {}: got {}",
                         N, n
                     )));
                 }
-                let mut elems = Vec::with_capacity(n as usize);
-                for _ in 0..n {
+                let count = n as usize;
+                let mut elems = Vec::with_capacity(count.min(64));
+                for _ in 0..count {
                     elems.push(T::decode(d, ctx)?);
                 }
                 Ok(MaxVec {

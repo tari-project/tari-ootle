@@ -27,3 +27,21 @@ impl From<&str> for NamedResourceRef {
         Self::Workspace(CallFromWorkspace::new(name))
     }
 }
+
+impl From<String> for NamedResourceRef {
+    fn from(name: String) -> Self {
+        Self::Workspace(CallFromWorkspace::new(name))
+    }
+}
+
+impl From<&String> for NamedResourceRef {
+    fn from(name: &String) -> Self {
+        Self::Workspace(CallFromWorkspace::new(name))
+    }
+}
+
+impl From<Box<str>> for NamedResourceRef {
+    fn from(name: Box<str>) -> Self {
+        Self::Workspace(CallFromWorkspace::new(name))
+    }
+}

@@ -164,8 +164,8 @@ impl CommittedShardGroupState {
     }
 
     /// The committed leaf of `shard` with its proof in [`Self::root`], or `None` if `shard` is neither in the shard
-    /// group nor the global shard. A shard with no committed state has the empty leaf at version 0, proved by its
-    /// absence from the tree.
+    /// group nor the global shard. A shard with no committed state has the empty-tree root at state version 0 and a
+    /// zero transition accumulator, proved by its absence from the tree.
     pub fn prove_leaf(&self, shard: Shard) -> Result<Option<ShardStateLeaf>, StorageError> {
         let Some(state) = self.shards.get(&shard) else {
             return Ok(None);

@@ -331,6 +331,16 @@ fn empty_shard_has_no_leaf_in_the_shard_group_root() {
         .unwrap(),
         SPARSE_MERKLE_PLACEHOLDER_HASH
     );
+    assert_ne!(
+        compute_shard_group_root(ProtocolVersion::V0, [(
+            Shard::first(),
+            SPARSE_MERKLE_PLACEHOLDER_HASH,
+            0,
+            TransitionAccumulator::new([1; 32])
+        )])
+        .unwrap(),
+        SPARSE_MERKLE_PLACEHOLDER_HASH
+    );
 }
 
 /// An empty shard's state is proved by the absence of its leaf from the shard-group root, and that
@@ -348,28 +358,30 @@ fn assert_substate_in_an_empty_shard_is_provably_absent(protocol_version: Protoc
         .unwrap();
     let (_, _, empty_leaf_proof) = SpreadPrefixStateTree::new(&mut empty).get_proof(1, &substate).unwrap();
 
-    let empty_group = ShardGroupRootTree::build(protocol_version, [
-        (own_shard, SPARSE_MERKLE_PLACEHOLDER_HASH, 0, ZERO_ACC),
-        (sibling_shard, hash_value_from_seed(99), 1, ZERO_ACC),
-    ])
-    .unwrap();
-    let (value, absent_proof) = empty_group.get_proof(own_shard).unwrap();
-    assert!(value.is_none());
-    SubstateValueProof::new(
-        SPARSE_MERKLE_PLACEHOLDER_HASH,
-        0,
-        ZERO_ACC,
-        absent_proof,
-        empty_leaf_proof.clone(),
-    )
-    .verify_exclusion(
-        JmtHashScheme::V1,
-        protocol_version,
-        &empty_group.root(),
-        NUM_PRESHARDS,
-        &substate,
-    )
-    .unwrap();
+    for sibling_state in [(hash_value_from_seed(99), 1), (SPARSE_MERKLE_PLACEHOLDER_HASH, 0)] {
+        let empty_group = ShardGroupRootTree::build(protocol_version, [
+            (own_shard, SPARSE_MERKLE_PLACEHOLDER_HASH, 0, ZERO_ACC),
+            (sibling_shard, sibling_state.0, sibling_state.1, ZERO_ACC),
+        ])
+        .unwrap();
+        let (value, absent_proof) = empty_group.get_proof(own_shard).unwrap();
+        assert!(value.is_none());
+        SubstateValueProof::new(
+            SPARSE_MERKLE_PLACEHOLDER_HASH,
+            0,
+            ZERO_ACC,
+            absent_proof,
+            empty_leaf_proof.clone(),
+        )
+        .verify_exclusion(
+            JmtHashScheme::V1,
+            protocol_version,
+            &empty_group.root(),
+            NUM_PRESHARDS,
+            &substate,
+        )
+        .unwrap();
+    }
 
     // Once the shard holds state, its leaf is present and no state cannot be claimed for it - even
     // when every substate in it has gone down.
@@ -740,4 +752,119 @@ fn shard_leaf_proof_binds_the_shard_state_version() {
             &value_hash,
         )
         .unwrap_err();
+}
+
+#[test]
+fn an_up_and_a_down_of_one_address_in_one_version_collapse_to_no_leaf_regardless_of_order() {
+    use tari_state_tree::{SpreadPrefixStateTree, StateTreePayload, memory_store::MemoryTreeStore};
+
+    // Whether the Up is listed before the Down or the Down before the Up, a substate created and
+    // destroyed within the same state version must collapse to no leaf in the JMT.
+    for changes in [vec![change(1, Some(30)), change(2, Some(40)), change(2, None)], vec![
+        change(1, Some(30)),
+        change(2, None),
+        change(2, Some(40)),
+    ]] {
+        let mut store = MemoryTreeStore::<StateTreePayload>::new();
+        let root = SpreadPrefixStateTree::new(&mut store)
+            .put_substate_changes(None, 1, changes)
+            .unwrap();
+
+        let mut reference_store = MemoryTreeStore::<StateTreePayload>::new();
+        let reference_root = SpreadPrefixStateTree::new(&mut reference_store)
+            .put_substate_changes(None, 1, vec![change(1, Some(30))])
+            .unwrap();
+
+        assert_eq!(root, reference_root);
+
+        let (key, proof_value, leaf_proof) = SpreadPrefixStateTree::new(&mut store)
+            .get_proof(1, &make_value(2))
+            .unwrap();
+        assert!(proof_value.is_none());
+        leaf_proof.verify_exclusion(JmtHashScheme::V1, &root, &key).unwrap();
+    }
+}
+
+#[test]
+fn two_transitions_of_one_kind_at_one_address_in_one_version_are_rejected_by_state_tree() {
+    for duplicated in [
+        vec![change(1, Some(30)), change(1, Some(40))],
+        vec![change(1, Some(30)), change(1, Some(30))],
+        vec![change(1, None), change(1, None)],
+        vec![change(1, Some(30)), change(1, None), change(1, Some(40))],
+        vec![change(1, None), change(1, Some(30)), change(1, Some(40))],
+        vec![change(1, Some(30)), change(1, None), change(1, None)],
+        vec![change(1, None), change(1, Some(30)), change(1, None)],
+    ] {
+        let mut tester = HashTreeTester::new_empty();
+        let err = tester.try_put_changes_at_version(None, 1, duplicated).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                StateTreeError::DuplicateTransition { address }
+                    if address == make_value(1).to_substate_address()
+            ),
+            "{err:?}"
+        );
+    }
+}
+
+#[test]
+fn root_state_tree_rejects_non_monotonic_versions() {
+    use tari_state_tree::{RootStateTree, memory_store::MemoryTreeStore};
+
+    let mut store = MemoryTreeStore::<()>::new();
+    RootStateTree::new(&mut store)
+        .put_changes(None, 2, [hash_value_from_seed(1)])
+        .unwrap();
+
+    for invalid_next in [1, 2] {
+        let err = RootStateTree::new(&mut store)
+            .put_changes(Some(2), invalid_next, [hash_value_from_seed(2)])
+            .unwrap_err();
+        assert!(
+            matches!(
+                err,
+                StateTreeError::NonMonotonicVersion {
+                    current_version: 2,
+                    next_version,
+                } if next_version == invalid_next
+            ),
+            "{err:?}"
+        );
+    }
+}
+
+#[test]
+fn duplicate_leaf_keys_are_rejected_in_merkle_root_and_root_proof_tree() {
+    use tari_state_tree::{
+        RootProofTree,
+        RootStateTree,
+        compute_merkle_root_for_hashes,
+        memory_store::MemoryTreeStore,
+    };
+
+    let h = hash_value_from_seed(1);
+
+    let err = compute_merkle_root_for_hashes([h, h]).unwrap_err();
+    assert!(
+        matches!(err, StateTreeError::DuplicateLeafKey { key } if key == h),
+        "{err:?}"
+    );
+
+    let err = match RootProofTree::build([h, h]) {
+        Ok(_) => panic!("expected DuplicateLeafKey error"),
+        Err(err) => err,
+    };
+    assert!(
+        matches!(err, StateTreeError::DuplicateLeafKey { key } if key == h),
+        "{err:?}"
+    );
+
+    let mut store = MemoryTreeStore::<()>::new();
+    let err = RootStateTree::new(&mut store).put_changes(None, 1, [h, h]).unwrap_err();
+    assert!(
+        matches!(err, StateTreeError::DuplicateLeafKey { key } if key == h),
+        "{err:?}"
+    );
 }

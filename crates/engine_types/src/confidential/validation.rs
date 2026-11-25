@@ -1,15 +1,11 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use ootle_byte_type::{ConvertFromByteType, FromByteType};
-use tari_crypto::{
-    ristretto::{RistrettoPublicKey, pedersen::PedersenCommitment},
-    tari_utilities::ByteArray,
-};
+use tari_crypto::ristretto::RistrettoPublicKey;
 use tari_template_lib::types::{Amount, confidential::ConfidentialOutputStatement};
 
 use crate::{
-    crypto::{ValidateOutputBody, range_proof::validate_bullet_proof, validate_elgamal_verifiable_balance_proof},
+    crypto::{DecodedOutput, ValidateOutputBody, range_proof::validate_bullet_proof_statements},
     resource_container::ResourceError,
 };
 
@@ -29,7 +25,7 @@ pub struct ValidatedConfidentialProof {
 /// outputs (revealed-only) verifies no range proof, so it prices at zero.
 pub fn statement_native_points(proof: &ConfidentialOutputStatement, has_view_key: bool) -> u64 {
     use crate::limits::NativeExecutionPoints as P;
-    let num_outputs = u64::from(proof.output.is_some()) + u64::from(proof.change_statement.is_some());
+    let num_outputs = proof.num_confidential_outputs() as u64;
     if num_outputs == 0 {
         return 0;
     }
@@ -50,12 +46,6 @@ pub fn validate_confidential_statement(
     proof: &ConfidentialOutputStatement,
     view_key: Option<&RistrettoPublicKey>,
 ) -> Result<ValidatedConfidentialProof, ResourceError> {
-    if proof.output_revealed_amount.is_negative() || proof.change_revealed_amount.is_negative() {
-        return Err(ResourceError::InvalidConfidentialProof {
-            details: "Revealed amounts must be positive".to_string(),
-        });
-    }
-
     if proof
         .output
         .iter()
@@ -70,70 +60,32 @@ pub fn validate_confidential_statement(
         });
     }
 
-    let maybe_output = proof
+    if let (Some(output), Some(change)) = (&proof.output, &proof.change_statement) &&
+        output.commitment == change.commitment
+    {
+        return Err(ResourceError::InvalidConfidentialProof {
+            details: "Confidential output and change commitments cannot be identical".to_string(),
+        });
+    }
+
+    let decoded_output = proof
         .output
         .as_ref()
-        .map(|statement| {
-            let output_commitment =
-                PedersenCommitment::convert_from_byte_type(&statement.commitment).map_err(|_| {
-                    ResourceError::InvalidConfidentialProof {
-                        details: "Invalid commitment".to_string(),
-                    }
-                })?;
-
-            let output_public_nonce = statement.sender_public_nonce.try_from_byte_type().map_err(|_| {
-                ResourceError::InvalidConfidentialProof {
-                    details: "Invalid sender public nonce".to_string(),
-                }
-            })?;
-
-            let viewable_balance = validate_elgamal_verifiable_balance_proof(
-                &output_commitment,
-                view_key,
-                statement.viewable_balance_proof.as_ref(),
-            )?;
-
-            Ok::<_, ResourceError>(ValidateOutputBody {
-                commitment: output_commitment,
-                public_nonce: output_public_nonce,
-                encrypted_data: statement.encrypted_data.clone(),
-                minimum_value_promise: statement.minimum_value_promise,
-                viewable_balance,
-            })
-        })
+        .map(|output| DecodedOutput::decode(output, view_key))
         .transpose()?;
-
-    let maybe_change = proof
+    let decoded_change = proof
         .change_statement
         .as_ref()
-        .map(|stmt| {
-            let commitment = PedersenCommitment::from_canonical_bytes(&*stmt.commitment).map_err(|_| {
-                ResourceError::InvalidConfidentialProof {
-                    details: "Invalid commitment".to_string(),
-                }
-            })?;
-
-            let stealth_public_nonce =
-                RistrettoPublicKey::from_canonical_bytes(&*stmt.sender_public_nonce).map_err(|_| {
-                    ResourceError::InvalidConfidentialProof {
-                        details: "Invalid sender public nonce".to_string(),
-                    }
-                })?;
-
-            let viewable_balance =
-                validate_elgamal_verifiable_balance_proof(&commitment, view_key, stmt.viewable_balance_proof.as_ref())?;
-
-            Ok(ValidateOutputBody {
-                commitment,
-                public_nonce: stealth_public_nonce,
-                encrypted_data: stmt.encrypted_data.clone(),
-                minimum_value_promise: stmt.minimum_value_promise,
-                viewable_balance,
-            })
-        })
+        .map(|change| DecodedOutput::decode(change, view_key))
         .transpose()?;
 
-    if maybe_output.is_none() && maybe_change.is_none() {
+    // The aggregated range proof covers the output then the change, in that order.
+    let bp_statements = decoded_output
+        .iter()
+        .chain(&decoded_change)
+        .map(DecodedOutput::to_range_proof_statement)
+        .collect::<Vec<_>>();
+    if bp_statements.is_empty() {
         if !proof.range_proof.is_empty() {
             return Err(ResourceError::InvalidConfidentialProof {
                 details: "Range proof is invalid because it was provided (non-empty) but the proof contained no \
@@ -141,12 +93,28 @@ pub fn validate_confidential_statement(
                     .to_string(),
             });
         }
-    } else {
-        validate_bullet_proof(
-            &proof.range_proof,
-            proof.output.as_ref().into_iter().chain(proof.change_statement.as_ref()),
-        )?;
+        return Ok(ValidatedConfidentialProof {
+            output: None,
+            change_output: None,
+            output_revealed_amount: proof.output_revealed_amount,
+            change_revealed_amount: proof.change_revealed_amount,
+        });
     }
+
+    if proof.range_proof.is_empty() {
+        return Err(ResourceError::InvalidRangeProof {
+            details: "Range proof is empty".to_string(),
+        });
+    }
+
+    let maybe_output = decoded_output
+        .map(|output| output.verify_viewable_balance(view_key))
+        .transpose()?;
+    let maybe_change = decoded_change
+        .map(|change| change.verify_viewable_balance(view_key))
+        .transpose()?;
+
+    validate_bullet_proof_statements(&proof.range_proof, bp_statements)?;
 
     Ok(ValidatedConfidentialProof {
         output: maybe_output,
@@ -154,4 +122,146 @@ pub fn validate_confidential_statement(
         output_revealed_amount: proof.output_revealed_amount,
         change_revealed_amount: proof.change_revealed_amount,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use ootle_byte_type::ToByteType;
+    use tari_crypto::{keys::PublicKey, ristretto::RistrettoSecretKey};
+    use tari_template_lib::types::{
+        EncryptedData,
+        crypto::{RangeProofBytes, RistrettoPublicKeyBytes, Scalar32Bytes},
+        stealth::{UnspentOutput, ViewableBalanceProof},
+    };
+
+    use super::*;
+    use crate::crypto::commit_u64_amount;
+
+    fn view_key() -> RistrettoPublicKey {
+        RistrettoPublicKey::from_secret_key(&RistrettoSecretKey::from(42u64))
+    }
+
+    /// Every field decodes, but the proof equations do not hold, so verifying it fails.
+    fn unverifiable_viewable_balance_proof() -> ViewableBalanceProof {
+        let point = |seed: u64| RistrettoPublicKey::from_secret_key(&RistrettoSecretKey::from(seed)).to_byte_type();
+        ViewableBalanceProof {
+            elgamal_encrypted: point(1),
+            elgamal_public_nonce: point(2),
+            c_prime: commit_u64_amount(&RistrettoSecretKey::from(3u64), 3).to_byte_type(),
+            e_prime: point(4),
+            r_prime: point(5),
+            s_v: Scalar32Bytes::from([1u8; 32]),
+            s_m: Scalar32Bytes::from([1u8; 32]),
+            s_r: Scalar32Bytes::from([1u8; 32]),
+        }
+    }
+
+    fn viewable_output(mask_seed: u64, value: u64) -> UnspentOutput {
+        let mut output = sample_unspent_output(mask_seed, value);
+        output.viewable_balance_proof = Some(unverifiable_viewable_balance_proof());
+        output
+    }
+
+    fn statement(
+        output: UnspentOutput,
+        change: UnspentOutput,
+        range_proof: RangeProofBytes,
+    ) -> ConfidentialOutputStatement {
+        ConfidentialOutputStatement {
+            output: Some(output),
+            change_statement: Some(change),
+            range_proof,
+            output_revealed_amount: Amount::ZERO,
+            change_revealed_amount: Amount::ZERO,
+        }
+    }
+
+    fn malformed_range_proof() -> RangeProofBytes {
+        RangeProofBytes::try_from(vec![0xabu8; 64]).unwrap()
+    }
+
+    #[test]
+    fn rejects_an_empty_range_proof_before_verifying_viewable_balance_proofs() {
+        let stmt = statement(
+            viewable_output(1, 100),
+            viewable_output(2, 50),
+            RangeProofBytes::empty(),
+        );
+
+        let err = validate_confidential_statement(&stmt, Some(&view_key())).unwrap_err();
+        assert!(
+            matches!(&err, ResourceError::InvalidRangeProof { details } if details == "Range proof is empty"),
+            "unexpected error: {err:?}"
+        );
+    }
+
+    #[test]
+    fn rejects_a_non_canonical_change_nonce_before_verifying_the_output_viewable_balance_proof() {
+        let mut change = viewable_output(2, 50);
+        change.sender_public_nonce = RistrettoPublicKeyBytes::from([0xffu8; 32]);
+        let stmt = statement(viewable_output(1, 100), change, malformed_range_proof());
+
+        let err = validate_confidential_statement(&stmt, Some(&view_key())).unwrap_err();
+        assert!(
+            matches!(
+                &err,
+                ResourceError::InvalidConfidentialProof { details } if details == "Invalid sender public nonce"
+            ),
+            "unexpected error: {err:?}"
+        );
+    }
+
+    #[test]
+    fn rejects_a_change_missing_its_viewable_balance_proof_before_verifying_the_output_proof() {
+        let stmt = statement(
+            viewable_output(1, 100),
+            sample_unspent_output(2, 50),
+            malformed_range_proof(),
+        );
+
+        let err = validate_confidential_statement(&stmt, Some(&view_key())).unwrap_err();
+        assert!(
+            matches!(
+                &err,
+                ResourceError::InvalidConfidentialProof { details }
+                    if details == "ViewableBalanceProof is required for a viewable resource"
+            ),
+            "unexpected error: {err:?}"
+        );
+    }
+
+    fn sample_unspent_output(mask_seed: u64, value: u64) -> UnspentOutput {
+        let mask = RistrettoSecretKey::from(mask_seed);
+        let commitment = commit_u64_amount(&mask, value).to_byte_type();
+        let sender_public_nonce = RistrettoPublicKey::from_secret_key(&mask).to_byte_type();
+        UnspentOutput {
+            commitment,
+            sender_public_nonce,
+            encrypted_data: EncryptedData::try_from(vec![0u8; EncryptedData::min_size()]).unwrap(),
+            minimum_value_promise: 1,
+            viewable_balance_proof: None,
+        }
+    }
+
+    #[test]
+    fn rejects_identical_output_and_change_commitments() {
+        let dup_output = sample_unspent_output(7, 100);
+        let stmt = ConfidentialOutputStatement {
+            output: Some(dup_output.clone()),
+            change_statement: Some(dup_output),
+            range_proof: RangeProofBytes::empty(),
+            output_revealed_amount: Amount::ZERO,
+            change_revealed_amount: Amount::ZERO,
+        };
+
+        let err = validate_confidential_statement(&stmt, None).unwrap_err();
+        assert!(
+            matches!(
+                &err,
+                ResourceError::InvalidConfidentialProof { details }
+                    if details.contains("output and change commitments cannot be identical")
+            ),
+            "unexpected error: {err:?}"
+        );
+    }
 }

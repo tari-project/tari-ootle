@@ -72,8 +72,8 @@ impl<TStore: StateReader> WorkingStateStore<TStore> {
         if !self.exists(&id)? {
             return Err(RuntimeError::SubstateNotFound { id: id.clone() });
         }
-        let lock_id = self.locked_substates.try_lock(id.clone(), lock_flag)?;
-        self.load_and_cache(id)?;
+        self.load_and_cache(id.clone())?;
+        let lock_id = self.locked_substates.try_lock(id, lock_flag)?;
         Ok(lock_id)
     }
 
@@ -373,6 +373,20 @@ impl<TStore: StateReader> WorkingStateStore<TStore> {
         let component = self.load_and_cache(addr)?;
         component.component().ok_or_else(|| RuntimeError::InvariantError {
             function: "load_component",
+            details: format!("Substate at address {} is not a component", address),
+        })
+    }
+
+    /// The current value of a component this transaction has already loaded, read without taking a lock.
+    pub fn get_loaded_component(&self, address: ComponentAddress) -> Result<&Component, RuntimeError> {
+        let value = self
+            .get_ref(&SubstateId::Component(address))
+            .map_err(|_| RuntimeError::InvariantError {
+                function: "get_loaded_component",
+                details: format!("Component {} has not been loaded by this transaction", address),
+            })?;
+        value.component().ok_or_else(|| RuntimeError::InvariantError {
+            function: "get_loaded_component",
             details: format!("Substate at address {} is not a component", address),
         })
     }

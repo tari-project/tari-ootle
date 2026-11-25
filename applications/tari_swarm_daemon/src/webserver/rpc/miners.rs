@@ -69,7 +69,11 @@ fn validate_mining_interval(interval_seconds: u64) -> Result<Duration, anyhow::E
         anyhow::bail!("interval_seconds must be greater than 0");
     }
     let period = Duration::from_secs(interval_seconds);
-    if period.checked_mul(2).and_then(|d| Instant::now().checked_add(d)).is_none() {
+    if period
+        .checked_mul(2)
+        .and_then(|d| Instant::now().checked_add(d))
+        .is_none()
+    {
         anyhow::bail!("interval_seconds is too large");
     }
     Ok(period)

@@ -28,7 +28,7 @@ function useTheme() {
     try {
       localStorage.setItem("swarm.theme", theme);
     } catch {
-      // Ignore storage errors in private browsing or restricted contexts.
+      // Ignore storage write errors (e.g. quota exceeded or read-only storage).
     }
   }, [theme]);
   return { theme, setTheme };
@@ -83,17 +83,13 @@ export default function Shell() {
         </nav>
 
         <div className="sidebar-foot">
-          <div
-            role="group"
-            aria-labelledby={refreshLabelId}
-            style={{ display: "flex", flexDirection: "column", gap: 4 }}
-          >
+          <div className="sidebar-field" role="group" aria-labelledby={refreshLabelId}>
             <span id={refreshLabelId} className="eyebrow">
               Refresh every
             </span>
             <Segmented options={RATES} value={swarm.intervalMs} onChange={swarm.setIntervalMs} />
           </div>
-          <div role="group" aria-labelledby={themeLabelId} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <div className="sidebar-field" role="group" aria-labelledby={themeLabelId}>
             <span id={themeLabelId} className="eyebrow">
               Theme
             </span>

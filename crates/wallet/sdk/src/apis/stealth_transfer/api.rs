@@ -1357,33 +1357,14 @@ fn generate_transfer_transaction(
                 }
             })
             .then(|builder| {
-                // When there are no stealth inputs or outputs, skip the stealth transfer instruction
-                // and use a standard withdraw instead. A stealth transfer would still work correctly,
-                // but a plain withdraw is more fee-efficient.
-                let has_no_inputs_or_outputs = transfer_statement.outputs_statement.outputs.is_empty() && transfer_statement.inputs_statement.inputs.is_empty();
-                if has_no_inputs_or_outputs {
-                    return withdraw_from_account(
-                        builder,
-                        *owner_account.component_address(),
-                        params.resource_address,
-                        revealed_input_amount,
-                        &params.badge_usage,
-                    );
-                }
-
-                if revealed_input_amount.is_positive() {
-                    withdraw_from_account(
-                        builder,
-                        owner_account.account.component_address,
-                        params.resource_address,
-                        revealed_input_amount,
-                        &params.badge_usage,
-                    )
-                        .put_last_instruction_output_on_workspace("input_bucket")
-                        .stealth_transfer_with_input_bucket(params.resource_address, transfer_statement, "input_bucket")
-                } else {
-                    builder.stealth_transfer(params.resource_address, transfer_statement)
-                }
+                execute_transfer_with_optional_badge(
+                    builder,
+                    *owner_account.component_address(),
+                    params.resource_address,
+                    revealed_input_amount,
+                    transfer_statement,
+                    &params.badge_usage,
+                )
             })
             .then(|builder| {
                 // revealed_to_account may be Some, but we only use it if revealed_output_amount is greater than zero.
@@ -1460,38 +1441,14 @@ fn generate_merged_transfer_transaction(
                             .put_last_instruction_output_on_workspace("proof"),
                     })
                     .then(|b| {
-                        // When there are no stealth inputs or outputs, skip the stealth transfer
-                        // instruction and use a standard withdraw instead. A stealth transfer would still
-                        // work correctly, but a plain withdraw is more fee-efficient.
-                        let has_no_inputs_or_outputs = transfer_statement.outputs_statement.outputs.is_empty() &&
-                            transfer_statement.inputs_statement.inputs.is_empty();
-                        if has_no_inputs_or_outputs {
-                            return withdraw_from_account(
-                                b,
-                                account_address,
-                                params.resource_address,
-                                revealed_input_amount,
-                                &params.badge_usage,
-                            );
-                        }
-
-                        if revealed_input_amount.is_positive() {
-                            withdraw_from_account(
-                                b,
-                                account_address,
-                                params.resource_address,
-                                revealed_input_amount,
-                                &params.badge_usage,
-                            )
-                            .put_last_instruction_output_on_workspace("input_bucket")
-                            .stealth_transfer_with_input_bucket(
-                                params.resource_address,
-                                transfer_statement,
-                                "input_bucket",
-                            )
-                        } else {
-                            b.stealth_transfer(params.resource_address, transfer_statement)
-                        }
+                        execute_transfer_with_optional_badge(
+                            b,
+                            account_address,
+                            params.resource_address,
+                            revealed_input_amount,
+                            transfer_statement,
+                            &params.badge_usage,
+                        )
                     })
                     .put_last_instruction_output_on_workspace("revealed_bucket")
                     .then(|b| {
@@ -1554,21 +1511,37 @@ struct CheckedStatementSpec {
     resource_view_key: Option<RistrettoPublicKey>,
 }
 
-/// Withdraws `amount` of `resource` from the owner's account. When a badge is in use, the call runs inside an
-/// authorization window over the workspace proof `proof`, which lends the badge to the account's withdraw rule.
-fn withdraw_from_account<D>(
+/// Executes the account withdraw and/or stealth transfer. When a badge is in use, the call runs inside an
+/// authorization window over the workspace proof `proof`, which lends the badge to the account's withdraw rule
+/// and the stealth transfer's resource/input access rules.
+fn execute_transfer_with_optional_badge<D>(
     builder: TransactionBuilder<D>,
     account: ComponentAddress,
     resource: ResourceAddress,
-    amount: Amount,
+    revealed_input_amount: Amount,
+    transfer_statement: StealthTransferStatement,
     badge_usage: &BadgeUsage,
 ) -> TransactionBuilder<D> {
+    // When there are no stealth inputs or outputs, skip the stealth transfer instruction
+    // and use a standard withdraw instead. A stealth transfer would still work correctly,
+    // but a plain withdraw is more fee-efficient.
+    let has_no_inputs_or_outputs = transfer_statement.outputs_statement.outputs.is_empty() &&
+        transfer_statement.inputs_statement.inputs.is_empty();
+    let apply = |b: TransactionBuilder<D>| {
+        if has_no_inputs_or_outputs {
+            b.call_method(account, "withdraw", args![resource, revealed_input_amount])
+        } else if revealed_input_amount.is_positive() {
+            b.call_method(account, "withdraw", args![resource, revealed_input_amount])
+                .put_last_instruction_output_on_workspace("input_bucket")
+                .stealth_transfer_with_input_bucket(resource, transfer_statement, "input_bucket")
+        } else {
+            b.stealth_transfer(resource, transfer_statement)
+        }
+    };
     if badge_usage.is_none() {
-        builder.call_method(account, "withdraw", args![resource, amount])
+        apply(builder)
     } else {
-        builder.with_authorized_proof("proof", |builder| {
-            builder.call_method(account, "withdraw", args![resource, amount])
-        })
+        builder.with_authorized_proof("proof", apply)
     }
 }
 

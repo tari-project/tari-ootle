@@ -148,49 +148,33 @@ mod tests {
         )
         .to_bech32_string();
 
-        let err = handle_add(
-            &daemon.context,
-            Some(&daemon.session),
-            AddressBookAddRequest {
-                name: "bob".to_string(),
-                address: non_canonical_address,
-                note: None,
-            },
-        )
+        let err = handle_add(&daemon.context, Some(&daemon.session), AddressBookAddRequest {
+            name: "bob".to_string(),
+            address: non_canonical_address,
+            note: None,
+        })
         .await
         .unwrap_err();
         let jrpc = err.downcast_ref::<JsonRpcError>().expect("JsonRpcError");
         assert!(matches!(jrpc.error_reason(), JsonRpcErrorReason::InvalidParams));
 
         for err in [
-            handle_get(
-                &daemon.context,
-                Some(&daemon.session),
-                AddressBookGetRequest {
-                    name: "missing".to_string(),
-                },
-            )
+            handle_get(&daemon.context, Some(&daemon.session), AddressBookGetRequest {
+                name: "missing".to_string(),
+            })
             .await
             .unwrap_err(),
-            handle_update(
-                &daemon.context,
-                Some(&daemon.session),
-                AddressBookUpdateRequest {
-                    name: "missing".to_string(),
-                    new_name: None,
-                    address: None,
-                    note: Some("note".to_string()),
-                },
-            )
+            handle_update(&daemon.context, Some(&daemon.session), AddressBookUpdateRequest {
+                name: "missing".to_string(),
+                new_name: None,
+                address: None,
+                note: Some("note".to_string()),
+            })
             .await
             .unwrap_err(),
-            handle_delete(
-                &daemon.context,
-                Some(&daemon.session),
-                AddressBookDeleteRequest {
-                    name: "missing".to_string(),
-                },
-            )
+            handle_delete(&daemon.context, Some(&daemon.session), AddressBookDeleteRequest {
+                name: "missing".to_string(),
+            })
             .await
             .unwrap_err(),
         ] {

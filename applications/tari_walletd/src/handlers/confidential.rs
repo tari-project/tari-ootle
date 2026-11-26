@@ -739,18 +739,14 @@ mod tests {
                 "destination_address",
             ),
         ] {
-            let err = handle_create_transfer_proof(
-                &daemon.context,
-                Some(&daemon.session),
-                ProofsGenerateRequest {
-                    account: None,
-                    confidential_amount,
-                    reveal_amount,
-                    resource_address,
-                    destination_address,
-                    output_memo: None,
-                },
-            )
+            let err = handle_create_transfer_proof(&daemon.context, Some(&daemon.session), ProofsGenerateRequest {
+                account: None,
+                confidential_amount,
+                reveal_amount,
+                resource_address,
+                destination_address,
+                output_memo: None,
+            })
             .await
             .unwrap_err();
             assert!(err.to_string().contains(expected_err), "{err}");
@@ -762,6 +758,10 @@ mod tests {
             "rejected requests must not leave vault outputs locked"
         );
         let mask = sdk.key_manager_api().next_key(KeyBranch::ConfidentialMask).unwrap();
-        assert_eq!(mask.key_index(), 0, "rejected requests must not advance ConfidentialMask");
+        assert_eq!(
+            mask.key_index(),
+            0,
+            "rejected requests must not advance ConfidentialMask"
+        );
     }
 }

@@ -44,6 +44,12 @@ pub async fn list(
         Ok(())
     }
 
+    add_item(
+        &tx,
+        "database_migration_version",
+        column_families::bookkeeping::DatabaseMigrationVersion,
+        &mut table,
+    )?;
     add_item(&tx, "high_qc", column_families::bookkeeping::HighPcCf, &mut table)?;
     add_item(
         &tx,
@@ -93,6 +99,12 @@ pub async fn list(
         &tx,
         "commit_block",
         column_families::bookkeeping::CommitBlockCf,
+        &mut table,
+    )?;
+    add_item(
+        &tx,
+        "last_committed_epoch_end",
+        column_families::bookkeeping::LastCommittedEpochEndCf,
         &mut table,
     )?;
 

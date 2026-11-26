@@ -83,7 +83,7 @@ use crate::{
         RuntimeModule,
         StateTracker,
         reject_transient_values,
-        scope::{CallScope, FrameWriteMode, PushCallFrame},
+        scope::{CallScope, FrameWriteMode, HookFrame, PushCallFrame},
     },
     state_store::StateReader,
     template::LoadedTemplate,
@@ -888,7 +888,7 @@ where
         method: &str,
         args: Vec<InstructionArg>,
         restrict_frame_to: Option<FrameWriteMode>,
-        arg_scope: Option<IndexedWellKnownTypes>,
+        hook_frame: Option<HookFrame>,
     ) -> Result<IndexedValue, TransactionErrorKind> {
         let component = runtime.interface().load_component(call)?;
         let template_address = component.template_address;
@@ -907,11 +907,19 @@ where
             .interface()
             .track_template_loaded(&template_address, template.code_size())?;
 
-        Self::invoke_component(template, runtime, component, method, args, restrict_frame_to, arg_scope)
+        Self::invoke_component(
+            template,
+            runtime,
+            component,
+            method,
+            args,
+            restrict_frame_to,
+            hook_frame,
+        )
     }
 
-    /// Calls `method` on `component`. The callee frame's argument scope is `arg_scope` when given, and otherwise
-    /// every substate the resolved `args` name.
+    /// Calls `method` on `component`. The callee frame's argument scope is every substate the resolved `args` name,
+    /// unless `hook_frame` pushes a resource auth hook's frame with its own argument scope.
     fn invoke_component(
         template: LoadedTemplate,
         runtime: &Runtime,
@@ -919,7 +927,7 @@ where
         method: &str,
         args: Vec<InstructionArg>,
         restrict_frame_to: Option<FrameWriteMode>,
-        arg_scope: Option<IndexedWellKnownTypes>,
+        hook_frame: Option<HookFrame>,
     ) -> Result<IndexedValue, TransactionErrorKind> {
         let template_def = template.shared_template_def();
         let function_def = template_def
@@ -949,13 +957,19 @@ where
         let resolved_args = runtime
             .interface()
             .resolve_args(Some(InstructionArg::from_type(&component.address)?), &args)?;
-        let arg_scope = match arg_scope {
-            Some(arg_scope) => arg_scope,
-            None => resolved_args
-                .iter()
-                .skip(1)
-                .map(IndexedWellKnownTypes::from_value)
-                .collect::<Result<_, _>>()?,
+        let (arg_scope, acting_component) = match hook_frame {
+            Some(HookFrame {
+                arg_scope,
+                acting_component,
+            }) => (arg_scope, acting_component),
+            None => (
+                resolved_args
+                    .iter()
+                    .skip(1)
+                    .map(IndexedWellKnownTypes::from_value)
+                    .collect::<Result<_, _>>()?,
+                None,
+            ),
         };
 
         runtime.interface().push_call_frame(
@@ -966,6 +980,7 @@ where
                 component_lock,
                 arg_scope: Box::new(arg_scope),
                 entity_id: component.entity_id,
+                acting_component,
             },
             restrict_frame_to,
         )?;

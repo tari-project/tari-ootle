@@ -31,7 +31,6 @@ export const useTemplateGet = (request: TemplatesGetRequest, options = {}) => {
       return templatesGet(request);
     },
     refetchInterval: false,
-    notifyOnChangeProps: ["data", "error"],
     retryOnMount: false,
     retry: false,
     ...options,

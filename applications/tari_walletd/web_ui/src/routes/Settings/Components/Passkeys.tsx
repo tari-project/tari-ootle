@@ -57,7 +57,7 @@ export default function Passkeys() {
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [newLabel, setNewLabel] = useState("");
   const [adding, setAdding] = useState(false);
-  const [actionError, setActionError] = useState<string | null>(null);
+  const [dialogError, setDialogError] = useState<string | null>(null);
 
   const [renameTarget, setRenameTarget] = useState<WebauthnPasskeyInfo | null>(null);
   const [renameValue, setRenameValue] = useState("");
@@ -68,34 +68,46 @@ export default function Passkeys() {
   const isLastPasskey = passkeys.length <= 1;
 
   const handleOpenAdd = () => {
-    setActionError(null);
+    setDialogError(null);
     setNewLabel("");
     setAddDialogOpen(true);
+  };
+
+  const handleCloseAdd = () => {
+    if (adding) return;
+    setAddDialogOpen(false);
+    setDialogError(null);
   };
 
   const handleAddPasskey = async (e: FormEvent) => {
     e.preventDefault();
     setAdding(true);
-    setActionError(null);
+    setDialogError(null);
     try {
       await performPasskeyRegistration({
         label: newLabel.trim() || undefined,
         updateClientToken: false,
       });
-      await queryClient.invalidateQueries({ queryKey: WEBAUTHN_PASSKEYS_QUERY_KEY });
+      void queryClient.invalidateQueries({ queryKey: WEBAUTHN_PASSKEYS_QUERY_KEY });
       setAddDialogOpen(false);
       setNewLabel("");
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : String(err));
+      setDialogError(err instanceof Error && err.message ? err.message : "Failed to register passkey");
     } finally {
       setAdding(false);
     }
   };
 
   const handleOpenRename = (passkey: WebauthnPasskeyInfo) => {
-    setActionError(null);
+    setDialogError(null);
     setRenameTarget(passkey);
     setRenameValue(passkey.label);
+  };
+
+  const handleCloseRename = () => {
+    if (renameMutation.isPending) return;
+    setRenameTarget(null);
+    setDialogError(null);
   };
 
   const handleRenameSubmit = async (e: FormEvent) => {
@@ -103,27 +115,37 @@ export default function Passkeys() {
     if (!renameTarget) return;
     const trimmed = renameValue.trim();
     if (!trimmed) {
-      setActionError("Passkey label must not be empty");
+      setDialogError("Passkey label must not be empty");
       return;
     }
-    setActionError(null);
+    setDialogError(null);
     try {
       await renameMutation.mutateAsync({ id: renameTarget.id, label: trimmed });
       setRenameTarget(null);
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : String(err));
+      setDialogError(err instanceof Error && err.message ? err.message : "Failed to rename passkey");
     }
+  };
+
+  const handleOpenRemove = (passkey: WebauthnPasskeyInfo) => {
+    setDialogError(null);
+    setRemoveTarget(passkey);
+  };
+
+  const handleCloseRemove = () => {
+    if (removeMutation.isPending) return;
+    setRemoveTarget(null);
+    setDialogError(null);
   };
 
   const handleConfirmRemove = async () => {
     if (!removeTarget) return;
-    setActionError(null);
+    setDialogError(null);
     try {
       await removeMutation.mutateAsync(removeTarget.id);
       setRemoveTarget(null);
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : String(err));
-      setRemoveTarget(null);
+      setDialogError(err instanceof Error && err.message ? err.message : "Failed to remove passkey");
     }
   };
 
@@ -155,12 +177,6 @@ export default function Passkeys() {
             <Alert severity="info" sx={{ mb: 2 }}>
               Only one passkey is registered. Consider adding a backup passkey so you do not lose access to your wallet
               if this authenticator is lost.
-            </Alert>
-          )}
-
-          {actionError && (
-            <Alert severity="error" sx={{ mb: 2 }} onClose={() => setActionError(null)}>
-              {actionError}
             </Alert>
           )}
 
@@ -203,7 +219,7 @@ export default function Passkeys() {
                             size="small"
                             color="error"
                             disabled={isLastPasskey}
-                            onClick={() => setRemoveTarget(passkey)}
+                            onClick={() => handleOpenRemove(passkey)}
                           >
                             <DeleteOutlineIcon fontSize="small" />
                           </IconButton>
@@ -216,13 +232,18 @@ export default function Passkeys() {
             </Table>
           </TableContainer>
 
-          <Dialog open={addDialogOpen} onClose={() => !adding && setAddDialogOpen(false)} fullWidth maxWidth="xs">
+          <Dialog open={addDialogOpen} onClose={handleCloseAdd} fullWidth maxWidth="xs">
             <form onSubmit={handleAddPasskey}>
               <DialogTitle>Add Passkey</DialogTitle>
               <DialogContent>
                 <DialogContentText sx={{ mb: 2 }}>
                   Enter a label to identify this passkey, then follow your browser or authenticator prompt.
                 </DialogContentText>
+                {dialogError && (
+                  <Alert severity="error" sx={{ mb: 2 }}>
+                    {dialogError}
+                  </Alert>
+                )}
                 <TextField
                   autoFocus
                   fullWidth
@@ -235,7 +256,7 @@ export default function Passkeys() {
                 />
               </DialogContent>
               <DialogActions>
-                <Button variant="outlined" onClick={() => setAddDialogOpen(false)} disabled={adding}>
+                <Button variant="outlined" onClick={handleCloseAdd} disabled={adding}>
                   Cancel
                 </Button>
                 <Button variant="contained" type="submit" disabled={adding}>
@@ -245,15 +266,15 @@ export default function Passkeys() {
             </form>
           </Dialog>
 
-          <Dialog
-            open={Boolean(renameTarget)}
-            onClose={() => !renameMutation.isPending && setRenameTarget(null)}
-            fullWidth
-            maxWidth="xs"
-          >
+          <Dialog open={Boolean(renameTarget)} onClose={handleCloseRename} fullWidth maxWidth="xs">
             <form onSubmit={handleRenameSubmit}>
               <DialogTitle>Rename Passkey</DialogTitle>
               <DialogContent>
+                {dialogError && (
+                  <Alert severity="error" sx={{ mb: 2, mt: 1 }}>
+                    {dialogError}
+                  </Alert>
+                )}
                 <TextField
                   autoFocus
                   fullWidth
@@ -266,7 +287,7 @@ export default function Passkeys() {
                 />
               </DialogContent>
               <DialogActions>
-                <Button variant="outlined" onClick={() => setRenameTarget(null)} disabled={renameMutation.isPending}>
+                <Button variant="outlined" onClick={handleCloseRename} disabled={renameMutation.isPending}>
                   Cancel
                 </Button>
                 <Button variant="contained" type="submit" disabled={renameMutation.isPending || !renameValue.trim()}>
@@ -276,9 +297,14 @@ export default function Passkeys() {
             </form>
           </Dialog>
 
-          <Dialog open={Boolean(removeTarget)} onClose={() => !removeMutation.isPending && setRemoveTarget(null)}>
+          <Dialog open={Boolean(removeTarget)} onClose={handleCloseRemove}>
             <DialogTitle>Remove Passkey</DialogTitle>
             <DialogContent>
+              {dialogError && (
+                <Alert severity="error" sx={{ mb: 2 }}>
+                  {dialogError}
+                </Alert>
+              )}
               <DialogContentText>
                 Are you sure you want to remove passkey &ldquo;{removeTarget?.label}&rdquo;? Removing this passkey
                 prevents future logins with it, but any active session or refresh token already issued to that device
@@ -286,7 +312,7 @@ export default function Passkeys() {
               </DialogContentText>
             </DialogContent>
             <DialogActions>
-              <Button variant="outlined" onClick={() => setRemoveTarget(null)} disabled={removeMutation.isPending}>
+              <Button variant="outlined" onClick={handleCloseRemove} disabled={removeMutation.isPending}>
                 Cancel
               </Button>
               <Button

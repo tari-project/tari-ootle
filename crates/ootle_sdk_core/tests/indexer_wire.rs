@@ -65,7 +65,7 @@ fn a_substate_as_the_indexer_serves_it_decodes() {
 
     assert!(
         matches!(decoded, DecodedSubstate::Vault {
-            revealed_balance: 100,
+            revealed_balance: ootle_sdk_core::types::U128 { hi: 0, lo: 100 },
             ..
         }),
         "{decoded:?}"

@@ -312,7 +312,7 @@ a:hover {
   gap: 10px;
 }
 
-.sidebar-foot label {
+.sidebar-foot .sidebar-field {
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -1209,7 +1209,7 @@ td.nowrap,
     flex: 0 0 auto;
   }
 
-  .sidebar-foot label > .eyebrow {
+  .sidebar-foot .sidebar-field > .eyebrow {
     display: none;
   }
 

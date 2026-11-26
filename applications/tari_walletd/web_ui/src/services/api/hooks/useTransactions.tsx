@@ -34,7 +34,7 @@ import type { TransactionGetAllRequest } from "@tari-project/ootle-ts-bindings";
 
 export const useTransactionDetails = (hash: string) => {
   return useQuery({
-    queryKey: ["transaction_details"],
+    queryKey: ["transaction_details", hash],
     queryFn: () => {
       return transactionsGet({ transaction_id: hash });
     },

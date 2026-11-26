@@ -54,7 +54,7 @@ use serde::Deserialize;
 /// static pointer). Every host binding asserts this at startup to detect a header/lib mismatch. Bump on any
 /// breaking ABI change (a changed signature, envelope layout, or handle contract) so a stale lib is
 /// caught loudly rather than mis-marshalled.
-const ABI_VERSION: &[u8] = b"ootle-sdk-ffi-c/20\0";
+const ABI_VERSION: &[u8] = b"ootle-sdk-ffi-c/21\0";
 
 /// The kind discriminant that guards opaque-handle **type confusion** across the FFI.
 ///

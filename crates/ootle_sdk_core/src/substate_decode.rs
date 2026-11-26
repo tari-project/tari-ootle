@@ -23,11 +23,12 @@
 //! tag. To verify a confidential delta, scan the relevant UTXOs
 //! ([`scan_stealth_substate`](crate::scan_stealth_substate)) and sum client-side.
 //!
-//! ## u64 safety
+//! ## Integer safety
 //!
-//! Balances cross as native `u64` end-to-end, never round-tripped through a float. The engine's
-//! [`Amount`] is a fixed-width integer; it is narrowed to `u64` via [`Amount::to_u64_checked`], with
-//! an out-of-range value surfaced as a clear error rather than truncated.
+//! Numbers cross as native integers end-to-end, never round-tripped through a float. Revealed
+//! balances span the full [`Amount`] width and cross as [`U128`]. A resource's total supply is
+//! narrowed to `u64` via [`Amount::to_u64_checked`], with an out-of-range value surfaced as a clear
+//! error rather than truncated.
 
 use std::str::FromStr;
 
@@ -36,7 +37,7 @@ use tari_engine_types::substate::{SubstateId, SubstateValue};
 
 use crate::{
     FetchedSubstate,
-    types::{address::ResourceAddressStr, error::OotleSdkError},
+    types::{address::ResourceAddressStr, error::OotleSdkError, numeric::U128},
 };
 
 /// Whether a vault holds a plain fungible balance or carries confidential (encrypted) commitments.
@@ -86,8 +87,8 @@ pub enum DecodedSubstate {
     Vault {
         /// The vault's resource address (`resource_<hex>` canonical string).
         resource_address: ResourceAddressStr,
-        /// The revealed/unlocked balance, native `u64` (not a confidential total).
-        revealed_balance: u64,
+        /// The revealed/unlocked balance (not a confidential total).
+        revealed_balance: U128,
         /// The number of confidential commitments the vault holds. `0` ⇒ purely revealed.
         confidential_commitment_count: u64,
         /// Whether the vault is fungible or confidential (derived from the commitment count).
@@ -111,22 +112,22 @@ pub enum DecodedSubstate {
 
 /// A single resource's revealed balance for an account (`account_balances` element).
 ///
-/// `revealed_balance` is the revealed/unlocked sum across the account's vaults of that resource,
-/// native `u64` — not a confidential total.
+/// `revealed_balance` is the revealed/unlocked sum across the account's vaults of that resource —
+/// not a confidential total.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ResourceBalance {
     /// The resource address (`resource_<hex>` canonical string).
     pub resource_address: ResourceAddressStr,
-    /// The revealed balance summed across the account's vaults of this resource, native `u64`.
-    pub revealed_balance: u64,
+    /// The revealed balance summed across the account's vaults of this resource.
+    pub revealed_balance: U128,
 }
 
 /// Narrows an engine [`Amount`](tari_template_lib_types::Amount) to a native `u64`, erroring (never
 /// truncating) on a value that exceeds the `u64` range.
 fn amount_to_u64(amount: tari_template_lib_types::Amount, context: &str) -> Result<u64, OotleSdkError> {
-    amount.to_u64_checked().ok_or_else(|| {
-        OotleSdkError::Validation(format!("{context}: balance {amount} does not fit in a u64 (> 2^64-1)"))
-    })
+    amount
+        .to_u64_checked()
+        .ok_or_else(|| OotleSdkError::Validation(format!("{context}: {amount} does not fit in a u64 (> 2^64-1)")))
 }
 
 /// `value` as the indexer serves it, for [`decode_served`](crate::encoded_decode::decode_served).
@@ -194,7 +195,7 @@ fn summarize_substate_value(value: &SubstateValue) -> Result<DecodedSubstate, Oo
             vault_ids: component_vault_id_strings(component, "decode_substate component")?,
         }),
         SubstateValue::Vault(vault) => {
-            let revealed_balance = amount_to_u64(vault.balance(), "decode_substate vault")?;
+            let revealed_balance = U128::from_amount(vault.balance());
             let confidential_commitment_count = vault.get_commitment_count();
             let kind = if confidential_commitment_count > 0 {
                 VaultKind::Confidential
@@ -323,7 +324,7 @@ pub fn account_balances(
     // Sum the revealed balance per resource, preserving first-seen order. A discovered vault the host
     // did not supply is a hard error (Resolution), never a silent zero.
     let mut order: Vec<String> = Vec::new();
-    let mut totals: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
+    let mut totals: std::collections::HashMap<String, u128> = std::collections::HashMap::new();
     for vault_id in &wanted_ids {
         let vault = supplied.get(vault_id).ok_or_else(|| {
             OotleSdkError::Resolution(format!(
@@ -332,7 +333,7 @@ pub fn account_balances(
             ))
         })?;
         let resource = ResourceAddressStr::from_internal(vault.resource_address());
-        let revealed = amount_to_u64(vault.balance(), &format!("account_balances vault '{vault_id}'"))?;
+        let revealed = vault.balance().to_u128();
         let key = resource.as_str().to_string();
         let entry = totals.entry(key.clone()).or_insert_with(|| {
             order.push(key.clone());
@@ -340,7 +341,7 @@ pub fn account_balances(
         });
         *entry = entry.checked_add(revealed).ok_or_else(|| {
             OotleSdkError::Validation(format!(
-                "account_balances: revealed balance for resource '{key}' overflows u64"
+                "account_balances: revealed balance for resource '{key}' overflows u128"
             ))
         })?;
     }
@@ -348,7 +349,7 @@ pub fn account_balances(
     Ok(order
         .into_iter()
         .map(|resource_address| ResourceBalance {
-            revealed_balance: totals[&resource_address],
+            revealed_balance: U128::from_u128(totals[&resource_address]),
             resource_address: ResourceAddressStr(resource_address),
         })
         .collect())
@@ -432,7 +433,7 @@ mod tests {
                 kind,
                 ..
             } => {
-                assert_eq!(revealed_balance, 4_242);
+                assert_eq!(revealed_balance, U128::from_u64(4_242));
                 assert_eq!(confidential_commitment_count, 0);
                 assert_eq!(kind, VaultKind::Fungible);
             },
@@ -463,19 +464,35 @@ mod tests {
         let vaults = vec![fetched_vault(ids[0], &v1), fetched_vault(ids[1], &v2)];
         let balances = account_balances(&account, &vaults).expect("balances");
         assert_eq!(balances.len(), 1);
-        assert_eq!(balances[0].revealed_balance, 3_500);
+        assert_eq!(balances[0].revealed_balance, U128::from_u64(3_500));
     }
 
     #[test]
     fn account_balances_handles_value_above_2_pow_33() {
-        // A balance > 2^33 must survive end-to-end as a native u64 (no float truncation).
+        // A balance > 2^33 must survive end-to-end as a native integer (no float truncation).
         let big: u64 = (1u64 << 33) + 123_456_789;
         let r = resource(5);
         let ids = [vault_id(1)];
         let v = fungible_vault(r, big);
         let account = account_substate_json(&ids);
         let balances = account_balances(&account, &[fetched_vault(ids[0], &v)]).expect("balances");
-        assert_eq!(balances[0].revealed_balance, big);
+        assert_eq!(balances[0].revealed_balance, U128::from_u64(big));
+    }
+
+    #[test]
+    fn account_balances_sums_revealed_above_u64_max() {
+        // Revealed balances span the full `Amount` width, so a per-resource sum above `u64::MAX` crosses as `U128`.
+        let r = resource(6);
+        let ids = [vault_id(1), vault_id(2)];
+        let v1 = fungible_vault(r, u64::MAX);
+        let v2 = fungible_vault(r, u64::MAX);
+        let account = account_substate_json(&ids);
+        let balances =
+            account_balances(&account, &[fetched_vault(ids[0], &v1), fetched_vault(ids[1], &v2)]).expect("balances");
+        assert_eq!(
+            serde_json::to_value(balances[0].revealed_balance).unwrap(),
+            serde_json::json!({ "hi": 1, "lo": u64::MAX - 1 })
+        );
     }
 
     #[test]
@@ -503,7 +520,7 @@ mod tests {
         ])
         .expect("balances");
         assert_eq!(balances.len(), 1);
-        assert_eq!(balances[0].revealed_balance, 500);
+        assert_eq!(balances[0].revealed_balance, U128::from_u64(500));
     }
 
     #[test]
@@ -538,6 +555,6 @@ mod tests {
         assert_eq!(wants, vec![SubstateId::Vault(id).to_string()]);
         let balances = account_balances(&account, &[fetched_vault(id, &v)]).expect("balances");
         assert_eq!(balances.len(), 1);
-        assert_eq!(balances[0].revealed_balance, 1_000);
+        assert_eq!(balances[0].revealed_balance, U128::from_u64(1_000));
     }
 }

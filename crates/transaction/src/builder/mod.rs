@@ -10,6 +10,8 @@ mod named_resource_ref;
 mod tests;
 mod workspace_ids;
 
+use std::collections::HashSet;
+
 pub use named_component_call::*;
 use tari_crypto::ristretto::RistrettoSecretKey;
 use tari_engine_types::{confidential::MinotariBurnClaimProof, indexed_value::IndexedValue, substate::SubstateId};
@@ -21,6 +23,7 @@ use tari_template_lib_types::{
     ResourceAddress,
     TemplateAddress,
     TemplateMetadataHash,
+    UtxoAddress,
     ValidatorFeePoolAddress,
     access_rules::ComponentAccessRules,
     constants::TARI_TOKEN,
@@ -165,6 +168,7 @@ impl TransactionBuilder<MainIntent> {
         self.with_fee_instructions_builder(|builder| builder.with_instructions(instructions))
     }
 
+    /// Note: fee `StealthTransfer` instructions must be added before any main instructions that spend their outputs.
     pub fn with_fee_instructions_builder<F: FnOnce(TransactionBuilder<FeeIntent>) -> TransactionBuilder<FeeIntent>>(
         mut self,
         f: F,
@@ -885,20 +889,18 @@ impl<D> TransactionBuilder<D> {
     }
 
     pub fn claim_validator_fees(self, address: ValidatorFeePoolAddress) -> Self {
-        self.then(|b| if b.fill_inputs { b.add_input(address) } else { b })
-            .add_instruction(Instruction::ClaimValidatorFees {
-                address,
-                max_amount: None,
-            })
+        self.add_instruction(Instruction::ClaimValidatorFees {
+            address,
+            max_amount: None,
+        })
     }
 
     pub fn claim_validator_fees_up_to<A: Into<Amount>>(self, address: ValidatorFeePoolAddress, max_amount: A) -> Self {
         let max_amount = max_amount.into();
-        self.then(|b| if b.fill_inputs { b.add_input(address) } else { b })
-            .add_instruction(Instruction::ClaimValidatorFees {
-                address,
-                max_amount: Some(max_amount),
-            })
+        self.add_instruction(Instruction::ClaimValidatorFees {
+            address,
+            max_amount: Some(max_amount),
+        })
     }
 
     pub fn create_proof<A: Into<ComponentReference>>(self, account: A, resource_addr: ResourceAddress) -> Self {
@@ -1019,10 +1021,21 @@ impl<D> TransactionBuilder<D> {
                 statement,
                 ..
             } => {
-                // NOTE: UTXO inputs may have come from previous instructions, and therefore are not an existing
-                // on-chain substate input. This means the user will have to manually add them as inputs as required.
-
                 self.add_input_for_resource_ref(resource_address_ref);
+                // An input UTXO may be an output of an earlier `StealthTransfer` instruction in this transaction. That
+                // UTXO is created and spent within the transaction, so only the remaining inputs are declared, matching
+                // `UnsignedTransactionV1::to_referenced_substates`. The rule sees outputs of `StealthTransfer`
+                // instructions only. Template calls also create UTXOs (a template's stealth transfer, a stealth fee
+                // payment), and an input spending one of those is still declared: build such a transaction with
+                // auto-fill off, or declare its inputs by hand.
+                let created_utxos = self.created_stealth_utxos();
+                declare_inputs(
+                    self.unsigned_transaction.inputs_mut(),
+                    instruction
+                        .stealth_input_utxos()
+                        .filter(|utxo| !created_utxos.contains(utxo))
+                        .map(InputDeclaration::write),
+                );
                 for arg in statement.script_path_template_functions().flat_map(|tf| &tf.args) {
                     self.add_inputs_for_raw_arg(arg, InputDeclaration::read);
                 }
@@ -1064,6 +1077,22 @@ impl<D> TransactionBuilder<D> {
             Instruction::AuthorizeProof { .. } |
             Instruction::DropProofAuthorization { .. } => {},
         }
+    }
+
+    /// The UTXOs the stealth transfers already in this transaction create. Fee instructions run before the main
+    /// instructions, so a main instruction may spend the outputs of either.
+    fn created_stealth_utxos(&self) -> HashSet<UtxoAddress> {
+        let pending_fee_instructions = self
+            .fee_instruction_builder
+            .iter()
+            .flat_map(|fee_builder| fee_builder.unsigned_transaction.instructions());
+        self.unsigned_transaction
+            .fee_instructions()
+            .iter()
+            .chain(pending_fee_instructions)
+            .chain(self.unsigned_transaction.instructions())
+            .flat_map(Instruction::stealth_output_utxos)
+            .collect()
     }
 
     fn resolve_call(&self, call: NamedComponentCall) -> ComponentReference {

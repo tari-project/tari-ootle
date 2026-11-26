@@ -5,13 +5,13 @@ import { useAccountsList } from "@api/hooks/useAccounts";
 import { useAddressBookList } from "@api/hooks/useAddressBook";
 import Autocomplete from "@mui/material/Autocomplete";
 import TextField from "@mui/material/TextField";
-import { shortenString } from "@utils/helpers";
 import { ReactNode, useMemo } from "react";
-
-interface AddressAutocompleteOption {
-  label: string;
-  value: string;
-}
+import {
+  AddressAutocompleteOption,
+  buildAddressOptions,
+  filterAddressOptions,
+  resolveSelectedAddressOption,
+} from "./addressAutocompleteHelpers";
 
 interface AddressAutocompleteProps {
   value: string;
@@ -40,26 +40,22 @@ export default function AddressAutocomplete({
   const { data: accounts } = useAccountsList(0, 100);
 
   const options = useMemo<AddressAutocompleteOption[]>(
-    () =>
-      (accounts?.accounts ?? [])
-        .map((acc) => ({
-          label: `${acc.account.name || ""} (${shortenString(acc.address)})`,
-          value: acc.address,
-        }))
-        .concat(
-          (addressBookData?.entries ?? []).map((e) => ({
-            label: `${e.name} (${shortenString(e.address)})`,
-            value: e.address,
-          })),
-        ),
+    () => buildAddressOptions(accounts?.accounts, addressBookData?.entries),
     [accounts, addressBookData],
   );
 
+  const selectedValue = useMemo(() => resolveSelectedAddressOption(options, value), [options, value]);
+
   return (
-    <Autocomplete
+    <Autocomplete<AddressAutocompleteOption, false, false, true>
       freeSolo
       options={options}
+      value={selectedValue}
       inputValue={value}
+      getOptionLabel={(option) => (typeof option === "string" ? option : option.label)}
+      getOptionKey={(option) => (typeof option === "string" ? option : option.key)}
+      isOptionEqualToValue={(option, val) => (typeof val === "string" ? option.value === val : option.key === val.key)}
+      filterOptions={(opts, state) => filterAddressOptions(opts, state.inputValue)}
       onInputChange={(_e, newValue, reason) => {
         if (reason === "input" || reason === "clear") {
           onChange(newValue);

@@ -2776,17 +2776,23 @@ mod create_stealth_transfer_statement_handler_tests {
             .expect("output present in store")
     }
 
+    /// A specific-input request with one well-formed output, so the request reaches input selection.
     fn specific_request(
-        account: ComponentAddress,
-        resource: ResourceAddress,
+        test: &StatementTest,
         utxo_addresses: Vec<UtxoAddress>,
     ) -> AccountsCreateStealthTransferStatementRequest {
         AccountsCreateStealthTransferStatementRequest {
             requests: vec![TransferStatementRequest {
-                sender_account: account.into(),
-                resource_address: resource,
+                sender_account: test.account.into(),
+                resource_address: test.stealth_resource,
                 input_selection: InputSelection::Specific { utxo_addresses },
-                outputs: vec![],
+                outputs: vec![TransferOutput {
+                    address: account_ootle_address(test),
+                    revealed_amount: Amount::zero(),
+                    blinded_amount: 100,
+                    memo: None,
+                    pay_to: PayTo::StealthPublicKey,
+                }],
             }],
         }
     }
@@ -2813,7 +2819,7 @@ mod create_stealth_transfer_statement_handler_tests {
             test.stealth_resource,
             PedersenCommitmentBytes::from_array([1u8; PedersenCommitmentBytes::length()]).into(),
         );
-        let request = specific_request(test.account, test.stealth_resource, vec![utxo]);
+        let request = specific_request(&test, vec![utxo]);
         let err = handle_create_stealth_transfer_statement(&test.context, Some(&bearer), request)
             .await
             .expect_err("specific selection without stealth_utxos:read must be rejected");
@@ -2831,11 +2837,15 @@ mod create_stealth_transfer_statement_handler_tests {
     async fn rejects_empty_specific_inputs() {
         let test = setup().await;
         let bearer = test.bearer(&test.transfer_and_read_scopes());
-        let request = specific_request(test.account, test.stealth_resource, vec![]);
+        let request = specific_request(&test, vec![]);
         let err = handle_create_stealth_transfer_statement(&test.context, Some(&bearer), request)
             .await
             .expect_err("empty specific input list must be rejected");
-        assert_invalid_params(&err);
+        let message = assert_invalid_params(&err).to_string();
+        assert!(
+            message.contains("utxo_addresses"),
+            "expected the input list to be rejected: {message}"
+        );
     }
 
     #[tokio::test]
@@ -2847,7 +2857,7 @@ mod create_stealth_transfer_statement_handler_tests {
             test.stealth_resource,
             PedersenCommitmentBytes::from_array([9u8; PedersenCommitmentBytes::length()]).into(),
         );
-        let request = specific_request(test.account, test.stealth_resource, vec![unknown]);
+        let request = specific_request(&test, vec![unknown]);
         let err = handle_create_stealth_transfer_statement(&test.context, Some(&bearer), request)
             .await
             .expect_err("unknown specific input must be rejected");

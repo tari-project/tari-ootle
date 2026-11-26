@@ -175,13 +175,9 @@ mod tests {
         let (_view_sk, view_pk) = RistrettoPublicKey::random_keypair(&mut rng);
         let commitment = get_commitment_factory().commit_value(&mask, 100).to_byte_type();
 
-        let err = generate_elgamal_viewable_balance_proof(
-            mask.as_bytes(),
-            99,
-            commitment.as_bytes(),
-            view_pk.as_bytes(),
-        )
-        .unwrap_err();
+        let err =
+            generate_elgamal_viewable_balance_proof(mask.as_bytes(), 99, commitment.as_bytes(), view_pk.as_bytes())
+                .unwrap_err();
         assert!(matches!(err, OotleWasmError::InvalidCommitment(_)));
     }
 
@@ -190,9 +186,15 @@ mod tests {
         let (_mask, view_pk, _view_sk, commitment, proof_json) = build_proof(42);
         let wrong_sk = RistrettoSecretKey::random(&mut rand::rng());
 
-        let err =
-            decrypt_elgamal_viewable_balance(&proof_json, &commitment, view_pk.as_bytes(), wrong_sk.as_bytes(), 0, 100)
-                .unwrap_err();
+        let err = decrypt_elgamal_viewable_balance(
+            &proof_json,
+            &commitment,
+            view_pk.as_bytes(),
+            wrong_sk.as_bytes(),
+            0,
+            100,
+        )
+        .unwrap_err();
         assert!(matches!(err, OotleWasmError::InvalidSecretKey(_)));
     }
 }

@@ -18,7 +18,7 @@ anyhow = { workspace = true }
 axum = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 fern = { workspace = true }
-humantime = { workspace = true }
+time = { workspace = true, features = ["formatting"] }
 include_dir = { workspace = true }
 log = { workspace = true }
 mime_guess = { workspace = true }

@@ -33,30 +33,32 @@ import { AccountInfo, substateIdToString } from "@tari-project/ootle-ts-bindings
 import { useState } from "react";
 import { IoAdd } from "react-icons/io5";
 import Dialog from "./AddAccount";
+import { buildAccountSelectOptions, resolveSelectedAccountValue } from "./selectAccountHelpers";
 
 function SelectAccount() {
   const account = useAccountStore((state) => state.account);
-  const { data: dataAccountsList } = useAccountsList(0, 10);
+  const { data: dataAccountsList } = useAccountsList(0, 100);
   const [dialogOpen, setDialogOpen] = useState(false);
   const theme = useTheme();
 
+  const options = buildAccountSelectOptions(dataAccountsList?.accounts, account);
+  const selectedValue = resolveSelectedAccountValue(options, account);
+
   const handleChange = (event: SelectChangeEvent) => {
-    const selectedValue = event.target.value as string;
-    if (selectedValue !== "addAccount") {
-      const account = dataAccountsList?.accounts.find(
-        (info: AccountInfo) => substateIdToString(info.account.component_address) === selectedValue,
-      );
-      if (account) {
-        setAccount(account.account);
-        setOotleAddress(account.address);
-        // setAccountName(event.target.value as string);
-      }
+    const nextValue = event.target.value as string;
+    if (nextValue === "addAccount") {
+      setDialogOpen(true);
+      return;
+    }
+    const selectedAccount = dataAccountsList?.accounts.find(
+      (info: AccountInfo) => substateIdToString(info.account.component_address) === nextValue,
+    );
+    if (selectedAccount) {
+      setAccount(selectedAccount.account);
+      setOotleAddress(selectedAccount.address);
     }
   };
 
-  const handleAddAccount = () => {
-    setDialogOpen(true);
-  };
   return (
     <Box sx={{ minWidth: 250 }}>
       <Dialog open={dialogOpen} setOpen={setDialogOpen} />
@@ -66,28 +68,17 @@ function SelectAccount() {
           labelId="account-select-label"
           id="account-select"
           size="small"
-          value={
-            account &&
-            dataAccountsList?.accounts.some(
-              (info: AccountInfo) => info.account.component_address === account?.component_address,
-            )
-              ? substateIdToString(account.component_address)
-              : dataAccountsList?.accounts.length
-                ? substateIdToString(dataAccountsList.accounts[0].account.component_address)
-                : "addAccount"
-          }
+          value={selectedValue}
           label="Account"
           onChange={handleChange}
         >
-          {dataAccountsList?.accounts.map((account: AccountInfo, i) => {
-            return (
-              <MenuItem key={i} value={substateIdToString(account.account.component_address)}>
-                {account.account.name || "<No Name>"}
-              </MenuItem>
-            );
-          })}
+          {options.map((opt) => (
+            <MenuItem key={opt.address} value={opt.address}>
+              {opt.label}
+            </MenuItem>
+          ))}
           <Divider />
-          <MenuItem value={"addAccount"} onClick={handleAddAccount}>
+          <MenuItem value={"addAccount"}>
             <IoAdd style={{ marginRight: theme.spacing(1) }} />
             Add Account
           </MenuItem>

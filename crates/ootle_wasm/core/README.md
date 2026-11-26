@@ -13,7 +13,7 @@ Encodes `Transaction` values using `tari_bor` and returns base64 strings matchin
 
 ### `hash` — Transaction hashing
 
-Produces the 64-byte signing messages. Delegates to `TransactionSignature::create_message_v1` (authorization) and `TransactionSealSignature::create_message_v1` (seal) to guarantee byte-identical output with the rest of the Tari codebase.
+Produces the 64-byte signing messages. Delegates to `TransactionSignature::create_message` (authorization) and `TransactionSealSignature::create_message` (seal) to guarantee byte-identical output with the rest of the Tari codebase.
 
 - `hash_unsigned_transaction(&UnsignedTransactionV1, seal_signer_hex: &str) → Result<Vec<u8>>`
 - `hash_unsigned_transaction_json(json: &str, seal_signer_hex: &str) → Result<Vec<u8>>`: accepts unsigned or unsealed JSON

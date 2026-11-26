@@ -108,7 +108,7 @@ mod tests {
             (UNLOADABLE, published(b"not wasm")),
         ]));
         ChainTemplateProvider::new(
-            Committed(WasmModule::load_template_from_code(code).unwrap()),
+            Committed(WasmModule::load(code).unwrap()),
             UncommittedTemplateCache::new(u64::MAX),
             chain,
         )

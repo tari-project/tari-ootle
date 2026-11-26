@@ -67,6 +67,8 @@ pub struct IndexerProcess {
     pub temp_dir_path: String,
     pub shutdown: Shutdown,
     pub db_path: PathBuf,
+    /// The epoch oracle config this indexer was started with, which a restart reuses.
+    pub epoch_oracle: EpochOracleConfig,
 }
 
 impl IndexerProcess {
@@ -122,10 +124,59 @@ impl IndexerProcess {
 }
 
 pub async fn spawn_indexer(world: &mut TariWorld, indexer_name: String, base_node_name: String) {
+    let epoch_oracle = world.epoch_oracle.clone().unwrap_or_default();
+    spawn_indexer_with_epoch_oracle(world, indexer_name, base_node_name, epoch_oracle).await;
+}
+
+/// Spawns an indexer that runs `epoch_oracle` rather than the scenario's epoch oracle.
+pub async fn spawn_indexer_with_epoch_oracle(
+    world: &mut TariWorld,
+    indexer_name: String,
+    base_node_name: String,
+    epoch_oracle: EpochOracleConfig,
+) {
+    let base_node_grpc_port = world.get_base_node(&base_node_name).grpc_port;
+    spawn_indexer_process(world, indexer_name, base_node_grpc_port, epoch_oracle).await;
+}
+
+/// Stops indexer `indexer_name` and waits for it to exit. Its data directory is kept for a restart.
+pub async fn stop_indexer(world: &mut TariWorld, indexer_name: &str) {
+    let indexer = world
+        .indexers
+        .get_mut(indexer_name)
+        .unwrap_or_else(|| panic!("Indexer {indexer_name} not found"));
+    indexer.shutdown.trigger();
+    let handle = std::mem::replace(&mut indexer.handle, task::spawn(async { Ok(()) }));
+    match handle.await {
+        Ok(Ok(())) => {},
+        Ok(Err(err)) => panic!("Indexer {indexer_name} exited with an error: {err:?}"),
+        Err(err) => panic!("Indexer {indexer_name} task failed: {err}"),
+    }
+    crate::cucumber_log!("Indexer {} stopped", indexer_name);
+}
+
+/// Restarts a stopped indexer on its existing data directory, with the epoch oracle config it first started with.
+pub async fn respawn_indexer(world: &mut TariWorld, indexer_name: String) {
+    let old = world
+        .indexers
+        .shift_remove(&indexer_name)
+        .unwrap_or_else(|| panic!("Indexer {indexer_name} not found for respawn"));
+    assert!(
+        old.shutdown.is_triggered(),
+        "Indexer {indexer_name} must be stopped before it restarts"
+    );
+    spawn_indexer_process(world, indexer_name, old.base_node_grpc_port, old.epoch_oracle).await;
+}
+
+async fn spawn_indexer_process(
+    world: &mut TariWorld,
+    indexer_name: String,
+    base_node_grpc_port: u16,
+    epoch_oracle: EpochOracleConfig,
+) {
     // each spawned indexer will use different ports
     let (port, api_port) = get_os_assigned_ports();
     let (web_ui_port, _) = get_os_assigned_ports();
-    let base_node_grpc_port = world.get_base_node(&base_node_name).grpc_port;
     let name = indexer_name.clone();
 
     let base_dir = get_base_dir_for_scenario("indexer", world.current_scenario_name.as_ref().unwrap(), &indexer_name);
@@ -144,41 +195,44 @@ pub async fn spawn_indexer(world: &mut TariWorld, indexer_name: String, base_nod
     let (ipc_sender, ipc_receiver) = tokio::sync::mpsc::unbounded_channel();
     let localnet_consensus_constants_file = world.consensus_constants_file.clone();
 
-    let handle = task::spawn(async move {
-        let mut config = ApplicationConfig {
-            common: CommonConfig::default(),
-            peer_seeds: PeerSeedsConfig::default(),
-            epoch_oracle: EpochOracleConfig::default(),
-            network: Network::LocalNet,
-            indexer: IndexerConfig::default(),
-        };
+    let handle = task::spawn({
+        let epoch_oracle = epoch_oracle.clone();
+        async move {
+            let mut config = ApplicationConfig {
+                common: CommonConfig::default(),
+                peer_seeds: PeerSeedsConfig::default(),
+                epoch_oracle,
+                network: Network::LocalNet,
+                indexer: IndexerConfig::default(),
+            };
 
-        // temporal folder for the VN files (e.g. sqlite file, json files, etc.)
-        cucumber_log!("Using indexer temp_dir: {}", base_dir.display());
-        config.common.base_path = base_dir.to_path_buf();
-        config.indexer.data_dir = base_dir.to_path_buf();
-        config.indexer.identity_file = base_dir.join("indexer_id.json");
-        config.indexer.localnet_consensus_constants_file = localnet_consensus_constants_file;
-        config.indexer.rate_limits.enabled = false;
-        config.epoch_oracle.base_layer.base_node_grpc_url =
-            Some(format!("http://127.0.0.1:{}", base_node_grpc_port).parse().unwrap());
-        config.indexer.state_scanning_interval = Duration::from_secs(5);
-        config.indexer.p2p.listener_port = port;
+            // temporal folder for the VN files (e.g. sqlite file, json files, etc.)
+            cucumber_log!("Using indexer temp_dir: {}", base_dir.display());
+            config.common.base_path = base_dir.to_path_buf();
+            config.indexer.data_dir = base_dir.to_path_buf();
+            config.indexer.identity_file = base_dir.join("indexer_id.json");
+            config.indexer.localnet_consensus_constants_file = localnet_consensus_constants_file;
+            config.indexer.rate_limits.enabled = false;
+            config.epoch_oracle.base_layer.base_node_grpc_url =
+                Some(format!("http://127.0.0.1:{}", base_node_grpc_port).parse().unwrap());
+            config.indexer.state_scanning_interval = Duration::from_secs(5);
+            config.indexer.p2p.listener_port = port;
 
-        config.indexer.p2p.enable_mdns = false;
-        config.indexer.api_listen_address = Some(format!("127.0.0.1:{}", api_port).parse().unwrap());
-        // OS-assigned port to avoid contention between concurrently running indexers
-        config.indexer.metrics_listen_address = Some("127.0.0.1:0".parse().unwrap());
-        config.indexer.web_ui_address = Some(format!("127.0.0.1:{}", web_ui_port).parse().unwrap());
+            config.indexer.p2p.enable_mdns = false;
+            config.indexer.api_listen_address = Some(format!("127.0.0.1:{}", api_port).parse().unwrap());
+            // OS-assigned port to avoid contention between concurrently running indexers
+            config.indexer.metrics_listen_address = Some("127.0.0.1:0".parse().unwrap());
+            config.indexer.web_ui_address = Some(format!("127.0.0.1:{}", web_ui_port).parse().unwrap());
 
-        // store all events in the database using an empty filter
-        config.indexer.event_filters = vec![];
+            // store all events in the database using an empty filter
+            config.indexer.event_filters = vec![];
 
-        // Add all other VNs as peer seeds
-        config.peer_seeds.peer_seeds = StringList::from(peer_seeds);
-        let ipc_stream = tokio_stream::wrappers::UnboundedReceiverStream::new(ipc_receiver);
+            // Add all other VNs as peer seeds
+            config.peer_seeds.peer_seeds = StringList::from(peer_seeds);
+            let ipc_stream = tokio_stream::wrappers::UnboundedReceiverStream::new(ipc_receiver);
 
-        run_indexer(config, ipc_stream, shutdown_signal).await
+            run_indexer(config, ipc_stream, shutdown_signal).await
+        }
     });
 
     // Wait for node to start up
@@ -198,6 +252,7 @@ pub async fn spawn_indexer(world: &mut TariWorld, indexer_name: String, base_nod
         temp_dir_path: base_dir_path,
         shutdown,
         db_path,
+        epoch_oracle,
     };
 
     crate::cucumber_log!("Indexer {} started", indexer_name);

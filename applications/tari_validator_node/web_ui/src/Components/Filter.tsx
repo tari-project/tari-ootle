@@ -69,22 +69,13 @@ const Filter: React.FC<ISearchProps> = ({
     // e.preventDefault();
     setFormState({ ...formState, [e.target.name]: e.target.value });
     setSearchValue(e.target.value);
-    setShowClearBtn(true);
+    setShowClearBtn(e.target.value !== "");
   };
 
-  // when search input changes and formState has been updated
-  useEffect(() => {
-    if (formState.searchValue === "") {
-      setShowClearBtn(false);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [formState, filterBy]);
-
   // once selected filter, focus on input
-
   useEffect(() => {
     if (filterBy !== "" && !initialUpdate) {
-      filterInputRef.current.focus();
+      filterInputRef.current?.focus();
     } else {
       setInitialUpdate(false);
     }
@@ -119,7 +110,7 @@ const Filter: React.FC<ISearchProps> = ({
                 return <em>Filter By</em>;
               }
 
-              return selected;
+              return filterItems.find((item) => item.value === selected)?.title ?? selected;
             }}
             onChange={onSelectChange}
             size="medium"
@@ -157,7 +148,7 @@ const Filter: React.FC<ISearchProps> = ({
             endAdornment: (
               <InputAdornment position="end">
                 {showClearBtn && (
-                  <IconButton onClick={cancelSearch}>
+                  <IconButton onClick={cancelSearch} aria-label="Clear search">
                     <CloseRoundedIcon />
                   </IconButton>
                 )}

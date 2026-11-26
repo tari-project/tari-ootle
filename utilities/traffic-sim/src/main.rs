@@ -72,7 +72,7 @@ enum Commands {
         #[arg(
             long,
             value_parser = parse_secret_view_key,
-            help = "Optional secret view key (hex) that overrides the wallet-generated view key"
+            help = "Optional secret view key (hex). Without it, the default account's key is the viewable-balance key"
         )]
         view_key: Option<RistrettoSecretKey>,
     },

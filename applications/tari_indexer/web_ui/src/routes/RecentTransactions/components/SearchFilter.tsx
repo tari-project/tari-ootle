@@ -34,7 +34,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 interface IFilterItems {
   title: string;
   value: string;
-  filterFn: (value: string, row: any) => void;
+  filterFn: (value: string, row: any) => boolean;
 }
 
 interface ISearchProps {
@@ -62,11 +62,14 @@ const TransactionFilter = ({
   const [initialUpdate, setInitialUpdate] = useState(true);
   const filterInputRef = useRef<any>(null);
   const stateObjectRef = useRef(stateObject);
+  const filterItemsRef = useRef(filterItems);
+  const searchStateRef = useRef({ searchValue: formState.searchValue, filterBy });
+  const prevSearchRef = useRef({ searchValue: formState.searchValue, filterBy });
 
-  // Update ref when stateObject changes
   useEffect(() => {
-    stateObjectRef.current = stateObject;
-  }, [stateObject]);
+    filterItemsRef.current = filterItems;
+    searchStateRef.current = { searchValue: formState.searchValue, filterBy };
+  }, [filterItems, formState.searchValue, filterBy]);
 
   const onSelectChange = (event: any) => {
     setFilterBy(event.target.value as string);
@@ -81,51 +84,49 @@ const TransactionFilter = ({
 
   // search function
   const requestSearch = useCallback(
-    (searchedVal: string, filter: string) => {
+    (searchedVal: string, filter: string, resetPage: boolean) => {
       const currentStateObject = stateObjectRef.current;
-      const filteredRows = currentStateObject.filter((row: any) => {
-        const index = filterItems.findIndex((item) => item.value === filter);
-        const filterFunction = filterItems[index].filterFn;
-        return filterFunction(searchedVal, row);
-      });
+      const filterItem = filterItemsRef.current.find((item) => item.value === filter);
+      if (!filterItem) {
+        return;
+      }
 
-      // Create a new array that is a copy of the original
-      const updatedObject = [...currentStateObject];
+      const updatedObject = currentStateObject.map((row: any) => ({
+        ...row,
+        show: Boolean(filterItem.filterFn(searchedVal, row)),
+      }));
 
-      // Set the "show" property of all transactions in the copy to false
-      updatedObject.forEach((template) => {
-        template.show = false;
-      });
-
-      // Loop over the filtered array, find the matching object in the
-      // original array, and set its "show" property to true
-      filteredRows.forEach((filteredRow: any) => {
-        const index = updatedObject.findIndex((item) => item.id === filteredRow.id);
-        if (index !== -1) {
-          updatedObject[index].show = true;
-        }
-      });
-
-      // Update the state with the modified copy of the original array
       setStateObject(updatedObject);
 
-      // Set paging to first page
-      setPage(0);
+      if (resetPage) {
+        setPage(0);
+      }
     },
-    [filterItems, setStateObject, setPage],
+    [setStateObject, setPage],
   );
+
+  // Re-apply the active filter whenever the source rows update (initial load, tab switch, or refetch)
+  useEffect(() => {
+    stateObjectRef.current = stateObject;
+    const { searchValue, filterBy: activeFilter } = searchStateRef.current;
+    requestSearch(searchValue, activeFilter, false);
+  }, [stateObject, requestSearch]);
 
   // when search input changes and formState has been updated
   useEffect(() => {
+    if (prevSearchRef.current.searchValue === formState.searchValue && prevSearchRef.current.filterBy === filterBy) {
+      return;
+    }
+    prevSearchRef.current = { searchValue: formState.searchValue, filterBy };
     const timeoutId = setTimeout(() => {
       if (formState.searchValue === "") {
         setShowClearBtn(false);
       }
-      requestSearch(formState.searchValue, filterBy);
+      requestSearch(formState.searchValue, filterBy, true);
     }, 300); // Debounce search
 
     return () => clearTimeout(timeoutId);
-  }, [formState.searchValue, filterBy]);
+  }, [formState.searchValue, filterBy, requestSearch]);
 
   // once selected filter, focus on input
 
@@ -139,7 +140,7 @@ const TransactionFilter = ({
 
   // search function when enter is pressed
   const confirmSearch = () => {
-    requestSearch(formState.searchValue, filterBy);
+    requestSearch(formState.searchValue, filterBy, true);
     if (formState.searchValue !== "") {
       setShowClearBtn(true);
     }
@@ -197,8 +198,8 @@ const TransactionFilter = ({
             endAdornment: (
               <InputAdornment position="end">
                 {showClearBtn && (
-                  <IconButton>
-                    <CloseRoundedIcon onClick={cancelSearch} />
+                  <IconButton aria-label="Clear search" onClick={cancelSearch}>
+                    <CloseRoundedIcon />
                   </IconButton>
                 )}
               </InputAdornment>

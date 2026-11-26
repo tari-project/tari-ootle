@@ -37,9 +37,17 @@ impl TraceTimer {
 impl Drop for TraceTimer {
     fn drop(&mut self) {
         let elapsed = self.start.elapsed();
-        if let Some(iterations) = self.iterations {
-            let avg = elapsed.as_millis() as f64 / iterations as f64;
-            log!(target: self.log_target, self.level, "⏲️ {} took {:.2?} for {} iterations (avg: {:.0?}ms)", self.context, elapsed, iterations, avg);
+        if let Some(iterations) = self.iterations.filter(|&n| n > 0) {
+            let avg = (elapsed.as_secs_f64() * 1000.0) / iterations as f64;
+            log!(
+                target: self.log_target,
+                self.level,
+                "⏲️ {} took {:.2?} for {} iterations (avg: {:.0?}ms)",
+                self.context,
+                elapsed,
+                iterations,
+                avg
+            );
         } else {
             log!(target: self.log_target, self.level, "⏲️ {} took {:.2?}", self.context, elapsed);
         }

@@ -119,6 +119,19 @@ pub struct FinalizedResult {
     pub execution_time: Duration,
     pub finalized_time: PrimitiveDateTime,
     pub abort_details: Option<String>,
+    /// The proof of `final_decision`, as the responder encoded it, undecoded. `None` when the responder holds none.
+    #[serde(default)]
+    pub inclusion_proof: Option<TransactionInclusionProof>,
+}
+
+/// A finalized decision's proof, as a responder encoded it.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct TransactionInclusionProof {
+    /// CBOR-encoded `SparseMerkleProofExt` of the transaction's leaf in the transaction merkle root of
+    /// [`Self::commit_proof`]'s block.
+    pub transaction_proof: Vec<u8>,
+    /// CBOR-encoded `CommittedBlockProof` of the block that finalized the transaction.
+    pub commit_proof: Vec<u8>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, minicbor::Encode, minicbor::Decode, minicbor::CborLen)]
@@ -261,6 +274,7 @@ impl<TAddr: NodeAddressable + ToPeerId, TMsg: MessageSpec> ValidatorNodeRpcClien
                     execution_time,
                     finalized_time: PrimitiveDateTime::new(finalized_time.date(), finalized_time.time()),
                     abort_details: Some(response.abort_details).filter(|s| !s.is_empty()),
+                    inclusion_proof: decode_inclusion_proof(response.transaction_proof, response.commit_proof)?,
                 })))
             },
             Err(_) => Err(ValidatorNodeRpcClientError::InvalidResponse(anyhow!(
@@ -471,6 +485,23 @@ fn decode_substate_proof(status: SubstateStatus, resp: &mut GetSubstateResponse)
         substate_down_proof: Some(std::mem::take(&mut resp.substate_down_proof)).filter(|proof| !proof.is_empty()),
         destroyed_at_state_version: (status == SubstateStatus::Down).then_some(resp.destroyed_at_state_version),
     })
+}
+
+/// The inclusion proof a responder sent, which must carry both parts or neither.
+fn decode_inclusion_proof(
+    transaction_proof: Vec<u8>,
+    commit_proof: Vec<u8>,
+) -> Result<Option<TransactionInclusionProof>, ValidatorNodeRpcClientError> {
+    match (transaction_proof.is_empty(), commit_proof.is_empty()) {
+        (true, true) => Ok(None),
+        (false, false) => Ok(Some(TransactionInclusionProof {
+            transaction_proof,
+            commit_proof,
+        })),
+        _ => Err(ValidatorNodeRpcClientError::InvalidResponse(anyhow!(
+            "Node returned a transaction inclusion proof without the commit proof of its block, or the reverse"
+        ))),
+    }
 }
 
 fn decode_batched_substate(proven: proto::rpc::ProvenSubstate) -> Result<BatchedSubstate, ValidatorNodeRpcClientError> {

@@ -45,7 +45,7 @@ fn it_finds_every_signer_badge_in_a_directly_called_frame() {
             .call_function(template, "assert_badge_in_scope", args![
                 NonFungibleAddress::from_public_key(pk)
             ])
-            .add_signer(&seal_pk, &sk)
+            .authorize(&seal_pk, [&sk])
             .seal(test.secret_key()),
         vec![],
     );

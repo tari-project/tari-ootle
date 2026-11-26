@@ -176,6 +176,13 @@ pub(crate) fn resolve_one_stealth_utxo(
 ) -> Result<bool, OotleSdkError> {
     // Derive the UTXO substate id.
     let utxo_substate_id = stealth_utxo_substate_id(resource_address, commitment)?;
+    // Reject duplicate spending of the same commitment in one transfer before decrypting or
+    // accumulating its mask.
+    if resolved.iter().any(|decl| *decl.substate_id() == utxo_substate_id) {
+        return Err(OotleSdkError::Validation(format!(
+            "stealth UTXO '{utxo_substate_id}' appears more than once in stealth inputs"
+        )));
+    }
 
     // Resolve it against the cache.
     let value = match cache.get(&utxo_substate_id) {
@@ -887,5 +894,37 @@ mod tests {
             req.is_empty(),
             "seal_signer must not be duplicated into required_signers"
         );
+    }
+
+    #[test]
+    fn resolve_one_stealth_utxo_rejects_duplicate_commitment() {
+        let f1 = make_fixture(1000, 108, 109, 110, 111);
+        let (_, com1, owner1) = want_fields(&f1.want);
+        let custom_resource = ResourceAddressStr::parse(resource().to_string()).unwrap();
+
+        let mut cache: HashMap<SubstateId, Option<SubstateValue>> = HashMap::new();
+        cache.insert(
+            f1.substate_id.clone(),
+            Some(serde_json::from_value(f1.value_json.clone()).unwrap()),
+        );
+        let secrets = secrets_for(&f1);
+        let mut resolved = vec![InputDeclaration::write(f1.substate_id.clone())];
+        let err = resolve_one_stealth_utxo(
+            custom_resource.as_str(),
+            com1,
+            owner1,
+            &cache,
+            &secrets,
+            &mut Vec::new(),
+            &mut RistrettoSecretKey::default(),
+            false,
+            &mut None,
+            &mut Vec::new(),
+            &mut resolved,
+            &mut Vec::new(),
+        )
+        .unwrap_err();
+        assert_eq!(err.code(), "VALIDATION");
+        assert!(err.to_string().contains("more than once"));
     }
 }

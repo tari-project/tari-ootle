@@ -55,8 +55,18 @@ mod tests {
         Amount,
         EncryptedData,
         Hash32,
+        access_rules::MAX_ACCESS_RULE_NODES,
         crypto::{PedersenCommitmentBytes, UtxoTag},
-        stealth::{MAX_STEALTH_INPUTS, MerkleProof, SpendAuthorization, SpendCondition, SpendWitness, StealthInput},
+        stealth::{
+            AtomicCondition,
+            BuiltinPredicate,
+            MAX_CONDITIONS_PER_CONJUNCTION,
+            MerkleProof,
+            SpendAuthorization,
+            SpendCondition,
+            SpendWitness,
+            StealthInput,
+        },
     };
 
     use super::*;
@@ -97,13 +107,26 @@ mod tests {
 
     #[test]
     fn rejects_transfer_exceeding_decode_limits() {
+        // Each input's leaf is within the per-conjunction bound, so JSON deserialization accepts every input; only the
+        // spend condition node bound shared across all inputs is exceeded.
+        let script_path_input = || {
+            let leaf = SpendCondition::all(
+                (0..MAX_CONDITIONS_PER_CONJUNCTION).map(|_| AtomicCondition::Builtin(BuiltinPredicate::AfterEpoch(0))),
+            );
+            let proof = MerkleProof::new(vec![Hash32::from_array([1; 32])]);
+            StealthInput::with_witness(PedersenCommitmentBytes::zero(), SpendWitness::script_path(leaf, proof))
+        };
         let mut transfer = create_transfer_statement(iter::empty(), Amount::from(10u64), iter::empty(), None).unwrap();
-        transfer.inputs_statement.inputs = (0..=MAX_STEALTH_INPUTS)
-            .map(|_| StealthInput::new(PedersenCommitmentBytes::zero()))
+        transfer.inputs_statement.inputs = (0..=MAX_ACCESS_RULE_NODES / MAX_CONDITIONS_PER_CONJUNCTION)
+            .map(|_| script_path_input())
             .collect();
+        assert!(transfer.num_nodes() > MAX_ACCESS_RULE_NODES);
         let json = serde_json::to_string(&transfer).unwrap();
         let err = validate_stealth_transfer(&json, None).unwrap_err();
-        assert!(matches!(err, OotleWasmError::StealthValidation(_)));
+        assert!(
+            matches!(&err, OotleWasmError::StealthValidation(msg) if msg.contains("decode limits")),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]

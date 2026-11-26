@@ -518,10 +518,7 @@ mod tests {
             Some("input substate missing".to_string()),
         );
         assert_eq!(with_details.code, "ABORT");
-        assert_eq!(
-            with_details.abort_code.as_deref(),
-            Some("ONE_OR_MORE_INPUTS_NOT_FOUND")
-        );
+        assert_eq!(with_details.abort_code.as_deref(), Some("ONE_OR_MORE_INPUTS_NOT_FOUND"));
         assert_eq!(with_details.failure_code, None);
         assert_eq!(with_details.message, "input substate missing");
 

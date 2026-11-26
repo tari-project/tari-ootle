@@ -251,6 +251,18 @@ impl ResourceContainer {
         }
     }
 
+    /// The discrete items a move of `amount` out of this container carries, read before the move is made. A
+    /// non-fungible container moves an amount as that many of its unlocked ids, up to those it holds; every other
+    /// container moves an amount out of its balance, which carries no discrete item.
+    pub fn discrete_items_in_amount(&self, amount: Amount) -> usize {
+        match self {
+            Self::NonFungible { token_ids, .. } => {
+                usize::try_from(amount.to_u128()).map_or(token_ids.len(), |n| n.min(token_ids.len()))
+            },
+            Self::Fungible { .. } | Self::Confidential { .. } | Self::Stealth { .. } => 0,
+        }
+    }
+
     pub fn into_non_fungible_ids(self) -> Option<BTreeSet<NonFungibleId>> {
         match self {
             Self::NonFungible { token_ids, .. } => Some(token_ids),

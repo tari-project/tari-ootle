@@ -87,6 +87,7 @@ use tari_template_lib::{
         ProofRef,
         RecallResourceArg,
         ResourceAction,
+        ResourceDiscriminator,
         ResourceGetNonFungibleArg,
         ResourceRef,
         ResourceUpdateNonFungibleDataArg,
@@ -1401,19 +1402,32 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
     }
 
     /// Charges for `items` discrete items (non-fungible ids or confidential commitments, see
-    /// [`ResourceContainer::discrete_items_held`]) an engine call moved from one container to another.
-    /// The count is read off the container that moved, so the charge follows the move it pays for,
-    /// and a transaction that cannot cover it fails out of compute having made that one move.
+    /// [`ResourceContainer::discrete_items_held`]) an engine call is about to move from one container
+    /// to another. It must be charged before the move, with the count read off the arguments or the
+    /// container the move takes from, so a transaction that cannot cover it fails out of compute
+    /// having moved nothing. A fee intent that fails collects no fee, so any work it runs past its
+    /// credit goes unpaid, and the same transaction can be submitted again.
     fn charge_discrete_items_moved(&self, items: usize) -> Result<(), RuntimeError> {
         self.tracker
             .charge_native_execution(tari_engine_types::limits::non_fungible_move_points(items as u64))
     }
 
-    /// Charges for `items` discrete items an engine call locked into a new proof. They move twice:
-    /// into the proof now, and back when the proof is dropped, explicitly or with its frame. Both
-    /// moves are charged here, since a frame's proofs can be dropped where no engine call is made.
+    /// Charges for `items` discrete items an engine call is about to lock into a new proof. They move
+    /// twice: into the proof now, and back when the proof is dropped, explicitly or with its frame.
+    /// Both moves are charged here, since a frame's proofs can be dropped where no engine call is made.
     fn charge_discrete_items_locked(&self, items: usize) -> Result<(), RuntimeError> {
         self.charge_discrete_items_moved(items.saturating_mul(2))
+    }
+
+    /// Reads a count off the vault `vault_id`, such as the discrete items a move out of it is about to
+    /// carry, so the move can be charged before it runs.
+    fn read_vault_with<T>(&self, vault_id: VaultId, f: impl FnOnce(&Vault) -> T) -> Result<T, RuntimeError> {
+        self.tracker.write_with(|state| {
+            let vault_lock = state.read_lock_substate(SubstateId::Vault(vault_id))?;
+            let value = f(state.get_vault(&vault_lock)?);
+            state.unlock_substate(vault_lock)?;
+            Ok(value)
+        })
     }
 
     /// Charges [`Self::charge_engine_arg`] for an argument's CBOR, then decodes it into the `Value`
@@ -2195,7 +2209,18 @@ where
                     self.invoke_resource_access_hook(auth_hook, auth_caller, ResourceAuthAction::Recall)?;
                 }
 
-                let (result, moved) = self.tracker.write_with(|state_mut| {
+                // Only public fungible and stealth vaults recall an amount, which carries no discrete item.
+                let moved = match &arg.resource {
+                    ResourceDiscriminator::Everything => {
+                        self.read_vault_with(arg.vault_id, Vault::discrete_items_held)?
+                    },
+                    ResourceDiscriminator::Fungible { .. } => 0,
+                    ResourceDiscriminator::NonFungible { tokens } => tokens.len(),
+                    ResourceDiscriminator::Confidential { commitments, .. } => commitments.len(),
+                };
+                self.charge_discrete_items_moved(moved)?;
+
+                self.tracker.write_with(|state_mut| {
                     let vault_lock = state_mut.write_lock_substate(arg.vault_id.into())?;
 
                     // The recall rule that authorized this action belongs to `resource_address`, so it may only
@@ -2217,18 +2242,14 @@ where
                     )?;
                     Self::emit_std_event("resource", "recall", resource_address, payload, state_mut)?;
 
-                    let moved = resource.discrete_items_held();
                     let bucket_id = state_mut.id_provider()?.new_bucket_id()?;
                     state_mut.new_bucket(bucket_id, resource)?;
 
                     state_mut.unlock_substate(vault_lock)?;
 
                     let bucket = tari_template_lib::models::Bucket::from_id(bucket_id);
-                    Ok::<_, RuntimeError>((InvokeResult::encode(&bucket)?, moved))
-                })?;
-                self.charge_discrete_items_moved(moved)?;
-
-                Ok(result)
+                    Ok(InvokeResult::encode(&bucket)?)
+                })
             },
             ResourceAction::GetNonFungible => {
                 let resource_address =
@@ -2868,7 +2889,12 @@ where
 
                 self.authorize_vault_action(vault_id, ResourceAuthAction::Deposit, VaultFreezeFlag::Deposits)?;
 
-                let moved = self.tracker.write_with(move |state_mut| {
+                let moved = self
+                    .tracker
+                    .read_with(|state| Ok::<_, RuntimeError>(state.get_bucket(bucket_id)?.discrete_items_held()))?;
+                self.charge_discrete_items_moved(moved)?;
+
+                self.tracker.write_with(move |state_mut| {
                     let vault_lock = state_mut.write_lock_substate(SubstateId::Vault(vault_id))?;
                     let bucket = state_mut.take_bucket(bucket_id)?;
                     Self::check_bucket_is_unlocked("deposit", bucket_id, &bucket)?;
@@ -2879,15 +2905,12 @@ where
                     Self::emit_std_event("vault", "deposit", vault_id, payload, state_mut)?;
 
                     let vault_mut = state_mut.get_vault_mut(&vault_lock)?;
-
-                    let moved = bucket.discrete_items_held();
                     vault_mut.deposit(bucket)?;
 
                     state_mut.unlock_substate(vault_lock)?;
 
-                    Ok::<_, RuntimeError>(moved)
+                    Ok::<_, RuntimeError>(())
                 })?;
-                self.charge_discrete_items_moved(moved)?;
 
                 Ok(InvokeResult::unit())
             },
@@ -2943,7 +2966,17 @@ where
                         None
                     };
 
-                let (result, moved) = self.tracker.write_with(|state| {
+                // A confidential withdraw's container holds only the proof's output commitment, if it has one.
+                let moved = match &arg {
+                    VaultWithdrawArg::Fungible { amount } | VaultWithdrawArg::Stealth { amount } => {
+                        self.read_vault_with(vault_id, |vault| vault.discrete_items_in_amount(*amount))?
+                    },
+                    VaultWithdrawArg::NonFungible { ids } => ids.len(),
+                    VaultWithdrawArg::Confidential { proof } => usize::from(proof.output_proof.output.is_some()),
+                };
+                self.charge_discrete_items_moved(moved)?;
+
+                self.tracker.write_with(|state| {
                     let vault_lock = state.write_lock_substate(SubstateId::Vault(vault_id))?;
 
                     let vault_mut = state.get_vault_mut(&vault_lock)?;
@@ -2976,18 +3009,14 @@ where
 
                     Self::emit_std_event("vault", "withdraw", vault_id, payload, state)?;
 
-                    let moved = resource_container.discrete_items_held();
                     let bucket_id = state.id_provider()?.new_bucket_id()?;
                     state.new_bucket(bucket_id, resource_container)?;
 
                     state.unlock_substate(vault_lock)?;
 
                     let bucket = tari_template_lib::models::Bucket::from_id(bucket_id);
-                    Ok::<_, RuntimeError>((InvokeResult::encode(&bucket)?, moved))
-                })?;
-                self.charge_discrete_items_moved(moved)?;
-
-                Ok(result)
+                    Ok(InvokeResult::encode(&bucket)?)
+                })
             },
             VaultAction::GetBalance => {
                 let vault_id = vault_ref.vault_id().ok_or_else(|| RuntimeError::InvalidArgument {
@@ -3167,21 +3196,20 @@ where
 
                 self.authorize_vault_action(vault_id, ResourceAuthAction::Withdraw, VaultFreezeFlag::Withdrawals)?;
 
-                let (result, locked) = self.tracker.write_with(|state| {
+                let locked = self.read_vault_with(vault_id, Vault::discrete_items_held)?;
+                self.charge_discrete_items_locked(locked)?;
+
+                self.tracker.write_with(|state| {
                     let vault_lock = state.write_lock_substate(SubstateId::Vault(vault_id))?;
                     let proof_id = state.id_provider()?.new_proof_id()?;
                     let vault_mut = state.get_vault_mut(&vault_lock)?;
                     let locked_funds = vault_mut.lock_all(vault_id)?;
-                    let locked = locked_funds.discrete_items_held();
                     state.new_proof(proof_id, locked_funds)?;
 
                     state.unlock_substate(vault_lock)?;
 
-                    Ok::<_, RuntimeError>((InvokeResult::encode(&proof_id)?, locked))
-                })?;
-                self.charge_discrete_items_locked(locked)?;
-
-                Ok(result)
+                    Ok(InvokeResult::encode(&proof_id)?)
+                })
             },
             VaultAction::CreateProofByFungibleAmount => {
                 let vault_id = vault_ref.vault_id().ok_or_else(|| RuntimeError::InvalidArgument {
@@ -3192,21 +3220,20 @@ where
 
                 self.authorize_vault_action(vault_id, ResourceAuthAction::Withdraw, VaultFreezeFlag::Withdrawals)?;
 
-                let (result, locked) = self.tracker.write_with(|state| {
+                let locked = self.read_vault_with(vault_id, |vault| vault.discrete_items_in_amount(arg.amount))?;
+                self.charge_discrete_items_locked(locked)?;
+
+                self.tracker.write_with(|state| {
                     let vault_lock = state.write_lock_substate(SubstateId::Vault(vault_id))?;
                     let proof_id = state.id_provider()?.new_proof_id()?;
                     let vault_mut = state.get_vault_mut(&vault_lock)?;
                     let locked_funds = vault_mut.lock_by_amount(vault_id, arg.amount)?;
-                    let locked = locked_funds.discrete_items_held();
                     state.new_proof(proof_id, locked_funds)?;
 
                     state.unlock_substate(vault_lock)?;
 
-                    Ok::<_, RuntimeError>((InvokeResult::encode(&proof_id)?, locked))
-                })?;
-                self.charge_discrete_items_locked(locked)?;
-
-                Ok(result)
+                    Ok(InvokeResult::encode(&proof_id)?)
+                })
             },
             VaultAction::CreateProofByNonFungibles => {
                 let vault_id = vault_ref.vault_id().ok_or_else(|| RuntimeError::InvalidArgument {
@@ -3217,21 +3244,19 @@ where
 
                 self.authorize_vault_action(vault_id, ResourceAuthAction::Withdraw, VaultFreezeFlag::Withdrawals)?;
 
-                let (result, locked) = self.tracker.write_with(|state| {
+                self.charge_discrete_items_locked(arg.ids.len())?;
+
+                self.tracker.write_with(|state| {
                     let vault_lock = state.write_lock_substate(SubstateId::Vault(vault_id))?;
                     let proof_id = state.id_provider()?.new_proof_id()?;
                     let vault_mut = state.get_vault_mut(&vault_lock)?;
                     let locked_funds = vault_mut.lock_by_non_fungible_ids(vault_id, arg.ids)?;
-                    let locked = locked_funds.discrete_items_held();
                     state.new_proof(proof_id, locked_funds)?;
 
                     state.unlock_substate(vault_lock)?;
 
-                    Ok::<_, RuntimeError>((InvokeResult::encode(&proof_id)?, locked))
-                })?;
-                self.charge_discrete_items_locked(locked)?;
-
-                Ok(result)
+                    Ok(InvokeResult::encode(&proof_id)?)
+                })
             },
             VaultAction::CreateProofByConfidentialResource => Err(RuntimeError::NotSupported {
                 details: "CreateProofByConfidentialResource not implemented".to_string(),
@@ -3340,19 +3365,20 @@ where
                     argument: "bucket_ref",
                     reason: "Take bucket action requires a bucket id".to_string(),
                 })?;
-                let amount = args.assert_one_arg()?;
+                let amount: Amount = args.assert_one_arg()?;
 
-                let (result, moved) = self.tracker.write_with(|state| {
-                    let bucket = state.get_bucket_mut(bucket_id)?;
-                    let resource = bucket.take(amount)?;
-                    let moved = resource.discrete_items_held();
-                    let bucket_id = state.new_bucket_id()?;
-                    state.new_bucket(bucket_id, resource)?;
-                    Ok::<_, RuntimeError>((InvokeResult::encode(&bucket_id)?, moved))
+                let moved = self.tracker.read_with(|state| {
+                    Ok::<_, RuntimeError>(state.get_bucket(bucket_id)?.discrete_items_in_amount(amount))
                 })?;
                 self.charge_discrete_items_moved(moved)?;
 
-                Ok(result)
+                self.tracker.write_with(|state| {
+                    let bucket = state.get_bucket_mut(bucket_id)?;
+                    let resource = bucket.take(amount)?;
+                    let bucket_id = state.new_bucket_id()?;
+                    state.new_bucket(bucket_id, resource)?;
+                    Ok(InvokeResult::encode(&bucket_id)?)
+                })
             },
             BucketAction::TakeConfidential => {
                 let bucket_id = bucket_ref.bucket_id().ok_or_else(|| RuntimeError::InvalidArgument {
@@ -3414,19 +3440,20 @@ where
                     argument: "bucket_ref",
                     reason: "Join bucket action requires a bucket id".to_string(),
                 })?;
-                let other_bucket_id = args.assert_one_arg()?;
+                let other_bucket_id: BucketId = args.assert_one_arg()?;
 
-                let (result, moved) = self.tracker.write_with(|state| {
-                    let other_bucket = state.take_bucket(other_bucket_id)?;
-                    Self::check_bucket_is_unlocked("join", other_bucket_id, &other_bucket)?;
-                    let moved = other_bucket.discrete_items_held();
-                    let bucket = state.get_bucket_mut(bucket_id)?;
-                    bucket.join(other_bucket)?;
-                    Ok::<_, RuntimeError>((InvokeResult::encode(&bucket_id)?, moved))
+                let moved = self.tracker.read_with(|state| {
+                    Ok::<_, RuntimeError>(state.get_bucket(other_bucket_id)?.discrete_items_held())
                 })?;
                 self.charge_discrete_items_moved(moved)?;
 
-                Ok(result)
+                self.tracker.write_with(|state| {
+                    let other_bucket = state.take_bucket(other_bucket_id)?;
+                    Self::check_bucket_is_unlocked("join", other_bucket_id, &other_bucket)?;
+                    let bucket = state.get_bucket_mut(bucket_id)?;
+                    bucket.join(other_bucket)?;
+                    Ok(InvokeResult::encode(&bucket_id)?)
+                })
             },
             BucketAction::Burn => {
                 let bucket_id = bucket_ref.bucket_id().ok_or_else(|| RuntimeError::InvalidArgument {
@@ -3538,18 +3565,19 @@ where
                     self.invoke_resource_access_hook(auth_hook, auth_caller, ResourceAuthAction::Withdraw)?;
                 }
 
-                let (result, locked) = self.tracker.write_with(|state| {
+                let locked = self
+                    .tracker
+                    .read_with(|state| Ok::<_, RuntimeError>(state.get_bucket(bucket_id)?.discrete_items_held()))?;
+                self.charge_discrete_items_locked(locked)?;
+
+                self.tracker.write_with(|state| {
                     let locked_funds = state.get_bucket_mut(bucket_id)?.lock_all()?;
-                    let locked = locked_funds.discrete_items_held();
 
                     let proof_id = state.id_provider()?.new_proof_id()?;
                     state.new_proof(proof_id, locked_funds)?;
 
-                    Ok::<_, RuntimeError>((InvokeResult::encode(&proof_id)?, locked))
-                })?;
-                self.charge_discrete_items_locked(locked)?;
-
-                Ok(result)
+                    Ok(InvokeResult::encode(&proof_id)?)
+                })
             },
             BucketAction::GetNonFungibleIds => {
                 let bucket_id = bucket_ref.bucket_id().ok_or_else(|| RuntimeError::InvalidArgument {
@@ -5373,6 +5401,125 @@ mod tests {
         });
 
         (runtime, vault_id, bucket_id)
+    }
+
+    /// A runtime whose current frame owns a confidential vault holding `count` commitments and a bucket holding `count`
+    /// others, enough that moving either set charges more than the fee intent's credit.
+    fn runtime_with_large_confidential_containers(
+        count: u32,
+    ) -> (
+        RuntimeInterfaceImpl<MemoryStateStore, DummyTemplateProvider>,
+        tari_template_lib::types::VaultId,
+        BucketId,
+    ) {
+        use tari_engine_types::{resource::Resource, vault::Vault};
+
+        let runtime = runtime_with_blobs(Blobs::default());
+        let resource_address = ResourceAddress::new([4u8; 32].into());
+        let vault_id = tari_template_lib::types::VaultId::new([5u8; 32].into());
+        let resource = Resource::new(
+            ResourceType::Confidential,
+            SubstateOwnerRule::None,
+            ResourceAccessRules::new(),
+            Metadata::new(),
+            None,
+            None,
+            0,
+            false,
+        );
+        let container = |seeds: std::ops::Range<u32>| {
+            let commitments = seeds.map(|i| {
+                let mut bytes = [0u8; 32];
+                bytes[..4].copy_from_slice(&i.to_le_bytes());
+                PedersenCommitmentBytes::from_array(bytes)
+            });
+            ResourceContainer::confidential(resource_address, commitments, Amount::zero())
+        };
+
+        runtime
+            .push_call_frame(
+                PushCallFrame::Static {
+                    template_address: TemplateAddress::default(),
+                    module_name: "Test".to_string(),
+                    arg_scope: IndexedWellKnownTypes::new(),
+                    entity_id: EntityId::default(),
+                },
+                None,
+            )
+            .unwrap();
+        let bucket_id = runtime.tracker.write_with(|state| {
+            state.new_substate(resource_address, resource).unwrap();
+            state.new_substate(vault_id, Vault::new(container(0..count))).unwrap();
+            let bucket_id = state.id_provider().unwrap().new_bucket_id().unwrap();
+            state.new_bucket(bucket_id, container(count..2 * count)).unwrap();
+            bucket_id
+        });
+
+        (runtime, vault_id, bucket_id)
+    }
+
+    /// The vault's discrete items held, and whether it has anything locked.
+    fn vault_items_and_locks(
+        runtime: &RuntimeInterfaceImpl<MemoryStateStore, DummyTemplateProvider>,
+        vault_id: tari_template_lib::types::VaultId,
+    ) -> (usize, bool) {
+        runtime
+            .read_vault_with(vault_id, |vault| {
+                (vault.discrete_items_held(), vault.has_locked_funds())
+            })
+            .unwrap()
+    }
+
+    #[test]
+    fn a_proof_the_fee_intent_cannot_pay_for_locks_nothing() {
+        let count = 10_000;
+        let (runtime, vault_id, _) = runtime_with_large_confidential_containers(count);
+        assert!(
+            2 * limits::non_fungible_move_points(u64::from(count)) > limits::FREE_COMPUTE_GRACE_POINTS,
+            "the lock must cost more than the fee intent's credit"
+        );
+
+        let err = runtime
+            .vault_invoke(
+                VaultRef::Ref(vault_id),
+                VaultAction::CreateProofByResource,
+                EngineArgs::default(),
+            )
+            .unwrap_err();
+        assert!(
+            matches!(err, RuntimeError::FeeIntentComputeExceeded { .. }),
+            "expected FeeIntentComputeExceeded, got {err:?}"
+        );
+        assert_eq!(
+            vault_items_and_locks(&runtime, vault_id),
+            (count as usize, false),
+            "a refused charge must leave every commitment in the vault unlocked"
+        );
+    }
+
+    #[test]
+    fn a_deposit_the_fee_intent_cannot_pay_for_moves_nothing() {
+        let count = 10_000;
+        let (runtime, vault_id, bucket_id) = runtime_with_large_confidential_containers(count);
+        assert!(
+            limits::non_fungible_move_points(u64::from(count)) > limits::FREE_COMPUTE_GRACE_POINTS,
+            "the deposit must cost more than the fee intent's credit"
+        );
+
+        let deposit_args = EngineArgs::from(vec![tari_bor::encode(&bucket_id).unwrap().into()]);
+        let err = runtime
+            .vault_invoke(VaultRef::Ref(vault_id), VaultAction::Deposit, deposit_args)
+            .unwrap_err();
+        assert!(
+            matches!(err, RuntimeError::FeeIntentComputeExceeded { .. }),
+            "expected FeeIntentComputeExceeded, got {err:?}"
+        );
+        assert_eq!(vault_items_and_locks(&runtime, vault_id), (count as usize, false));
+        let bucket_items = runtime
+            .tracker
+            .read_with(|state| state.get_bucket(bucket_id).map(|bucket| bucket.discrete_items_held()))
+            .expect("a refused charge must leave the bucket in place");
+        assert_eq!(bucket_items, count as usize);
     }
 
     #[test]

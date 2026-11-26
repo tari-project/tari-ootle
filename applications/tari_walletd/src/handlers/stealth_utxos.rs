@@ -104,18 +104,14 @@ pub async fn handle_decrypt_value(
         ));
     }
 
-    let view_key = sdk
-        .key_manager_api()
-        .get_key(view_key_id)
-        .optional()?
-        .ok_or_else(|| {
-            invalid_params(
-                "view_key_id",
-                Some(format!(
-                    "{view_key_id} does not exist: the wallet holds no imported key with that id"
-                )),
-            )
-        })?;
+    let view_key = sdk.key_manager_api().get_key(view_key_id).optional()?.ok_or_else(|| {
+        invalid_params(
+            "view_key_id",
+            Some(format!(
+                "{view_key_id} does not exist: the wallet holds no imported key with that id"
+            )),
+        )
+    })?;
 
     let utxo_ids = req
         .ids
@@ -298,7 +294,10 @@ mod tests {
                 .sign_with_stealth_key::<_, _>(&spend_key, &seal_public_key, &tx)
                 .map(|_: SignatureOutput| ())
                 .unwrap_err();
-            assert!(matches!(err, KeyManagerApiError::InvalidKeyId { .. }), "{branch}: {err:?}");
+            assert!(
+                matches!(err, KeyManagerApiError::InvalidKeyId { .. }),
+                "{branch}: {err:?}"
+            );
         }
 
         let valid_spend_key = StealthUtxoSpendKeyId {

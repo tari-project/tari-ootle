@@ -11,7 +11,10 @@ import type {
   SyncActivityBucket,
 } from "@tari-project/ootle-ts-bindings";
 
-export type MapMode = "state" | "lag" | "activity";
+export type MapMode = "state" | "lag" | "activity" | "bias";
+
+/** |z| at and beyond which a cell is drawn at full strength in bias mode. */
+export const BIAS_Z_SATURATION = 4;
 
 /** A shard whose last mismatch is this recent is marked on the map. */
 export const RECENT_MISMATCH_SECS = 10 * 60;
@@ -61,6 +64,44 @@ export function stagedBacklog(shard: ShardSyncStatus): number {
   if (!shard.staged) return 0;
   const verified = shard.verified?.state_version ?? -1;
   return Math.max(0, shard.staged.state_version - verified);
+}
+
+/** The highest state version this indexer has seen for the shard: verified, staged or probed at its committee. */
+export function shardVersion(shard: ShardSyncStatus): number | null {
+  const versions = [shard.verified?.state_version, shard.staged?.state_version, shard.tip_leaf?.state_version].filter(
+    (v): v is number => v !== undefined,
+  );
+  return versions.length === 0 ? null : Math.max(...versions);
+}
+
+/** How the preshards' versions are spread. The global shard's traffic differs by design, so it is left out. */
+export interface VersionSpread {
+  mean: number;
+  /** Sample variance over the mean: about 1 when versions land on shards by chance, well above 1 under bias. */
+  dispersion: number;
+  /** The number of preshards with a version. */
+  shards: number;
+}
+
+export function versionSpread(shards: ShardSyncStatus[]): VersionSpread | null {
+  const versions = shards
+    .filter((s) => s.shard !== 0)
+    .map(shardVersion)
+    .filter((v): v is number => v !== null);
+  if (versions.length < 2) return null;
+  const mean = versions.reduce((sum, v) => sum + v, 0) / versions.length;
+  if (mean <= 0) return null;
+  const variance = versions.reduce((sum, v) => sum + (v - mean) ** 2, 0) / (versions.length - 1);
+  return { mean, dispersion: variance / mean, shards: versions.length };
+}
+
+/**
+ * A shard's departure from the mean in units of the deviation chance alone gives. Counts spread over shards at
+ * random deviate by about √mean, so noise stays within |z| ≈ 2 however large the versions grow, and a favoured
+ * shard stands out beyond 3.
+ */
+export function biasZ(version: number, spread: VersionSpread): number {
+  return (version - spread.mean) / Math.sqrt(spread.mean);
 }
 
 /** Maps `value` onto 0..1 on a log scale that saturates at `max`. */

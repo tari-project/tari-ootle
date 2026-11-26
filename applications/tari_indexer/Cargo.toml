@@ -37,6 +37,7 @@ tari_ootle_app_utilities = { workspace = true, features = ["consensus_constants"
 tari_logging = { workspace = true }
 tari_ootle_common_types = { workspace = true }
 tari_ootle_p2p = { workspace = true }
+tari_ootle_light_client = { workspace = true }
 tari_ootle_storage = { workspace = true }
 tari_state_tree = { workspace = true }
 tari_ootle_storage_sqlite = { workspace = true }
@@ -96,10 +97,13 @@ utoipa = { workspace = true }
 utoipa-swagger-ui = { workspace = true, features = ["axum"] }
 
 [dev-dependencies]
+tari_consensus_types = { workspace = true }
+tari_ootle_light_client = { workspace = true, features = ["test-fixtures"] }
 tempfile = { workspace = true }
 # test-util drives the clock, so the write lock timeout tests do not wait in real time
 tokio = { workspace = true, features = ["test-util"] }
 toml = { workspace = true }
+tracing = { workspace = true }
 
 [features]
 default = ["web_ui", "metrics"]

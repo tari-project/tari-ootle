@@ -29,11 +29,9 @@ import Typography from "@mui/material/Typography";
 import { useTheme } from "@mui/material/styles";
 import useAccountStore from "@store/accountStore";
 import { Account } from "@tari-project/ootle-ts-bindings";
-import { bigintToDecimalString, substateIdToString } from "@utils/helpers";
-import { useEffect } from "react";
+import { substateIdToString } from "@utils/helpers";
 import { IoEyeOffOutline, IoEyeOutline } from "react-icons/io5";
-
-const XTR_RESOURCE = "resource_0101010101010101010101010101010101010101010101010101010101010101";
+import { formatXtrBalance } from "./xtrBalanceHelpers";
 
 export default function AccountBalance() {
   const showBalance = useAccountStore((state) => state.showBalance);
@@ -60,30 +58,14 @@ function AccountBalanceInner({
     data: balancesData,
     isError: balancesIsError,
     error: balancesError,
-    // isFetching: balancesIsFetching,
     isLoading: balancesIsLoading,
-    refetch,
   } = useAccountsGetBalances(substateIdToString(account.component_address));
 
-  useEffect(() => {
-    refetch();
-  }, [account, refetch]);
-
-  let formattedBalance;
-  if (balancesIsLoading && !balancesData) {
-    formattedBalance = "...";
-  } else {
-    if (showBalance) {
-      const balanceObj = balancesData?.balances.find((b) => b.resource_address === XTR_RESOURCE);
-      const balance = BigInt(balanceObj?.balance || 0) + BigInt(balanceObj?.confidential_balance || 0);
-      const xtr_decimals = balanceObj?.divisibility || 6;
-      formattedBalance = bigintToDecimalString(balance, xtr_decimals);
-    } else {
-      formattedBalance = "************";
-    }
-  }
-
-  const symbol = balancesData?.balances.find((b) => b.resource_address === XTR_RESOURCE)?.token_symbol || "";
+  const { formattedBalance, symbol } = formatXtrBalance(balancesData?.balances, {
+    mode: "total",
+    showBalance,
+    isLoading: balancesIsLoading,
+  });
 
   return (
     <FetchStatusCheck
@@ -110,7 +92,10 @@ function AccountBalanceInner({
             <Typography variant="h2">
               {formattedBalance} <span style={{ fontSize: "18px" }}>{symbol}</span>
             </Typography>
-            <IconButton onClick={() => setShowBalance(!showBalance)}>
+            <IconButton
+              aria-label={showBalance ? "Hide balance" : "Show balance"}
+              onClick={() => setShowBalance(!showBalance)}
+            >
               {showBalance ? (
                 <IoEyeOffOutline color={theme.palette.primary.main} />
               ) : (

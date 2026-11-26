@@ -81,6 +81,17 @@ pub trait WalletNetworkInterface {
         include_proofs: bool,
     ) -> impl Future<Output = Result<FetchedSubstates, Self::Error>> + Send;
 
+    /// The live version of each of `substate_ids`, without values or proofs. A substate that does not exist, or whose
+    /// latest version is down, has no entry.
+    ///
+    /// The versions are unverified. They are fit for pinning transaction inputs, where a wrong version makes the
+    /// transaction fail rather than spend or read anything it should not, and for nothing that takes a version as
+    /// evidence of what the chain holds.
+    fn get_substate_versions(
+        &self,
+        substate_ids: &[SubstateId],
+    ) -> impl Future<Output = Result<HashMap<SubstateId, SubstateVersion>, Self::Error>> + Send;
+
     fn submit_transaction(
         &self,
         transaction: Transaction,

@@ -61,17 +61,17 @@ wasm-pack build crates/ootle_wasm/wasm --target bundler --dev --out-dir ../../..
 
 ## WASM Exports
 
-| Function                     | Signature                                                                                                  | Description                                     |
-|------------------------------|------------------------------------------------------------------------------------------------------------|-------------------------------------------------|
-| `borEncodeTransaction`       | `(transactionJson: string) → string`                                                                       | BOR-encode a Transaction JSON → base64 envelope |
-| `hashUnsignedTransaction`    | `(txJson: string, sealSignerPubKey: Uint8Array) → Uint8Array`                                              | Hash a transaction for authorization (64 bytes) |
-| `hashUnsealedTransaction`    | `(txJson: string) → Uint8Array`                                                                            | Hash a transaction for sealing (64 bytes)       |
-| `attachSealSignature`        | `(txJson: string, sealSignerPubKey: Uint8Array, signature: Uint8Array) → string`                           | Seal with an external signer's signature        |
-| `attachTransactionSignature` | `(txJson: string, signerPubKey: Uint8Array, signature: Uint8Array, sealSignerPubKey: Uint8Array) → string` | Append an external signer's authorization       |
-| `addTransactionSigner`       | `(txJson: string, signerSecretKey: Uint8Array, sealSignerPubKey: Uint8Array) → string`                     | Append an authorization by a secret key         |
-| `sealTransaction`            | `(txJson: string, sealSignerSecretKey: Uint8Array) → string`                                               | Seal with the seal signer's secret key          |
-| `generateKeypair`            | `() → { secret_key, public_key }`                                                                          | Generate a random Ristretto keypair             |
-| `publicKeyFromSecretKey`     | `(secretKey: Uint8Array) → Uint8Array`                                                                     | Derive public key from secret key               |
+| Function                     | Signature                                                                                                                                 | Description                                     |
+|------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------|
+| `borEncodeTransaction`       | `(transactionJson: string) → string`                                                                                                      | BOR-encode a Transaction JSON → base64 envelope |
+| `hashUnsignedTransaction`    | `(txJson: string, sealSignerPubKey: Uint8Array, authorizerPubKeys: Uint8Array) → Uint8Array`                                              | Hash a transaction for authorization (64 bytes) |
+| `hashUnsealedTransaction`    | `(txJson: string) → Uint8Array`                                                                                                           | Hash a transaction for sealing (64 bytes)       |
+| `attachSealSignature`        | `(txJson: string, sealSignerPubKey: Uint8Array, signature: Uint8Array) → string`                                                          | Seal with an external signer's signature        |
+| `attachTransactionSignature` | `(txJson: string, signerPubKey: Uint8Array, signature: Uint8Array, sealSignerPubKey: Uint8Array, authorizerPubKeys: Uint8Array) → string` | Add an external signer's authorization          |
+| `addTransactionSigner`       | `(txJson: string, signerSecretKey: Uint8Array, sealSignerPubKey: Uint8Array, authorizerPubKeys: Uint8Array) → string`                     | Add an authorization by a secret key            |
+| `sealTransaction`            | `(txJson: string, sealSignerSecretKey: Uint8Array) → string`                                                                              | Seal with the seal signer's secret key          |
+| `generateKeypair`            | `() → { secret_key, public_key }`                                                                                                         | Generate a random Ristretto keypair             |
+| `publicKeyFromSecretKey`     | `(secretKey: Uint8Array) → Uint8Array`                                                                                                    | Derive public key from secret key               |
 
 All keys and signatures are raw `Uint8Array` bytes. An external signer's key must sign Ootle transaction messages only; see the key isolation requirements in `NPM_README.md`.
 

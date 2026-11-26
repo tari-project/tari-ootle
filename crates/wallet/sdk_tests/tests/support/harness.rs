@@ -13,11 +13,12 @@ use tari_crypto::{
 use tari_engine_types::{
     Utxo,
     UtxoOutput,
-    crypto::{OutputBody, commit_amount},
+    crypto::{OutputBody, commit_range_provable_amount},
+    encoded::Encoded,
     resource::Resource,
-    substate::{Substate, SubstateId},
+    substate::{Substate, SubstateId, SubstateValue},
 };
-use tari_indexer_client::types::{EpochCheckpointEntry, ValidatorSetCommittee, WatchedSubstateItem};
+use tari_indexer_client::types::{EpochCheckpointEntry, SubstateState, ValidatorSetCommittee, WatchedSubstateItem};
 use tari_ootle_address::Network;
 use tari_ootle_common_types::{
     Epoch,
@@ -97,6 +98,14 @@ impl Test {
     pub fn new() -> Self {
         Self::with_network(PanicNetworkInterface)
     }
+
+    /// A wallet with the test account that has not cached the stealth TARI resource. Any lookup of that resource
+    /// reaches the network and panics.
+    pub fn without_tari_resource() -> Self {
+        let test = Self::bare(PanicNetworkInterface, IndexerTrust::Trust);
+        test.add_test_account();
+        test
+    }
 }
 
 impl<TNetwork: WalletNetworkInterface> TestWithNetwork<TNetwork> {
@@ -107,7 +116,12 @@ impl<TNetwork: WalletNetworkInterface> TestWithNetwork<TNetwork> {
     /// A wallet with the test account, which trusts its indexer as far as `indexer_trust` says.
     pub fn with_network_trusting(network: TNetwork, indexer_trust: IndexerTrust) -> Self {
         let test = Self::without_accounts_trusting(network, indexer_trust);
-        let accounts_api = test.sdk.accounts_api();
+        test.add_test_account();
+        test
+    }
+
+    fn add_test_account(&self) {
+        let accounts_api = self.sdk.accounts_api();
         accounts_api
             .add_account(
                 Some("test"),
@@ -130,7 +144,6 @@ impl<TNetwork: WalletNetworkInterface> TestWithNetwork<TNetwork> {
                 6,
             )
             .unwrap();
-        test
     }
 
     /// A wallet with the stealth TARI resource and no accounts, which takes its indexer at its word.
@@ -141,6 +154,28 @@ impl<TNetwork: WalletNetworkInterface> TestWithNetwork<TNetwork> {
     /// A wallet with the stealth TARI resource and no accounts, which trusts its indexer as far as `indexer_trust`
     /// says.
     pub fn without_accounts_trusting(network: TNetwork, indexer_trust: IndexerTrust) -> Self {
+        let test = Self::bare(network, indexer_trust);
+        test.sdk
+            .resources_api()
+            .upsert_resource(
+                &STEALTH_TARI_RESOURCE_ADDRESS,
+                &Resource::new(
+                    ResourceType::Stealth,
+                    SubstateOwnerRule::None,
+                    ResourceAccessRules::new(),
+                    Metadata::from([(TOKEN_SYMBOL, "TEST".to_string())]),
+                    None,
+                    None,
+                    6,
+                    false,
+                ),
+            )
+            .unwrap();
+        test
+    }
+
+    /// A wallet with neither accounts nor cached resources.
+    fn bare(network: TNetwork, indexer_trust: IndexerTrust) -> Self {
         let temp = tempfile::tempdir().unwrap();
         let store = SqliteWalletStore::try_open(temp.path().join("data/wallet.sqlite")).unwrap();
         store.run_migrations().unwrap();
@@ -157,21 +192,6 @@ impl<TNetwork: WalletNetworkInterface> TestWithNetwork<TNetwork> {
         )
         .unwrap();
         sdk.initialize_cipher_seed(CipherSeedRestore::CreateNewIfRequired)
-            .unwrap();
-        sdk.resources_api()
-            .upsert_resource(
-                &STEALTH_TARI_RESOURCE_ADDRESS,
-                &Resource::new(
-                    ResourceType::Stealth,
-                    SubstateOwnerRule::None,
-                    ResourceAccessRules::new(),
-                    Metadata::from([(TOKEN_SYMBOL, "TEST".to_string())]),
-                    None,
-                    None,
-                    6,
-                    false,
-                ),
-            )
             .unwrap();
 
         Self {
@@ -197,7 +217,7 @@ impl<TNetwork: WalletNetworkInterface> TestWithNetwork<TNetwork> {
         let amount = amount.into();
 
         let outputs_api = self.sdk.confidential_outputs_api();
-        let commitment = commit_amount(&Default::default(), amount)
+        let commitment = commit_range_provable_amount(&Default::default(), amount)
             .expect("Cannot add unspent output with negative amount")
             .to_byte_type();
         outputs_api
@@ -232,6 +252,18 @@ impl<TNetwork: WalletNetworkInterface> TestWithNetwork<TNetwork> {
         amount: u64,
         nonce_secret: &RistrettoSecretKey,
     ) -> (UtxoId, Utxo) {
+        self.owned_utxo_of_resource(account, &STEALTH_TARI_RESOURCE_ADDRESS, amount, nonce_secret)
+    }
+
+    /// A UTXO of the stealth resource `resource_address` paying `amount` to `account`, with the public nonce of
+    /// `nonce_secret`.
+    pub fn owned_utxo_of_resource(
+        &self,
+        account: &AccountWithAddress,
+        resource_address: &ResourceAddress,
+        amount: u64,
+        nonce_secret: &RistrettoSecretKey,
+    ) -> (UtxoId, Utxo) {
         let sdk = &self.sdk;
         let view_key = sdk.key_manager_api().get_key(account.view_only_key_id()).unwrap();
         let owner_key = sdk
@@ -246,10 +278,12 @@ impl<TNetwork: WalletNetworkInterface> TestWithNetwork<TNetwork> {
             sdk.network(),
             &view_key.secret,
             &public_nonce,
-            &STEALTH_TARI_RESOURCE_ADDRESS,
+            resource_address,
         );
         let mask = random_key();
-        let commitment = commit_amount(&mask, amount.into()).unwrap().to_byte_type();
+        let commitment = commit_range_provable_amount(&mask, amount.into())
+            .unwrap()
+            .to_byte_type();
         let encrypted_data = sdk
             .stealth_crypto_api()
             .encrypt_value_and_mask(amount, &mask, &view_public_key, nonce_secret, None)
@@ -348,6 +382,13 @@ impl WalletNetworkInterface for CannedTransactionResultInterface {
     }
 
     async fn get_substates(&self, _: &[SubstateId], _: bool) -> Result<FetchedSubstates, Self::Error> {
+        panic!("CannedTransactionResultInterface called")
+    }
+
+    async fn get_substate_versions(
+        &self,
+        _: &[SubstateId],
+    ) -> Result<HashMap<SubstateId, SubstateVersion>, Self::Error> {
         panic!("CannedTransactionResultInterface called")
     }
 
@@ -468,6 +509,13 @@ impl WalletNetworkInterface for PanicNetworkInterface {
     }
 
     async fn get_substates(&self, _: &[SubstateId], _: bool) -> Result<FetchedSubstates, Self::Error> {
+        panic!("PanicNetworkInterface called")
+    }
+
+    async fn get_substate_versions(
+        &self,
+        _: &[SubstateId],
+    ) -> Result<HashMap<SubstateId, SubstateVersion>, Self::Error> {
         panic!("PanicNetworkInterface called")
     }
 
@@ -601,5 +649,152 @@ impl TransactionStatusResponseError for PanicError {
 impl IsNotFoundError for PanicError {
     fn is_not_found_error(&self) -> bool {
         matches!(self, Self::NotFound)
+    }
+}
+
+/// Network interface that serves pre-configured substates from an in-memory map and panics on other calls.
+#[derive(Debug, Clone, Default)]
+pub struct CannedSubstateNetworkInterface {
+    substates: HashMap<SubstateId, (SubstateVersion, SubstateValue)>,
+}
+
+impl CannedSubstateNetworkInterface {
+    pub fn new<I>(entries: I) -> Self
+    where I: IntoIterator<Item = (SubstateId, SubstateVersion, SubstateValue)> {
+        Self {
+            substates: entries
+                .into_iter()
+                .map(|(id, version, value)| (id, (version, value)))
+                .collect(),
+        }
+    }
+}
+
+impl WalletNetworkInterface for CannedSubstateNetworkInterface {
+    type Error = PanicError;
+
+    async fn query_substate(
+        &self,
+        address: &SubstateId,
+        _version: Option<SubstateVersion>,
+        _local_search_only: bool,
+        _include_proof: bool,
+    ) -> Result<SubstateQueryResult, Self::Error> {
+        let (version, value) = self.substates.get(address).ok_or(PanicError::NotFound)?;
+        Ok(SubstateQueryResult {
+            version: *version,
+            state: SubstateState::Up {
+                substate: Encoded::encode(value).unwrap(),
+            },
+            proof: None,
+        })
+    }
+
+    async fn get_substates(&self, _: &[SubstateId], _: bool) -> Result<FetchedSubstates, Self::Error> {
+        panic!("CannedSubstateNetworkInterface called")
+    }
+
+    async fn get_substate_versions(
+        &self,
+        substate_ids: &[SubstateId],
+    ) -> Result<HashMap<SubstateId, SubstateVersion>, Self::Error> {
+        Ok(substate_ids
+            .iter()
+            .filter_map(|id| self.substates.get(id).map(|(version, _)| (id.clone(), *version)))
+            .collect())
+    }
+
+    async fn submit_transaction(&self, _transaction: Transaction) -> Result<TransactionId, Self::Error> {
+        panic!("CannedSubstateNetworkInterface called")
+    }
+
+    async fn submit_transaction_envelope(
+        &self,
+        _transaction: TransactionEnvelope,
+    ) -> Result<TransactionId, Self::Error> {
+        panic!("CannedSubstateNetworkInterface called")
+    }
+
+    async fn submit_dry_run_transaction(
+        &self,
+        _transaction: Transaction,
+    ) -> Result<TransactionQueryResult, Self::Error> {
+        panic!("CannedSubstateNetworkInterface called")
+    }
+
+    async fn query_transaction_result(
+        &self,
+        _transaction_id: TransactionId,
+        _include_proof: bool,
+    ) -> Result<TransactionQueryResult, Self::Error> {
+        panic!("CannedSubstateNetworkInterface called")
+    }
+
+    async fn subscribe_transaction_finalized(&self) -> Result<TransactionFinalizedStream<Self::Error>, Self::Error> {
+        Ok(futures::stream::pending().boxed())
+    }
+
+    async fn fetch_template_definition(&self, _template_address: TemplateAddress) -> Result<TemplateDef, Self::Error> {
+        panic!("CannedSubstateNetworkInterface called")
+    }
+
+    async fn stream_stealth_utxo_updates(
+        &self,
+        _from_epoch: Epoch,
+        _resource_address: ResourceAddress,
+        _shard_state_versions: Vec<(Shard, StateVersion)>,
+        _unspent_only: bool,
+    ) -> Result<UtxoUpdateStream<Self::Error>, Self::Error> {
+        panic!("CannedSubstateNetworkInterface called")
+    }
+
+    async fn list_watched_substates(
+        &self,
+        _template_address: Option<TemplateAddress>,
+        _limit: Option<u64>,
+        _offset: Option<u64>,
+    ) -> Result<Vec<WatchedSubstateItem>, Self::Error> {
+        panic!("CannedSubstateNetworkInterface called")
+    }
+
+    async fn fetch_utxos(
+        &self,
+        _resource_address: ResourceAddress,
+        _tag_and_nonce_pairs: Vec<PlacedTagAndNoncePair>,
+    ) -> Result<FetchedUtxos, Self::Error> {
+        panic!("CannedSubstateNetworkInterface called")
+    }
+
+    async fn get_latest_epoch_checkpoint(&self, _shard: Shard) -> Result<EpochCheckpointEntry, Self::Error> {
+        panic!("CannedSubstateNetworkInterface called")
+    }
+
+    async fn get_latest_shard_group_checkpoints(&self) -> Result<Vec<EpochCheckpointEntry>, Self::Error> {
+        panic!("CannedSubstateNetworkInterface called")
+    }
+
+    async fn list_epoch_checkpoints(
+        &self,
+        _from_epoch: Epoch,
+        _limit: u32,
+        _shard: Shard,
+    ) -> Result<Vec<EpochCheckpointEntry>, Self::Error> {
+        panic!("CannedSubstateNetworkInterface called")
+    }
+
+    async fn get_committee(&self, _epoch: Epoch, _shard: Shard) -> Result<ValidatorSetCommittee, Self::Error> {
+        panic!("CannedSubstateNetworkInterface called")
+    }
+
+    async fn get_current_epoch(&self) -> Result<Epoch, Self::Error> {
+        panic!("CannedSubstateNetworkInterface called")
+    }
+
+    async fn get_consensus_epoch(&self) -> Result<Option<Epoch>, Self::Error> {
+        panic!("CannedSubstateNetworkInterface called")
+    }
+
+    async fn wait_until_ready(&self) -> Result<(), Self::Error> {
+        Ok(())
     }
 }

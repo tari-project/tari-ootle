@@ -11,6 +11,8 @@ import type {
   GetResourceResponse,
   GetSubstatesRequest,
   GetSubstatesResponse,
+  GetSubstateVersionsRequest,
+  GetSubstateVersionsResponse,
   GetTransactionReceiptResponse,
   IndexerGetConnectionsResponse,
   IndexerGetIdentityResponse,
@@ -125,6 +127,10 @@ export class IndexerClient {
 
   public fetchSubstates(params: GetSubstatesRequest): Promise<GetSubstatesResponse> {
     return this.transport.sendPost(`substates/fetch`, params);
+  }
+
+  public getSubstateVersions(params: GetSubstateVersionsRequest): Promise<GetSubstateVersionsResponse> {
+    return this.transport.sendPost(`substates/versions`, params);
   }
 
   public submitTransaction(params: TransactionSubmitRequest): Promise<TransactionSubmitResponse> {

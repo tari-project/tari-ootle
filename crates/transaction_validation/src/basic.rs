@@ -12,6 +12,7 @@ const LOG_TARGET: &str = "tari::ootle::mempool::validators::is_shard_applicable"
 /// - Has at least one fee instruction
 /// - All fee instructions are permitted in the fee intent, and at least one can pay a fee
 /// - Main instructions contain no fee payment instruction
+/// - No instruction updates a component's template
 #[derive(Debug, Clone, Default)]
 pub struct BasicValidations;
 
@@ -70,6 +71,18 @@ impl Validator<Transaction> for BasicValidations {
             });
         }
 
+        if let Some(index) = transaction
+            .instructions()
+            .iter()
+            .position(|instr| matches!(instr, Instruction::UpdateComponentTemplate { .. }))
+        {
+            warn!(target: LOG_TARGET, "BasicValidations - FAIL: Instruction {index} updates a component's template");
+            return Err(TransactionValidationError::ComponentTemplateUpdateNotSupported {
+                transaction_id: transaction.calculate_id(),
+                index,
+            });
+        }
+
         debug!(target: LOG_TARGET, "BasicValidations - OK");
         Ok(())
     }
@@ -80,7 +93,13 @@ mod tests {
     use tari_common_types::types::PrivateKey;
     use tari_ootle_common_types::Epoch;
     use tari_ootle_transaction::{ComponentReference, Instruction, args, args::WorkspaceOffsetId};
-    use tari_template_lib::types::{Amount, ComponentAddress, TemplateAddress};
+    use tari_template_lib::types::{
+        Amount,
+        ComponentAddress,
+        OwnerRule,
+        TemplateAddress,
+        access_rules::ComponentAccessRules,
+    };
 
     use super::*;
 
@@ -129,6 +148,51 @@ mod tests {
             ..
         }));
         assert!(err.is_sender_fault());
+    }
+
+    #[test]
+    fn rejects_component_template_update_in_main_instructions() {
+        let tx = Transaction::builder_localnet(Epoch(10))
+            .pay_fee_from_component(account(), Amount::new(1000))
+            .add_instruction(Instruction::DropAllProofsInWorkspace)
+            .add_instruction(Instruction::UpdateComponentTemplate {
+                component: ComponentReference::Address(account()),
+                migrate: None,
+                new_template: TemplateAddress::from_array([2u8; 32]),
+            })
+            .build_and_seal(&PrivateKey::from(1u64));
+        let err = BasicValidations::new().validate(&(), &tx).unwrap_err();
+        assert!(matches!(
+            err,
+            TransactionValidationError::ComponentTemplateUpdateNotSupported { index: 1, .. }
+        ));
+        assert!(err.is_sender_fault());
+    }
+
+    #[test]
+    fn rejects_component_rule_changes_in_fee_instructions() {
+        for instruction in [
+            Instruction::SetComponentAccessRules {
+                component: ComponentReference::Address(account()),
+                access_rules: ComponentAccessRules::new(),
+            },
+            Instruction::SetComponentOwnerRule {
+                component: ComponentReference::Address(account()),
+                owner_rule: OwnerRule::None,
+            },
+        ] {
+            let tx = Transaction::builder_localnet(Epoch(10))
+                .with_fee_instructions([instruction, Instruction::PayFeeFromBucket {
+                    bucket: WorkspaceOffsetId::new(0),
+                }])
+                .build_and_seal(&PrivateKey::from(1u64));
+            let err = BasicValidations::new().validate(&(), &tx).unwrap_err();
+            assert!(matches!(err, TransactionValidationError::DisallowedFeeInstruction {
+                index: 0,
+                ..
+            }));
+            assert!(err.is_sender_fault());
+        }
     }
 
     #[test]

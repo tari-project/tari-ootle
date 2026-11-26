@@ -16,6 +16,8 @@ use tari_crypto::{
 };
 use tari_engine_types::{
     Utxo,
+    UtxoOutput,
+    crypto::OutputBody,
     resource::Resource,
     resource_container::ResourceContainer,
     substate::{Substate, SubstateDiff, SubstateId},
@@ -787,6 +789,23 @@ fn stealth_output(
     }
 }
 
+/// The version-zero `Utxo` substate a transaction ups for `output`, carrying its output body.
+fn live_utxo_substate(output: &StealthOutputModel) -> Substate {
+    Substate::new(SubstateVersion::ZERO, Utxo {
+        output: Some(UtxoOutput {
+            output: OutputBody {
+                public_nonce: output.sender_public_nonce,
+                encrypted_data: output.encrypted_data.clone(),
+                minimum_value_promise: output.minimum_value_promise,
+                viewable_balance: None,
+            },
+            auth: output.auth.clone(),
+            tag: output.tag_byte,
+        }),
+        is_frozen: false,
+    })
+}
+
 fn upsert_stealth_resource(tx: &mut impl WalletStoreWriter, resource_address: &ResourceAddress) {
     tx.resources_upsert(
         resource_address,
@@ -868,13 +887,7 @@ fn lock_finalize_records_confidential_spend_for_vaultless_account() {
 
     let mut diff = SubstateDiff::new();
     diff.down(SubstateId::Utxo(spent.to_utxo_address()), SubstateVersion::ZERO);
-    diff.up(
-        SubstateId::Utxo(change.to_utxo_address()),
-        Substate::new(SubstateVersion::ZERO, Utxo {
-            output: None,
-            is_frozen: false,
-        }),
-    );
+    diff.up(SubstateId::Utxo(change.to_utxo_address()), live_utxo_substate(&change));
     tx.locks_unlock_finalized(lock_id, &diff).unwrap();
     tx.commit().unwrap();
 
@@ -962,13 +975,7 @@ fn lock_finalize_records_confidential_spend_for_vault_backed_resource() {
 
     let mut diff = SubstateDiff::new();
     diff.down(SubstateId::Utxo(spent.to_utxo_address()), SubstateVersion::ZERO);
-    diff.up(
-        SubstateId::Utxo(change.to_utxo_address()),
-        Substate::new(SubstateVersion::ZERO, Utxo {
-            output: None,
-            is_frozen: false,
-        }),
-    );
+    diff.up(SubstateId::Utxo(change.to_utxo_address()), live_utxo_substate(&change));
     tx.locks_unlock_finalized(lock_id, &diff).unwrap();
     tx.commit().unwrap();
 
@@ -1058,13 +1065,7 @@ fn lock_finalize_records_on_vault_created_by_transaction() {
 
     let mut diff = SubstateDiff::new();
     diff.down(SubstateId::Utxo(spent.to_utxo_address()), SubstateVersion::ZERO);
-    diff.up(
-        SubstateId::Utxo(change.to_utxo_address()),
-        Substate::new(SubstateVersion::ZERO, Utxo {
-            output: None,
-            is_frozen: false,
-        }),
-    );
+    diff.up(SubstateId::Utxo(change.to_utxo_address()), live_utxo_substate(&change));
     diff.up(
         SubstateId::Vault(new_vault),
         Substate::new(
@@ -1708,4 +1709,140 @@ fn vaults_insert_update_and_get_round_trip_high_bit_substate_version_and_reject_
     drop(tx);
     drop(store);
     std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn finalize_confirms_unconfirmed_output_relocked_for_spend_via_lock_many() {
+    let (store, _, _, _, _) = setup_store();
+    let stealth_resource = resource_address(3);
+    let stealth_vault = vault_address(3);
+    let account = account_address();
+    let transaction = build_transaction(41);
+    let transaction_id = transaction.calculate_id();
+
+    let mut tx = store.create_write_tx().unwrap();
+    upsert_stealth_resource(&mut tx, &stealth_resource);
+    tx.vaults_insert(VaultModel {
+        account_address: account,
+        id: stealth_vault,
+        vault_version: SubstateVersion::ZERO,
+        resource_address: stealth_resource,
+        resource_type: ResourceType::Stealth,
+        confidential_balance: Amount::from(1_000u64),
+        revealed_balance: Amount::zero(),
+        locked_revealed_balance: Amount::zero(),
+        token_symbol: Some("STEALTH".to_string()),
+        divisibility: 6,
+    })
+    .unwrap();
+    tx.transactions_insert(&transaction, None, &[account], false).unwrap();
+
+    let fee_input = stealth_output(account, stealth_resource, 1_000, 41, OutputStatus::Unspent, None);
+    tx.stealth_outputs_insert(&fee_input).unwrap();
+    let lock_id = tx.locks_create(None, LockOwner::Wallet).unwrap();
+    tx.locks_link_transaction(lock_id, transaction_id).unwrap();
+    tx.stealth_outputs_lock_many_for_account(&account, &stealth_resource, &[&fee_input.commitment], lock_id)
+        .unwrap();
+
+    // Fee statement creates change as LockedUnconfirmed, then main statement locks it under the same lock_id.
+    let fee_change = stealth_output(
+        account,
+        stealth_resource,
+        900,
+        42,
+        OutputStatus::LockedUnconfirmed,
+        Some(lock_id),
+    );
+    tx.stealth_outputs_insert(&fee_change).unwrap();
+    tx.stealth_outputs_lock_many_for_account(&account, &stealth_resource, &[&fee_change.commitment], lock_id)
+        .unwrap();
+
+    // Main intent fails (`AcceptFeeRejectRest`): fee_diff downs fee_input and ups fee_change only.
+    let mut fee_diff = SubstateDiff::new();
+    fee_diff.down(SubstateId::Utxo(fee_input.to_utxo_address()), SubstateVersion::ZERO);
+    fee_diff.up(
+        SubstateId::Utxo(fee_change.to_utxo_address()),
+        live_utxo_substate(&fee_change),
+    );
+
+    tx.locks_unlock_finalized(lock_id, &fee_diff).unwrap();
+    tx.commit().unwrap();
+
+    let mut tx = store.create_read_tx().unwrap();
+    let unspent = tx
+        .stealth_outputs_get_unspent_by_account(&account, Some(&stealth_resource), true)
+        .unwrap();
+    assert_eq!(unspent.len(), 1);
+    assert_eq!(unspent[0].commitment, fee_change.commitment);
+    assert_eq!(unspent[0].value, 900);
+    let vault = tx.vaults_get(&stealth_vault).unwrap();
+    assert_eq!(vault.confidential_balance, Amount::from(900u64));
+}
+
+#[test]
+fn finalize_confirms_unconfirmed_output_relocked_via_lock_smallest_amount() {
+    let (store, _, _, _, _) = setup_store();
+    let stealth_resource = resource_address(3);
+    let stealth_vault = vault_address(3);
+    let account = account_address();
+    let transaction = build_transaction(43);
+    let transaction_id = transaction.calculate_id();
+
+    let mut tx = store.create_write_tx().unwrap();
+    upsert_stealth_resource(&mut tx, &stealth_resource);
+    tx.vaults_insert(VaultModel {
+        account_address: account,
+        id: stealth_vault,
+        vault_version: SubstateVersion::ZERO,
+        resource_address: stealth_resource,
+        resource_type: ResourceType::Stealth,
+        confidential_balance: Amount::from(1_000u64),
+        revealed_balance: Amount::zero(),
+        locked_revealed_balance: Amount::zero(),
+        token_symbol: Some("STEALTH".to_string()),
+        divisibility: 6,
+    })
+    .unwrap();
+    tx.transactions_insert(&transaction, None, &[account], false).unwrap();
+
+    let fee_input = stealth_output(account, stealth_resource, 1_000, 43, OutputStatus::Unspent, None);
+    tx.stealth_outputs_insert(&fee_input).unwrap();
+    let lock_id = tx.locks_create(None, LockOwner::Wallet).unwrap();
+    tx.locks_link_transaction(lock_id, transaction_id).unwrap();
+    tx.stealth_outputs_lock_many_for_account(&account, &stealth_resource, &[&fee_input.commitment], lock_id)
+        .unwrap();
+
+    let fee_change = stealth_output(
+        account,
+        stealth_resource,
+        850,
+        44,
+        OutputStatus::LockedUnconfirmed,
+        Some(lock_id),
+    );
+    tx.stealth_outputs_insert(&fee_change).unwrap();
+    let locked = tx
+        .stealth_outputs_lock_smallest_amount(&account, &stealth_resource, lock_id)
+        .unwrap();
+    assert_eq!(locked.commitment, fee_change.commitment);
+
+    let mut fee_diff = SubstateDiff::new();
+    fee_diff.down(SubstateId::Utxo(fee_input.to_utxo_address()), SubstateVersion::ZERO);
+    fee_diff.up(
+        SubstateId::Utxo(fee_change.to_utxo_address()),
+        live_utxo_substate(&fee_change),
+    );
+
+    tx.locks_unlock_finalized(lock_id, &fee_diff).unwrap();
+    tx.commit().unwrap();
+
+    let mut tx = store.create_read_tx().unwrap();
+    let unspent = tx
+        .stealth_outputs_get_unspent_by_account(&account, Some(&stealth_resource), true)
+        .unwrap();
+    assert_eq!(unspent.len(), 1);
+    assert_eq!(unspent[0].commitment, fee_change.commitment);
+    assert_eq!(unspent[0].value, 850);
+    let vault = tx.vaults_get(&stealth_vault).unwrap();
+    assert_eq!(vault.confidential_balance, Amount::from(850u64));
 }

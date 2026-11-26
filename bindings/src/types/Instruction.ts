@@ -60,4 +60,6 @@ export type Instruction =
     }
   | { PutIntoBucket: { src: WorkspaceOffsetId; dest: WorkspaceOffsetId } }
   | { AuthorizeProof: { proof: WorkspaceOffsetId } }
-  | { DropProofAuthorization: { proof: WorkspaceOffsetId } };
+  | { DropProofAuthorization: { proof: WorkspaceOffsetId } }
+  | { SetComponentAccessRules: { component: ComponentReference; access_rules: ComponentAccessRules } }
+  | { SetComponentOwnerRule: { component: ComponentReference; owner_rule: OwnerRule } };

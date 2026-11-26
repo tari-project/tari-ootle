@@ -38,7 +38,14 @@ use tari_template_lib_types::{
     ResourceType,
     UtxoId,
     VaultId,
-    access_rules::{AccessRule, ComponentAccessRules, ResourceAccessRules, ResourceAuthAction, UpdateRule},
+    access_rules::{
+        AccessRule,
+        ComponentAccessRules,
+        ResourceAccessRules,
+        ResourceAuthAction,
+        RulesUpdater,
+        UpdateRule,
+    },
     bytes::Bytes,
     confidential::{ConfidentialOutputStatement, ConfidentialWithdrawProof},
     crypto::CommitmentValueProof,
@@ -143,6 +150,11 @@ pub struct CreateComponentArg {
     pub address_allocation: Option<ComponentAddressAllocation>,
     #[n(4)]
     pub upgrade_rule: UpdateRule,
+    /// Who may replace the component's access rules and owner rule. A template built before the setting existed
+    /// sends none, which the engine takes as [`RulesUpdater::TemplateManaged`] so that its rule-changing code keeps
+    /// working.
+    #[n(5)]
+    pub rules_updater: Option<RulesUpdater>,
 }
 
 // -------------------------------- Events -------------------------------- //

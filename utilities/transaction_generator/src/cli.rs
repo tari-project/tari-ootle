@@ -28,6 +28,7 @@ impl Cli {
 pub enum SubCommand {
     Write(WriteArgs),
     Read(ReadArgs),
+    Accounts(AccountsArgs),
 }
 
 #[derive(Args, Debug)]
@@ -104,9 +105,22 @@ pub enum Flood {
     /// so each depends on the one before it.
     Faucet,
     /// Transaction `i` transfers from account `i` of `--account-seed` into a new account. No two write the same
-    /// substate, so none depends on another. The accounts must first be funded by a faucet flood with the same seed
-    /// and at least as many transactions.
+    /// substate, so none depends on another. The accounts must first be funded, either by a faucet flood with the same
+    /// seed and at least as many transactions, or by deposits to the addresses the `accounts` subcommand lists.
     Transfers,
+}
+
+/// Lists the accounts derived from a seed, one per line: index, owner public key (hex), component address, and the
+/// TARI balance the indexer reports, or `-` for an account the network does not hold.
+#[derive(Args, Debug)]
+pub struct AccountsArgs {
+    /// The seed passed to `write --account-seed`.
+    #[clap(long)]
+    pub account_seed: u64,
+    #[clap(long, short = 'n')]
+    pub num_accounts: u64,
+    #[clap(long, default_value = "http://127.0.0.1:12500")]
+    pub indexer_url: Url,
 }
 
 #[derive(Args, Debug)]

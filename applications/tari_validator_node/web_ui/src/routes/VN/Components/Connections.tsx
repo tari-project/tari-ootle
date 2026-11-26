@@ -21,7 +21,7 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import AddIcon from "@mui/icons-material/Add";
-import { TextField } from "@mui/material";
+import { Alert, TextField } from "@mui/material";
 import Button from "@mui/material/Button";
 import Fade from "@mui/material/Fade";
 import Table from "@mui/material/Table";
@@ -43,9 +43,12 @@ const useInterval = (fn: () => Promise<unknown>, ms: number) => {
   const timeout = useRef<number>(0);
   const mountedRef = useRef(false);
   const run = useCallback(async () => {
-    await fn();
-    if (mountedRef.current) {
-      timeout.current = window.setTimeout(run, ms);
+    try {
+      await fn();
+    } finally {
+      if (mountedRef.current) {
+        timeout.current = window.setTimeout(run, ms);
+      }
     }
   }, [fn, ms]);
   useEffect(() => {
@@ -58,33 +61,63 @@ const useInterval = (fn: () => Promise<unknown>, ms: number) => {
   }, [run]);
 };
 
+const formatError = (err: unknown): string =>
+  err && typeof err === "object" && "message" in err && typeof err.message === "string" && err.message
+    ? err.message
+    : `Unknown error: ${JSON.stringify(err)}`;
+
 function Connections() {
   const [connections, setConnections] = useState<VNConnection[]>([]);
   const [showPeerDialog, setShowAddPeerDialog] = useState(false);
   const [formState, setFormState] = useState({ publicKey: "", address: "" });
+  const [submitting, setSubmitting] = useState(false);
+  const [fetchError, setFetchError] = useState<string>();
+  const [addError, setAddError] = useState<string>();
 
   const showAddPeerDialog = (setElseToggle: boolean = !showPeerDialog) => {
+    setAddError(undefined);
     setShowAddPeerDialog(setElseToggle);
   };
 
-  const onSubmitAddPeer = async () => {
-    await addPeer({
-      public_key: formState.publicKey,
-      addresses: formState.address ? [formState.address] : [],
-      wait_for_dial: false,
-    });
-    setFormState({ publicKey: "", address: "" });
-    setShowAddPeerDialog(false);
+  const fetchConnections = useCallback(async () => {
+    try {
+      const resp = await getConnections();
+      setConnections(resp.connections);
+      setFetchError(undefined);
+    } catch (err) {
+      setFetchError(formatError(err));
+    }
+  }, []);
+  useInterval(fetchConnections, 5000);
+
+  const onSubmitAddPeer = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const publicKey = formState.publicKey.trim();
+    const address = formState.address.trim();
+    if (submitting || !publicKey) {
+      return;
+    }
+    setSubmitting(true);
+    setAddError(undefined);
+    try {
+      await addPeer({
+        public_key: publicKey,
+        addresses: address ? [address] : [],
+        wait_for_dial: false,
+      });
+      setFormState({ publicKey: "", address: "" });
+      setShowAddPeerDialog(false);
+      await fetchConnections();
+    } catch (err) {
+      setAddError(formatError(err));
+    } finally {
+      setSubmitting(false);
+    }
   };
   const onChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFormState({ ...formState, [e.target.name]: e.target.value });
+    setAddError(undefined);
   };
-
-  let fetchConnections = useCallback(async () => {
-    const resp = await getConnections();
-    setConnections(resp.connections);
-  }, []);
-  useInterval(fetchConnections, 5000);
 
   return (
     <>
@@ -98,6 +131,7 @@ function Connections() {
                 value={formState.publicKey}
                 onChange={onChange}
                 style={{ flexGrow: 1 }}
+                disabled={submitting}
               />
               <TextField
                 name="address"
@@ -105,11 +139,12 @@ function Connections() {
                 value={formState.address}
                 onChange={onChange}
                 style={{ flexGrow: 1 }}
+                disabled={submitting}
               />
-              <Button variant="contained" type="submit">
+              <Button variant="contained" type="submit" disabled={submitting || !formState.publicKey.trim()}>
                 Add Peer
               </Button>
-              <Button variant="outlined" onClick={() => showAddPeerDialog(false)}>
+              <Button variant="outlined" onClick={() => showAddPeerDialog(false)} disabled={submitting}>
                 Cancel
               </Button>
             </Form>
@@ -125,6 +160,16 @@ function Connections() {
           </Fade>
         )}
       </BoxHeading2>
+      {addError && (
+        <Alert severity="error" sx={{ mb: 2 }}>
+          {addError}
+        </Alert>
+      )}
+      {fetchError && (
+        <Alert severity="error" sx={{ mb: 2 }}>
+          {fetchError}
+        </Alert>
+      )}
       <TableContainer>
         <Table>
           <TableHead>

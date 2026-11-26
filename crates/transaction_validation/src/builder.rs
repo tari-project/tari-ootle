@@ -99,8 +99,8 @@ pub fn create_gossip_transaction_validator(
             |_| (),
             create_structural_transaction_validator(network, max_transaction_weight, max_transaction_size_bytes),
         )
-        .and_then(EpochRangeValidator::new())
         .and_then(TransactionValidityWindowValidator::new(max_validity_epochs))
+        .and_then(EpochRangeValidator::new())
 }
 
 #[cfg(test)]
@@ -117,6 +117,13 @@ mod tests {
 
     fn transaction(max_epoch: Epoch) -> Transaction {
         Transaction::builder_localnet(max_epoch)
+            .pay_fee_from_component(ComponentAddress::from_array([1u8; 32]), Amount::new(1000))
+            .build_and_seal(&PrivateKey::from(1u64))
+    }
+
+    fn transaction_with_min_epoch(min_epoch: Epoch, max_epoch: Epoch) -> Transaction {
+        Transaction::builder_localnet(max_epoch)
+            .with_min_epoch(Some(min_epoch))
             .pay_fee_from_component(ComponentAddress::from_array([1u8; 32]), Amount::new(1000))
             .build_and_seal(&PrivateKey::from(1u64))
     }
@@ -171,6 +178,16 @@ mod tests {
     #[test]
     fn an_unbounded_window_is_the_senders_fault() {
         let err = validate(Epoch(1), &transaction(Epoch(u64::MAX))).unwrap_err();
+        assert!(err.is_sender_fault());
+    }
+
+    /// Setting `min_epoch` equal to an unbounded `max_epoch` satisfies `min_epoch <= max_epoch` in
+    /// `BasicValidations` and must still fail the validity-window ceiling (`is_sender_fault()`)
+    /// rather than `CurrentEpochLessThanMinimum`.
+    #[test]
+    fn an_unbounded_window_with_matching_min_epoch_is_the_senders_fault() {
+        let err = validate(Epoch(1), &transaction_with_min_epoch(Epoch(u64::MAX), Epoch(u64::MAX))).unwrap_err();
+        assert!(matches!(err, TransactionValidationError::MaxEpochTooFarAhead { .. }));
         assert!(err.is_sender_fault());
     }
 

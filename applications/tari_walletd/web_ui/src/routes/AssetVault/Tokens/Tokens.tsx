@@ -48,7 +48,7 @@ import {
   ResourceType,
   VaultId,
 } from "@tari-project/ootle-ts-bindings";
-import { bigintToDecimalString, shortenString, substateIdToString } from "@utils/helpers";
+import { bigintToDecimalString, substateIdToString } from "@utils/helpers";
 import { useState } from "react";
 import { IoWalletOutline } from "react-icons/io5";
 import { useNavigate } from "react-router-dom";
@@ -72,14 +72,19 @@ interface ConfidentialBalanceProps {
   balance: Amount;
   resourceType: string;
   divisibility: number;
-  token_symbol?: string;
+  token_symbol: string;
+}
+
+function formatBalanceWithSymbol(balance: Amount, divisibility: number, tokenSymbol: string): string {
+  const formatted = bigintToDecimalString(balance, divisibility);
+  return tokenSymbol ? `${formatted} ${tokenSymbol}` : formatted;
 }
 
 function ConfidentialBalance({ show, resourceType, balance, divisibility, token_symbol }: ConfidentialBalanceProps) {
   switch (resourceType) {
     case "Confidential":
     case "Stealth":
-      return <>{show ? bigintToDecimalString(balance, divisibility) + " " + token_symbol : "********"}</>;
+      return <>{show ? formatBalanceWithSymbol(balance, divisibility, token_symbol) : "********"}</>;
     default:
       return <>--</>;
   }
@@ -128,7 +133,7 @@ function BalanceRow({
   );
 
   return (
-    <TableRow key={token_symbol || resource_address}>
+    <TableRow>
       <FluidTableCell>{vault_address ? <CopyAddress address={vault_address} /> : "--"}</FluidTableCell>
       <FluidTableCell>
         <Stack
@@ -138,15 +143,12 @@ function BalanceRow({
           }}
           gap={isLg ? 1 : 0.3}
         >
-          <CopyAddress
-            address={resource_address}
-            display={shortenString(resource_address, isLg ? 3 : 1, isLg ? 6 : 4)}
-          />
+          <CopyAddress address={resource_address} />
           <TypeChip type={resource_type} symbol={token_symbol} compact />
         </Stack>
       </FluidTableCell>
       <FluidTableCell align="right">
-        {showBalance ? `${bigintToDecimalString(balance, divisibility)} ${token_symbol}` : "********"}
+        {showBalance ? formatBalanceWithSymbol(balance, divisibility, token_symbol) : "********"}
       </FluidTableCell>
       <FluidTableCell align="right">
         <ConfidentialBalance
@@ -176,20 +178,19 @@ function BalanceRow({
 }
 
 function Tokens({ account }: { account: Account }) {
-  const theme = useTheme();
-  const isLg = useMediaQuery(theme.breakpoints.up("md"));
   const [resourceToSend, setResourceToSend] = useState<{
     address: ResourceAddress;
     resource_type: ResourceType;
   } | null>(null);
   const [nftResourceToSend, setNftResourceToSend] = useState<ResourceAddress | null>(null);
+  const accountAddress = substateIdToString(account.component_address) as ComponentAddress;
 
   const {
     data: balancesData,
     isError: balancesIsError,
     error: balancesError,
     isFetching: balancesIsFetching,
-  } = useAccountsGetBalances(substateIdToString(account.component_address));
+  } = useAccountsGetBalances(accountAddress);
 
   const handleSendResourceClicked = (address: ResourceAddress, resource_type: ResourceType) => {
     if (resource_type === "NonFungible") {
@@ -199,7 +200,8 @@ function Tokens({ account }: { account: Account }) {
     }
   };
 
-  const hasBalances = balancesData?.balances && balancesData.balances.length > 0;
+  const nonZeroBalances =
+    balancesData?.balances.filter((b) => BigInt(b.balance) > 0n || BigInt(b.confidential_balance) > 0n) ?? [];
 
   return (
     <>
@@ -208,10 +210,10 @@ function Tokens({ account }: { account: Account }) {
           open={true}
           handleClose={() => setResourceToSend(null)}
           onSendComplete={() => setResourceToSend(null)}
-          resource_address={resourceToSend?.address}
-          resource_type={resourceToSend?.resource_type!}
+          resource_address={resourceToSend.address}
+          resource_type={resourceToSend.resource_type}
           token_symbol={
-            balancesData?.balances.find((b: BalanceEntry) => b.resource_address === resourceToSend?.address)
+            balancesData?.balances.find((b: BalanceEntry) => b.resource_address === resourceToSend.address)
               ?.token_symbol || ""
           }
         />
@@ -234,7 +236,7 @@ function Tokens({ account }: { account: Account }) {
             <ClaimCoinsButton />
           </Stack>
 
-          {balancesData && !hasBalances ? (
+          {balancesData && nonZeroBalances.length === 0 ? (
             <Box
               sx={{
                 display: "flex",
@@ -269,35 +271,30 @@ function Tokens({ account }: { account: Account }) {
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {balancesData?.balances
-                    .filter((b) => BigInt(b.balance) > 0n || BigInt(b.confidential_balance) > 0n)
-                    .map(
-                      (
-                        {
-                          resource_address,
-                          balance,
-                          resource_type,
-                          confidential_balance,
-                          token_symbol,
-                          vault_address,
-                          divisibility,
-                        }: BalanceEntry,
-                        i: number,
-                      ) => (
-                        <BalanceRow
-                          key={i}
-                          token_symbol={token_symbol || ""}
-                          resource_address={resource_address}
-                          resource_type={resource_type}
-                          balance={balance}
-                          confidential_balance={confidential_balance}
-                          vault_address={vault_address ?? undefined} // convert null to undefined
-                          divisibility={divisibility}
-                          accountAddress={substateIdToString(account.component_address) as ComponentAddress}
-                          onSendClicked={handleSendResourceClicked}
-                        />
-                      ),
-                    )}
+                  {nonZeroBalances.map(
+                    ({
+                      resource_address,
+                      balance,
+                      resource_type,
+                      confidential_balance,
+                      token_symbol,
+                      vault_address,
+                      divisibility,
+                    }: BalanceEntry) => (
+                      <BalanceRow
+                        key={`${vault_address ?? "stealth"}:${resource_address}`}
+                        token_symbol={token_symbol || ""}
+                        resource_address={resource_address}
+                        resource_type={resource_type}
+                        balance={balance}
+                        confidential_balance={confidential_balance}
+                        vault_address={vault_address ?? undefined} // convert null to undefined
+                        divisibility={divisibility}
+                        accountAddress={accountAddress}
+                        onSendClicked={handleSendResourceClicked}
+                      />
+                    ),
+                  )}
                 </TableBody>
               </Table>
             </TableContainer>

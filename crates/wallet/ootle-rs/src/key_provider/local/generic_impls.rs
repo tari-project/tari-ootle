@@ -12,6 +12,7 @@ use tari_crypto::{
 use tari_ootle_address::RistrettoOotleAddress;
 use tari_ootle_common_types::signature::Sr25519SignatureBytes;
 use tari_ootle_transaction::{
+    AuthorizationContext,
     Signable,
     TransactionSealSignature,
     TransactionSignature,
@@ -76,10 +77,10 @@ where C: TransactionMessageSigner<(Sr25519SignatureBytes, RistrettoPublicKey)> +
 
     async fn sign_authorization(
         &self,
-        seal_signer: &RistrettoPublicKeyBytes,
+        context: AuthorizationContext<'_>,
         tx: &UnsignedTransaction,
     ) -> signer::Result<TransactionAuthorization> {
-        let message = tx.to_signing_message(seal_signer);
+        let message = tx.to_signing_message(context);
         let (signature, public_key) = self.credentials.sign_transaction_message(&message)?;
         let sig = TransactionSignature::new(public_key.to_byte_type(), signature);
         Ok(sig.into())
@@ -298,12 +299,12 @@ impl<C: StealthKeyPrehashSigner<(Sr25519SignatureBytes, RistrettoPublicKey)> + S
     async fn sign_authorization_with_stealth(
         &self,
         public_nonce: &RistrettoPublicKey,
-        seal_signer: &RistrettoPublicKeyBytes,
+        context: AuthorizationContext<'_>,
         tx: &UnsignedTransaction,
     ) -> signer::Result<TransactionAuthorization> {
         let (sig, pk) = self
             .credentials
-            .sign_prehash_with_stealth_key(public_nonce, &tx.to_signing_message(seal_signer))
+            .sign_prehash_with_stealth_key(public_nonce, &tx.to_signing_message(context))
             .await?;
         let sig = TransactionSignature::new(pk.to_byte_type(), sig);
         Ok(sig.into())
@@ -333,17 +334,11 @@ impl<C: StealthKeyPrehashSigner<(Sr25519SignatureBytes, RistrettoPublicKey)> + S
 mod tests {
     use std::num::NonZeroU64;
 
-    use tari_crypto::keys::SecretKey;
     use tari_ootle_common_types::engine_types::{crypto::OutputBody, stealth::validate_transfer};
-    use tari_ootle_wallet_crypto::MaskAndValue;
     use tari_template_lib_types::{Amount, ResourceAddress, constants::TARI_TOKEN, stealth::StealthInput};
 
     use super::*;
-    use crate::{
-        Network,
-        key_provider::PrivateKeyProvider,
-        stealth::{BurnClaimKeyProvider, BurnClaimStatementSpec, ResolvedStealthInput},
-    };
+    use crate::{Network, key_provider::PrivateKeyProvider, stealth::ResolvedStealthInput};
 
     const VALUE: u64 = 1_000_000;
 
@@ -588,63 +583,45 @@ mod tests {
         assert!(with_stealth_output.requires_balance_proof());
     }
 
-    /// A burn claim spends the minted burn UTXO into a stealth output plus a revealed fee, and the
-    /// engine accepts the resulting statement.
-    ///
-    /// The L1 burn output is encrypted to the claimant's *account* key (not its view-only key) with the
-    /// burn's sender-offset nonce, which is the shape `decrypt_burn_claim_output` expects.
+    /// A burn claim pays the claimed bucket into a stealth output plus a revealed fee, and the engine
+    /// accepts the resulting statement.
     #[tokio::test]
     async fn a_burn_claim_statement_balances_and_validates() {
         const FEE: u64 = 1000;
 
         let provider = PrivateKeyProvider::random(Network::LocalNet);
-        let account_pk = RistrettoPublicKey::from_secret_key(provider.credentials().account_secret());
-
-        // Stand in for the L1 burn: a commitment to `VALUE` under `mask`, encrypted to the claimant.
-        let (sender_offset_secret, sender_offset_public_key) = RistrettoPublicKey::random_keypair(&mut rand::rng());
-        let mask = RistrettoSecretKey::random(&mut rand::rng());
-        let commitment = MaskAndValue::new(VALUE, mask.clone()).to_commitment().to_byte_type();
-        let encrypted_data = StealthCryptoApi::new()
-            .encrypt_value_and_mask(VALUE, &mask, &account_pk, &sender_offset_secret, None)
-            .expect("encrypting the burn output must succeed");
-
         let statement = provider
-            .create_burn_claim_statement(BurnClaimStatementSpec {
-                commitment,
-                encrypted_data,
-                sender_offset_public_key: sender_offset_public_key.clone(),
-                output: output_to_self(&provider, VALUE - FEE),
-                revealed_output: Some(RevealedOutput::new(Amount::from(u128::from(FEE)), a_receiver())),
+            .create_transfer_statement(ResolvedStealthTransferSpec {
+                inputs: vec![],
+                revealed_input_amount: Amount::from(VALUE),
+                outputs: vec![output_to_self(&provider, VALUE - FEE)],
+                revealed_output: Some(RevealedOutput::new(Amount::from(FEE), a_receiver())),
             })
             .await
             .expect("a balanced burn claim must produce a statement");
 
         assert!(statement.balance_proof.is_some());
-        assert_eq!(statement.inputs_statement.inputs.len(), 1);
-        assert_eq!(statement.inputs_statement.inputs[0].commitment, commitment);
+        assert!(statement.inputs_statement.inputs.is_empty());
         validate_transfer(&statement, None).expect("the engine must accept the burn claim statement");
 
         let err = provider
-            .create_burn_claim_statement(BurnClaimStatementSpec {
-                commitment,
-                encrypted_data: StealthCryptoApi::new()
-                    .encrypt_value_and_mask(VALUE, &mask, &account_pk, &sender_offset_secret, None)
-                    .expect("encrypting the burn output must succeed"),
-                sender_offset_public_key,
-                output: output_to_self(&provider, VALUE),
-                revealed_output: Some(RevealedOutput::new(Amount::from(u128::from(FEE)), a_receiver())),
+            .create_transfer_statement(ResolvedStealthTransferSpec {
+                inputs: vec![],
+                revealed_input_amount: Amount::from(VALUE),
+                outputs: vec![output_to_self(&provider, VALUE)],
+                revealed_output: Some(RevealedOutput::new(Amount::from(FEE), a_receiver())),
             })
             .await
             .expect_err("an unbalanced burn claim must be rejected");
         match err {
-            StealthProviderError::UnbalancedBurnClaim {
-                burned_amount,
+            StealthProviderError::UnbalancedTransfer {
+                total_revealed_input,
                 output_amount,
             } => {
-                assert_eq!(burned_amount, Amount::from(u128::from(VALUE)));
-                assert_eq!(output_amount, Amount::from(u128::from(VALUE + FEE)));
+                assert_eq!(total_revealed_input, Amount::from(VALUE));
+                assert_eq!(output_amount, Amount::from(VALUE + FEE));
             },
-            err => panic!("expected UnbalancedBurnClaim, got {err:?}"),
+            err => panic!("expected UnbalancedTransfer, got {err:?}"),
         }
     }
 
@@ -669,10 +646,16 @@ mod tests {
             .expect("sealing with a stealth key must succeed");
         assert_eq!(seal.public_key(), &derived);
 
+        let authorizers: tari_ootle_transaction::AuthorizerSet = [derived].into_iter().collect();
+        let context = AuthorizationContext::new(&derived, &authorizers);
         let auth = provider
-            .sign_authorization_with_stealth(&public_nonce, &derived, &unsigned)
+            .sign_authorization_with_stealth(&public_nonce, context, &unsigned)
             .await
             .expect("authorizing with a stealth key must succeed");
         assert_eq!(auth.signature().public_key(), &derived);
+        assert!(
+            auth.signature()
+                .verify_message(TransactionSignature::create_message(context, unsigned.body()))
+        );
     }
 }

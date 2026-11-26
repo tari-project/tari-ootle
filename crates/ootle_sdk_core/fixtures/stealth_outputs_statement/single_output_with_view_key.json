@@ -20,7 +20,10 @@
           "destination_account_pk": "b820df4d8d7d59f2e4870aa19597e694109bc2eeb6a47e51bf2d0e5c897f2769",
           "destination_view_pk": "6c5b1a8e7953516748b072c48d336d798ace16087b21fc3b63f200c8fe55e857",
           "amount": 2500000,
-          "revealed_amount": 0,
+          "revealed_amount": {
+            "hi": 0,
+            "lo": 0
+          },
           "resource_address": "resource_0101010101010101010101010101010101010101010101010101010101010101",
           "resource_view_key": "a02d8c83a3f70f13144d1ee8f24814df735f324093999a366138719e59ec4606",
           "memo": null,
@@ -29,8 +32,14 @@
           "minimum_value_promise": 0
         }
       ],
-      "revealed_input_amount": 0,
-      "revealed_output_amount": 0,
+      "revealed_input_amount": {
+        "hi": 0,
+        "lo": 0
+      },
+      "revealed_output_amount": {
+        "hi": 0,
+        "lo": 0
+      },
       "min_epoch": null,
       "max_epoch": 1,
       "dry_run": false,

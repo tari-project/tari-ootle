@@ -69,10 +69,11 @@ pub const fn num_preshards() -> NumPreshards {
     NumPreshards::P256
 }
 
-/// Create a RocksDbStateStore and a temporary directory
+/// Create a RocksDbStateStore and a temporary directory. It keeps one epoch of history, so that epoch cleanup at epoch
+/// `n` prunes epoch `n - 1`.
 /// NOTE: this takes around 1.5 s on my machine (AMD Ryzen 9 5950X, SSD)
 pub fn create_rocksdb() -> (RocksDbStateStore<String>, TempDir) {
-    create_rocksdb_with_opts(DatabaseOptions::default())
+    create_rocksdb_with_opts(DatabaseOptions::default().with_epoch_history_length(1))
 }
 
 pub fn create_rocksdb_with_opts(opts: DatabaseOptions) -> (RocksDbStateStore<String>, TempDir) {
@@ -153,6 +154,7 @@ pub fn build_substate_value(entity_id: Option<EntityId>) -> SubstateValue {
             access_rules: ComponentAccessRules::allow_all(),
             entity_id,
             upgrade_rule: Default::default(),
+            rules_updater: None,
         },
         body: ComponentBody {
             state: cbor!({
@@ -240,6 +242,7 @@ pub fn substate_value_for_entity(entity_id: EntityId) -> SubstateValue {
             access_rules: ComponentAccessRules::allow_all(),
             entity_id,
             upgrade_rule: Default::default(),
+            rules_updater: None,
         },
         body: ComponentBody {
             state: cbor!({

@@ -5,7 +5,7 @@ use tari_crypto::{
     keys::SecretKey,
     ristretto::{RistrettoPublicKey, RistrettoSecretKey, pedersen::PedersenCommitment},
 };
-use tari_engine_types::{confidential::MIN_CONFIDENTIAL_OUTPUT_VALUE_PROMISE, crypto::commit_amount};
+use tari_engine_types::{confidential::MIN_CONFIDENTIAL_OUTPUT_VALUE_PROMISE, crypto::commit_range_provable_amount};
 use tari_ootle_wallet_crypto::{MaskAndValue, OutputWitness, confidential};
 use tari_template_lib::types::{
     Amount,
@@ -101,7 +101,7 @@ pub struct ConfidentialWithdrawProofOutput {
 
 impl ConfidentialWithdrawProofOutput {
     pub fn to_commitment_for_output(&self, amount: Amount) -> Option<PedersenCommitment> {
-        commit_amount(&self.output_mask, amount)
+        commit_range_provable_amount(&self.output_mask, amount)
     }
 }
 

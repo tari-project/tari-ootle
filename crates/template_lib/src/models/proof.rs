@@ -43,6 +43,10 @@ const TAG: u64 = BinaryTag::ProofId.as_u64();
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct ProofId(BorTag<u32, TAG>);
 
+impl tari_bor::Tagged for ProofId {
+    const TAG: u64 = TAG;
+}
+
 impl From<u32> for ProofId {
     fn from(value: u32) -> Self {
         Self(BorTag::new(value))
@@ -179,7 +183,8 @@ fn drop_proof(id: ProofId) {
 }
 
 /// An open authorization window over a proof. The window closes when this is dropped; the proof itself stays held.
-#[derive(Debug, Clone, Encode, Decode, CborLen)]
+#[must_use = "the authorization window closes as soon as ProofAccess is dropped"]
+#[derive(Debug, Encode, Decode, CborLen)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ProofAccess {
     #[n(0)]

@@ -7,7 +7,19 @@ import Typography from "@mui/material/Typography";
 import { alpha, useTheme } from "@mui/material/styles";
 import type { ShardSyncStatus } from "@tari-project/ootle-ts-bindings";
 import { memo } from "react";
-import { MapMode, STATE_LABEL, hasRecentMismatch, logScale, shardLag, stagedBacklog, stateColour } from "./model";
+import {
+  BIAS_Z_SATURATION,
+  MapMode,
+  STATE_LABEL,
+  VersionSpread,
+  biasZ,
+  hasRecentMismatch,
+  logScale,
+  shardLag,
+  shardVersion,
+  stagedBacklog,
+  stateColour,
+} from "./model";
 
 /** Lag at and beyond which a cell is drawn at full strength in lag mode. */
 export const LAG_SATURATION = 1000;
@@ -17,17 +29,21 @@ interface Props {
   mode: MapMode;
   /** The busiest shard's versions in the last minute, which activity mode saturates at. */
   maxActivity: number;
+  /** The preshards' version spread, which bias mode measures each shard against. */
+  spread: VersionSpread | null;
   nowSec: number;
   selected: boolean;
   onSelect: (shard: number) => void;
 }
 
-function ShardCell({ shard, mode, maxActivity, nowSec, selected, onSelect }: Props) {
+function ShardCell({ shard, mode, maxActivity, spread, nowSec, selected, onSelect }: Props) {
   const theme = useTheme();
   const lag = shardLag(shard);
   const backlog = stagedBacklog(shard);
   const mismatch = hasRecentMismatch(shard, nowSec);
   const name = shard.shard === 0 ? "Global shard" : `Shard ${shard.shard}`;
+  const version = shardVersion(shard);
+  const z = version !== null && spread !== null && shard.shard !== 0 ? biasZ(version, spread) : null;
 
   let background = "transparent";
   let border = "transparent";
@@ -47,6 +63,13 @@ function ShardCell({ shard, mode, maxActivity, nowSec, selected, onSelect }: Pro
       border = theme.palette.text.disabled;
     } else {
       background = alpha(theme.palette.info.main, 0.12 + 0.88 * logScale(lag, LAG_SATURATION));
+    }
+  } else if (mode === "bias") {
+    if (z === null) {
+      border = theme.palette.text.disabled;
+    } else {
+      const hue = z >= 0 ? theme.palette.warning.main : theme.palette.info.main;
+      background = alpha(hue, 0.08 + 0.92 * Math.min(1, Math.abs(z) / BIAS_Z_SATURATION));
     }
   } else {
     const versions = shard.versions_last_minute;
@@ -83,6 +106,17 @@ function ShardCell({ shard, mode, maxActivity, nowSec, selected, onSelect }: Pro
       <Typography variant="caption" component="div">
         {shard.versions_last_minute.toLocaleString()} versions promoted in the last minute
       </Typography>
+      {mode === "bias" &&
+        (z !== null ? (
+          <Typography variant="caption" component="div">
+            At v{version}, z = {z >= 0 ? "+" : "−"}
+            {Math.abs(z).toFixed(1)} against chance{Math.abs(z) > 3 && ", beyond what chance explains"}
+          </Typography>
+        ) : (
+          <Typography variant="caption" component="div">
+            {shard.shard === 0 ? "The global shard is left out of the bias measure" : "No version to compare yet"}
+          </Typography>
+        ))}
       {mismatch && (
         <Typography variant="caption" component="div" color="error.light">
           A peer was blamed for this shard's history recently

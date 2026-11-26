@@ -629,14 +629,7 @@ fn committee_lookup_orders_by_start_epoch_then_id_when_multiple_shard_keys_are_a
 
         for ((shard_key, start_epoch), claim_key) in [(first_row, first_claim_key), (second_row, second_claim_key)] {
             validator_nodes
-                .insert_validator_node(
-                    address.clone(),
-                    pk_bytes,
-                    shard_key,
-                    start_epoch,
-                    claim_key,
-                    VotePower::of(1),
-                )
+                .insert_validator_node(address, pk_bytes, shard_key, start_epoch, claim_key, VotePower::of(1))
                 .unwrap();
             validator_nodes
                 .set_committee_shard(shard_key, shard_group, Epoch(30))

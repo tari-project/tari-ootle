@@ -84,6 +84,10 @@ impl SpendWitness {
 pub struct MerkleProof {
     #[n(0)]
     #[cbor(decode_with = "decode_siblings")]
+    #[cfg_attr(
+        feature = "serde",
+        serde(deserialize_with = "ootle_serde::bounded_seq::deserialize::<{ MAX_INCLUSION_PROOF_LEN }, _, _>")
+    )]
     pub siblings: Vec<Hash32>,
 }
 

@@ -66,7 +66,7 @@ interface Store {
   setCode: (code: string) => void;
   addVariable: (key: string, value: string) => void;
   removeVariable: (key: string) => void;
-  renameVariable: (oldKey: string, newKey: string) => void;
+  renameVariable: (oldKey: string, newKey: string) => boolean;
   addSigningKey: (key: KeyId) => void;
   removeSigningKey: (index: number) => void;
   /** Add or update a blob payload under `name`. `base64` is base64-encoded bytes. */
@@ -89,6 +89,29 @@ function nextTabName(tabs: ManifestTab[]): string {
   const names = new Set(tabs.map((t) => t.name));
   while (names.has(`Manifest ${i}`)) i++;
   return `Manifest ${i}`;
+}
+
+export function isSameKeyId(a: KeyId, b: KeyId): boolean {
+  if ("Derived" in a && "Derived" in b) {
+    return a.Derived.key_branch === b.Derived.key_branch && String(a.Derived.index) === String(b.Derived.index);
+  }
+  if ("Imported" in a && "Imported" in b) {
+    return String(a.Imported.local_key_id) === String(b.Imported.local_key_id);
+  }
+  return false;
+}
+
+export function normalizeStringRecord(value: unknown): Record<string, string> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+  const result: Record<string, string> = {};
+  for (const [k, v] of Object.entries(value)) {
+    if (typeof v === "string") {
+      result[k] = v;
+    }
+  }
+  return result;
 }
 
 function updateActiveTab(state: Store, patch: Partial<ManifestTab>): Partial<Store> {
@@ -182,19 +205,28 @@ const useManifestCodeStore = create<Store>()(
           return updateActiveTab(state, { variables: rest });
         }),
 
-      renameVariable: (oldKey: string, newKey: string) =>
+      renameVariable: (oldKey: string, newKey: string) => {
+        let renamed = false;
         set((state) => {
           const active = state.tabs.find((t) => t.id === state.activeTabId)!;
-          if (oldKey === newKey || !(oldKey in active.variables)) return state;
+          if (
+            oldKey === newKey ||
+            !Object.prototype.hasOwnProperty.call(active.variables, oldKey) ||
+            Object.prototype.hasOwnProperty.call(active.variables, newKey)
+          ) {
+            return state;
+          }
+          renamed = true;
           const entries = Object.entries(active.variables).map(([k, v]) => (k === oldKey ? [newKey, v] : [k, v]));
           return updateActiveTab(state, { variables: Object.fromEntries(entries) });
-        }),
+        });
+        return renamed;
+      },
 
       addSigningKey: (key: KeyId) =>
         set((state) => {
           const active = state.tabs.find((t) => t.id === state.activeTabId)!;
-          // Avoid duplicates
-          const isDuplicate = active.signingKeys.some((k) => JSON.stringify(k) === JSON.stringify(key));
+          const isDuplicate = active.signingKeys.some((k) => isSameKeyId(k, key));
           if (isDuplicate) return state;
           return updateActiveTab(state, { signingKeys: [...active.signingKeys, key] });
         }),
@@ -220,12 +252,14 @@ const useManifestCodeStore = create<Store>()(
 
       loadTabs: (loaded: ManifestTab[]) =>
         set(() => {
-          // Assign fresh IDs to avoid collisions with existing tabs
+          // Assign fresh IDs to avoid collisions with existing tabs and default missing/invalid maps
           const tabs = loaded.map((t) => ({
-            ...t,
             id: generateId(),
-            signingKeys: t.signingKeys || [],
-            blobs: t.blobs || {},
+            name: t.name,
+            code: t.code,
+            variables: normalizeStringRecord(t.variables),
+            signingKeys: Array.isArray(t.signingKeys) ? t.signingKeys : [],
+            blobs: normalizeStringRecord(t.blobs),
           }));
           const first = tabs[0];
           return {

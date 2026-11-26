@@ -140,10 +140,11 @@ mod tests {
         )
     }
 
-    /// The pair as composed at mempool ingress: window rules plus the admission ceiling.
+    /// The pair as composed at mempool ingress: the admission ceiling before the window rules so an
+    /// out-of-ceiling window fails with `MaxEpochTooFarAhead` even when `min_epoch` is also ahead.
     fn validate(current_epoch: Epoch, transaction: &Transaction) -> Result<(), TransactionValidationError> {
-        EpochRangeValidator::new().validate(&current_epoch, transaction)?;
-        TransactionValidityWindowValidator::new(MAX_VALIDITY_EPOCHS).validate(&current_epoch, transaction)
+        TransactionValidityWindowValidator::new(MAX_VALIDITY_EPOCHS).validate(&current_epoch, transaction)?;
+        EpochRangeValidator::new().validate(&current_epoch, transaction)
     }
 
     #[test]
@@ -178,6 +179,16 @@ mod tests {
             validate(Epoch(0), &tx),
             Err(TransactionValidationError::MaxEpochTooFarAhead { .. })
         ));
+    }
+
+    #[test]
+    fn it_rejects_a_window_beyond_the_ceiling_even_when_min_epoch_is_also_ahead() {
+        for epoch in [Epoch(100), Epoch(u64::MAX)] {
+            let tx = transaction(Some(epoch), epoch);
+            let err = validate(Epoch(5), &tx).unwrap_err();
+            assert!(matches!(err, TransactionValidationError::MaxEpochTooFarAhead { .. }));
+            assert!(err.is_sender_fault());
+        }
     }
 
     /// The consensus sequencing path must never refuse a window for being too far ahead: a lagging

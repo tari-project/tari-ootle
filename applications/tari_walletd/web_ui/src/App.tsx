@@ -32,7 +32,6 @@ import AddressBookPage from "@routes/AddressBook/AddressBookPage";
 import ApiKeysLayout from "@routes/ApiKeys/ApiKeys";
 import MyAssets from "@routes/AssetVault/Components/MyAssets";
 import ErrorPage from "@routes/ErrorPage";
-import Keys from "@routes/Keys/Keys";
 import Manifest from "@routes/Manifest/Manifest";
 import Onboarding from "@routes/Onboarding/Onboarding";
 import SettingsPage from "@routes/Settings/Settings";
@@ -50,6 +49,7 @@ import { getClientInstance, isValidJwt, settingsGet } from "@utils/json_rpc";
 import { useEffect, useState } from "react";
 import { Route, Routes } from "react-router-dom";
 import { ErrorNotificationProvider } from "./contexts/ErrorNotificationContext";
+import { resolveGuardedRouteView } from "./guardedRouteHelpers";
 
 export const breadcrumbRoutes = [
   {
@@ -73,13 +73,13 @@ export const breadcrumbRoutes = [
     dynamic: false,
   },
   {
-    label: "Keys",
-    path: "/keys",
+    label: "Access Tokens",
+    path: "/access-tokens",
     dynamic: false,
   },
   {
-    label: "Access Tokens",
-    path: "/access-tokens",
+    label: "API Keys",
+    path: "/api-keys",
     dynamic: false,
   },
   {
@@ -174,8 +174,12 @@ const GuardedRoute = ({ component: Component, redirect = "/", ...rest }: Guarded
   const setAdvancedUiFeatures = useSettingsStore((s) => s.setAdvancedUiFeatures);
 
   useEffect(() => {
+    let cancelled = false;
     async function initAuth() {
       const client = await getClientInstance();
+      if (cancelled) {
+        return;
+      }
       const token = client.getToken();
 
       if (isValidJwt(token)) {
@@ -196,28 +200,49 @@ const GuardedRoute = ({ component: Component, redirect = "/", ...rest }: Guarded
         if (response.token) {
           console.log("AUTH: refresh succeeded");
           client.setToken(response.token);
-          setHasToken(true);
-          setLoggedIn(true);
-        } else {
+          if (!cancelled) {
+            setHasToken(true);
+            setLoggedIn(true);
+          }
+        } else if (!cancelled) {
           setHasToken(false);
         }
       } catch (e) {
+        if (cancelled) {
+          return;
+        }
         console.log("AUTH: refresh failed", e);
         setHasToken(false);
       } finally {
-        setNeedsReauth(false);
+        if (!cancelled) {
+          setNeedsReauth(false);
+        }
       }
     }
 
     initAuth();
+    return () => {
+      cancelled = true;
+    };
   }, [hasToken, needsReauth]);
 
   useEffect(() => {
-    if (hasToken && loggedIn) {
-      settingsGet().then((res) => {
-        setAdvancedUiFeatures(res.advanced_ui_features);
-      });
+    if (!hasToken || !loggedIn) {
+      return;
     }
+    let cancelled = false;
+    settingsGet()
+      .then((res) => {
+        if (!cancelled) {
+          setAdvancedUiFeatures(res.advanced_ui_features);
+        }
+      })
+      .catch((err) => {
+        console.error("Failed to fetch settings:", err);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [hasToken, loggedIn, setAdvancedUiFeatures]);
 
   const handleOnAuthenticated = () => {
@@ -226,18 +251,26 @@ const GuardedRoute = ({ component: Component, redirect = "/", ...rest }: Guarded
     setNeedsReauth(false);
   };
 
-  if (isLoading || !authMethod || hasToken === null) {
-    return <Loading />;
-  }
+  const decision = resolveGuardedRouteView({
+    isLoading,
+    authMethodsIsError,
+    authMethod,
+    hasToken,
+    loggedIn,
+  });
 
-  if (authMethodsIsError) {
+  if (decision.view === "error") {
     console.error("Error fetching auth method:", authMethodsError);
     return <div>Error fetching authentication method: {authMethodsError?.message || "Unknown error"}</div>;
   }
 
-  if (!hasToken || !loggedIn) {
-    console.log(`AUTH: User not authenticated, showing auth dialog for ${authMethod.method}`);
-    return <AuthDialog open={true} authMethod={authMethod.method} onAuthenticated={handleOnAuthenticated} />;
+  if (decision.view === "loading") {
+    return <Loading />;
+  }
+
+  if (decision.view === "auth") {
+    console.log(`AUTH: User not authenticated, showing auth dialog for ${decision.authMethod.method}`);
+    return <AuthDialog open={true} authMethod={decision.authMethod.method} onAuthenticated={handleOnAuthenticated} />;
   }
 
   return <Component {...rest} />;
@@ -253,7 +286,6 @@ function App() {
           <Route path="onboarding" element={<GuardedRoute component={Onboarding} />} />
           <Route path="accounts" element={<GuardedRoute redirect="/accounts" component={Accounts} />} />
           <Route path="accounts/:id" element={<GuardedRoute redirect="/accounts" component={AccountDetails} />} />
-          <Route path="keys" element={<GuardedRoute redirect="/keys" component={Keys} />} />
           <Route
             path="access-tokens"
             element={<GuardedRoute redirect="/access-tokens" component={AccessTokensLayout} />}

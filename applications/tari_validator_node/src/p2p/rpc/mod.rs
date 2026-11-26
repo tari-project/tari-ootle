@@ -27,6 +27,8 @@ mod state_sync_task;
 /// The status returned to a peer whose request needs consensus in a state this node is not in.
 pub(crate) const CONSENSUS_NOT_RUNNING: &str = "Consensus is not running on this node";
 
+use std::sync::Arc;
+
 pub use rpc_impl::ValidatorNodeRpcServiceImpl;
 use tari_epoch_manager::service::EpochManagerHandle;
 use tari_ootle_p2p::PeerAddress;
@@ -42,13 +44,17 @@ pub fn create_tari_validator_node_rpc_service<TStateStore: StateStore + Send + S
     consensus: ConsensusHandle,
     max_transaction_size_bytes: usize,
     epoch_history_length: u64,
+    epoch_oracle_config_json: Option<Arc<str>>,
 ) -> ValidatorNodeRpcServer<ValidatorNodeRpcServiceImpl<TStateStore>> {
-    ValidatorNodeRpcServer::new(ValidatorNodeRpcServiceImpl::new(
-        epoch_manager,
-        shard_store_store,
-        mempool,
-        consensus,
-        max_transaction_size_bytes,
-        epoch_history_length,
-    ))
+    ValidatorNodeRpcServer::new(
+        ValidatorNodeRpcServiceImpl::new(
+            epoch_manager,
+            shard_store_store,
+            mempool,
+            consensus,
+            max_transaction_size_bytes,
+            epoch_history_length,
+        )
+        .with_epoch_oracle_config_json(epoch_oracle_config_json),
+    )
 }

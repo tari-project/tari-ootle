@@ -1,6 +1,8 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use std::{collections::HashMap, ops::Deref};
+
 use log::*;
 use tari_consensus_types::{BlockId, LastVoted, PcId, ProposalCertificate};
 use tari_crypto::ristretto::RistrettoPublicKey;
@@ -22,12 +24,11 @@ use tari_ootle_storage::{
         BookkeepingModel,
         Command,
         CommittedBlockProof,
+        FinalizedTransactionInclusion,
         ForeignProposalAtom,
         ForeignProposalRecord,
         ForeignProposalStatus,
         NoVoteReason,
-        PendingShardStateTreeDiff,
-        ProposalOrigin,
         SubstateRecord,
         TransactionPool,
         TransactionPoolRecord,
@@ -38,6 +39,7 @@ use tari_ootle_storage::{
         index_substate_down_proofs,
     },
 };
+use tari_ootle_transaction::TransactionId;
 use tari_sidechain::{FixedHash, QuorumDecision};
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 use tokio::sync::broadcast;
@@ -46,9 +48,8 @@ use crate::{
     hotstuff::{
         HotstuffConfig,
         ProposalValidationError,
-        apply_leader_fee_to_substate_store,
         block_change_set::{BlockDecision, ProposedBlockChangeSet},
-        calculate_state_merkle_root,
+        command_sequencer::{BlockTotals, block_state_root},
         commit_proofs::{committed_block_commit_proof, generate_block_commit_proof},
         error::HotStuffError,
         event::HotstuffEvent,
@@ -109,6 +110,7 @@ where
         self.transaction_manager.uncommitted_templates()
     }
 
+    #[expect(clippy::too_many_lines)]
     pub fn handle(
         &mut self,
         tx: &mut TStateStore::WriteTransaction<'_>,
@@ -124,7 +126,6 @@ where
         // a transaction from LocalPrepared (see `abort_local_prepared_for_epoch_end`) and requires the end-of-epoch
         // block to leave none there (see `check_epoch_end_drained`).
         next_epoch_changes_layout: bool,
-        origin: ProposalOrigin,
         change_set: &mut ProposedBlockChangeSet,
     ) -> Result<BlockDecision, HotStuffError> {
         let _timer =
@@ -179,10 +180,8 @@ where
 
         // A block at a height this node has already voted at may still be the one the committee certifies, and
         // committing it applies its change set. It is therefore decided on, and its change set saved, whether or not
-        // this node may vote for it. Blocks first imported through catch-up have already been certified by the
-        // committee and are never voted on by the caller, so their decision is reported even at or below
-        // `last_voted`.
-        let may_vote = origin.is_catch_up() || self.should_vote(&**tx, valid_block.block())?;
+        // this node may vote for it; `local_decision` is reported only for blocks above `last_voted`.
+        let may_vote = self.should_vote(&**tx, valid_block.block())?;
         let parent = valid_block.block().get_parent(&**tx)?;
         self.decide_what_to_vote(
             &**tx,
@@ -227,6 +226,12 @@ where
         }
 
         let (local_decision, no_vote_reason) = if !may_vote {
+            // The caller sees only `AlreadyVotedAtHeight`, so the block's own no-vote reason is kept in diagnostics.
+            if let Some(reason) = change_set.no_vote_reason() &&
+                let Err(err) = tx.diagnostics_add_no_vote(*valid_block.id(), reason.clone())
+            {
+                error!(target: LOG_TARGET, "Failed to save no vote reason: {err}");
+            }
             (None, Some(NoVoteReason::AlreadyVotedAtHeight))
         } else if let Some(reason) = change_set.no_vote_reason() {
             (None, Some(reason.clone()))
@@ -332,10 +337,8 @@ where
         let mut substate_store =
             PendingSubstateStore::init(tx, block.as_leaf(), self.config.consensus_constants.num_preshards)?
                 .with_input_load_budget(self.config.consensus_constants.max_block_input_load_bytes);
-        let mut total_leader_fee = 0;
-        let mut total_exhaust_burn = parent.header().total_accumulated_exhaust_burn();
+        let mut totals = BlockTotals::extending(parent.header().total_accumulated_exhaust_burn());
         let max_validation_execution_points = self.config.consensus_constants.max_block_validation_execution_points;
-        let mut block_execution_points = 0u64;
         let num_foreign_proposals = block.all_foreign_proposals().count();
         let mut foreign_proposal_bytes = 0usize;
 
@@ -350,8 +353,7 @@ where
                         local_committee_info,
                         &mut substate_store,
                         proposed_block_change_set,
-                        &mut total_leader_fee,
-                        &mut total_exhaust_burn,
+                        &mut totals,
                     )? {
                         proposed_block_change_set.set_no_vote(reason);
                         return Ok(());
@@ -365,6 +367,7 @@ where
                         local_committee_info,
                         &mut substate_store,
                         proposed_block_change_set,
+                        &mut totals,
                     )? {
                         proposed_block_change_set.set_no_vote(reason);
                         return Ok(());
@@ -379,6 +382,7 @@ where
                         next_epoch_changes_layout,
                         &mut substate_store,
                         proposed_block_change_set,
+                        &mut totals,
                     )? {
                         proposed_block_change_set.set_no_vote(reason);
                         return Ok(());
@@ -392,8 +396,7 @@ where
                         local_committee_info,
                         &mut substate_store,
                         proposed_block_change_set,
-                        &mut total_leader_fee,
-                        &mut total_exhaust_burn,
+                        &mut totals,
                     )? {
                         proposed_block_change_set.set_no_vote(reason);
                         return Ok(());
@@ -404,8 +407,10 @@ where
                         tx,
                         block,
                         atom,
-                        &substate_store,
+                        local_committee_info,
+                        &mut substate_store,
                         proposed_block_change_set,
+                        &mut totals,
                     )? {
                         proposed_block_change_set.set_no_vote(reason);
                         return Ok(());
@@ -547,22 +552,17 @@ where
             // pushes it over the limit stops block execution (no-vote), bounding the compute a misbehaving
             // leader can extract from replicas. Both halves are deterministic — metering is, and the native
             // price is a pure function of the declared statement — so every replica computes identical totals
-            // and stops at the same command. Commands executed for this block have an execution in the change set;
-            // finalization commands (AllAccept/SomeAccept) reuse a prior block's execution and add nothing.
-            if let Some(atom) = cmd.transaction() &&
-                let Some(execution) = proposed_block_change_set.transaction_execution(atom.id())
-            {
-                block_execution_points =
-                    block_execution_points.saturating_add(execution.result().total_execution_points());
-                if block_execution_points > max_validation_execution_points {
-                    let reason = NoVoteReason::BlockExecutionPointsExceeded {
-                        total_points: block_execution_points,
-                        max_points: max_validation_execution_points,
-                    };
-                    warn!(target: LOG_TARGET, "❌ NO VOTE: {reason}");
-                    proposed_block_change_set.set_no_vote(reason);
-                    return Ok(());
-                }
+            // and stops at the same command. Each command adds the points of the execution it is derived from to the
+            // block totals, as the proposer's does; finalization commands (AllAccept/SomeAccept) derive from none
+            // and add nothing, whichever execution an earlier command in the block placed in the change set.
+            if totals.execution_points > max_validation_execution_points {
+                let reason = NoVoteReason::BlockExecutionPointsExceeded {
+                    total_points: totals.execution_points,
+                    max_points: max_validation_execution_points,
+                };
+                warn!(target: LOG_TARGET, "❌ NO VOTE: {reason}");
+                proposed_block_change_set.set_no_vote(reason);
+                return Ok(());
             }
         }
 
@@ -597,51 +597,37 @@ where
             return Ok(());
         }
 
-        if total_leader_fee != block.total_leader_fee() {
+        if totals.leader_fee != block.total_leader_fee() {
             warn!(
                 target: LOG_TARGET,
                 "❌ Leader fee disagreement for block {}. Leader proposed {}, we calculated {}",
                 block,
                 block.total_leader_fee(),
-                total_leader_fee
+                totals.leader_fee
             );
             proposed_block_change_set.set_no_vote(NoVoteReason::TotalLeaderFeeDisagreement);
             return Ok(());
         }
 
-        if total_exhaust_burn != block.header().total_accumulated_exhaust_burn() {
+        if totals.exhaust_burn != block.header().total_accumulated_exhaust_burn() {
             warn!(
                 target: LOG_TARGET,
                 "❌ Exhaust burn disagreement for block {}. Leader proposed {}, we calculated {}",
                 block,
                 block.header().total_accumulated_exhaust_burn(),
-                total_exhaust_burn
+                totals.exhaust_burn
             );
             proposed_block_change_set.set_no_vote(NoVoteReason::TotalExhaustBurnDisagreement);
             return Ok(());
         }
 
-        // Apply leader fee to substate store before we calculate the state root
-        if total_leader_fee > 0 {
-            apply_leader_fee_to_substate_store(
-                &mut substate_store,
-                proposer_claim_public_key_bytes,
-                local_committee_info.num_preshards(),
-                local_committee_info.shard_group().start(),
-                total_leader_fee,
-            )?;
-        }
-
-        let pending = PendingShardStateTreeDiff::get_all_up_to_commit_block(tx, block.parent())?;
-        let (expected_merkle_root, tree_diffs) = calculate_state_merkle_root(
+        let (expected_merkle_root, tree_diffs) = block_state_root(
             tx,
-            block.shard_group(),
-            pending,
-            substate_store
-                .changes()
-                .iter()
-                // Calculate for local shards only or the global shard
-                .filter(|ch| block.shard_group().contains_or_global(&ch.shard())),
+            local_committee_info,
+            block.parent(),
+            &mut substate_store,
+            proposer_claim_public_key_bytes,
+            totals.leader_fee,
             block.network(),
             block.epoch(),
         )?;
@@ -875,21 +861,9 @@ where
         let version_updates = state_tree.commit_diffs(pending)?;
         let tx = state_tree.into_transaction();
         // The state version proofs just indexed name this block, which is pruned with its epoch, so they are served
-        // with the commit proof stored here. A storage error fails the commit; a block that breaks a commit-proof
-        // invariant is logged, and the node keeps committing, as it does when it cannot index the proofs.
-        if index_committed_block_state_versions(tx, block, &version_updates)? {
-            match generate_block_commit_proof(&**tx, commit_qc, block) {
-                Ok(commit_proof) => {
-                    tx.block_commit_proofs_insert(block.id(), &CommittedBlockProof::new(commit_proof).to_bytes())?
-                },
-                Err(err @ HotStuffError::StorageError(_)) => return Err(err),
-                Err(err) => error!(
-                    target: LOG_TARGET,
-                    "BUG: cannot generate the commit proof of {block}, so its state versions cannot be proven to \
-                     syncing peers once it is pruned: {err}"
-                ),
-            }
-        }
+        // with the commit proof stored here.
+        let commit_proof_stored = index_committed_block_state_versions(tx, block, &version_updates)? &&
+            store_block_commit_proof(tx, commit_qc, block)?;
 
         {
             let _timer = TraceTimer::debug(LOG_TARGET, "commit_block");
@@ -916,7 +890,15 @@ where
         if !finalized_transactions.is_empty() {
             let _timer =
                 TraceTimer::debug(LOG_TARGET, "finalize transactions").with_iterations(finalized_transactions.len());
-            TransactionRecord::finalize_all(tx, block.epoch(), &finalized_transactions)?;
+            let mut inclusions =
+                finalized_transaction_inclusions(tx, commit_qc, block, &finalized_transactions, commit_proof_stored)?;
+            TransactionRecord::finalize_all(
+                tx,
+                block.epoch(),
+                finalized_transactions
+                    .iter()
+                    .map(|transaction| (transaction, inclusions.remove(transaction.id()))),
+            )?;
 
             debug!(
                 target: LOG_TARGET,
@@ -948,6 +930,80 @@ where
         block.clear_leader_failure_count(tx, thresholds)?;
 
         Ok(finalized_transactions)
+    }
+}
+
+/// Stores the commit proof of `block`, returning whether it is stored.
+///
+/// A storage error fails the commit. A block that breaks a commit-proof invariant is logged, and the node keeps
+/// committing, as it does when it cannot index the proofs.
+fn store_block_commit_proof<TTx>(
+    tx: &mut TTx,
+    commit_qc: &ProposalCertificate,
+    block: &Block,
+) -> Result<bool, HotStuffError>
+where
+    TTx: StateStoreWriteTransaction + Deref,
+    TTx::Target: StateStoreReadTransaction,
+{
+    match generate_block_commit_proof(&**tx, commit_qc, block) {
+        Ok(commit_proof) => {
+            tx.block_commit_proofs_insert(block.id(), &CommittedBlockProof::new(commit_proof).to_bytes())?;
+            Ok(true)
+        },
+        Err(err @ HotStuffError::StorageError(_)) => Err(err),
+        Err(err) => {
+            error!(
+                target: LOG_TARGET,
+                "BUG: cannot generate the commit proof of {block}, so neither its state versions nor the decisions it \
+                 finalized can be proven once it is pruned: {err}"
+            );
+            Ok(false)
+        },
+    }
+}
+
+/// The inclusion of each transaction in `finalized` that `block` aborts, storing the block's commit proof for them
+/// unless `commit_proof_stored`. Each inclusion cites the block once recorded, so the commit proof is stored only when
+/// there is an inclusion to cite it.
+///
+/// A block whose header disagrees with its commands, or whose commit proof cannot be generated, is logged, and its
+/// aborts are recorded without inclusions.
+fn finalized_transaction_inclusions<TTx>(
+    tx: &mut TTx,
+    commit_qc: &ProposalCertificate,
+    block: &Block,
+    finalized: &[TransactionPoolRecord],
+    commit_proof_stored: bool,
+) -> Result<HashMap<TransactionId, FinalizedTransactionInclusion>, HotStuffError>
+where
+    TTx: StateStoreWriteTransaction + Deref,
+    TTx::Target: StateStoreReadTransaction,
+{
+    let mut proofs = match block.compute_abort_proofs() {
+        Ok(proofs) => proofs,
+        Err(err) => {
+            error!(
+                target: LOG_TARGET,
+                "BUG: cannot prove the aborts {block} finalized, so they are recorded unproven: {err}"
+            );
+            return Ok(HashMap::new());
+        },
+    };
+    let inclusions = finalized
+        .iter()
+        .filter_map(|transaction| {
+            let proof = proofs.remove(transaction.id())?;
+            Some((*transaction.id(), FinalizedTransactionInclusion {
+                block_id: *block.id(),
+                proof,
+            }))
+        })
+        .collect::<HashMap<_, _>>();
+    if inclusions.is_empty() || commit_proof_stored || store_block_commit_proof(tx, commit_qc, block)? {
+        Ok(inclusions)
+    } else {
+        Ok(HashMap::new())
     }
 }
 
@@ -1086,34 +1142,6 @@ pub(super) fn check_foreign_proposal_record(
     None
 }
 
-/// Consensus rule: a leader may only move a transaction out of its current stage once the shard groups involved in it
-/// are ready for that, which is the same condition under which an honest leader proposes `command`. Evidence equality
-/// with the atom cannot stand in for this, because every replica derives the same incomplete evidence.
-pub(super) fn check_ready_to_leave_stage(
-    tx_rec: &TransactionPoolRecord,
-    block: &Block,
-    command: &'static str,
-) -> Option<NoVoteReason> {
-    if tx_rec.is_ready_for_pending_stage(block.shard_group()) {
-        return None;
-    }
-
-    warn!(
-        target: LOG_TARGET,
-        "❌ NO VOTE: Leader proposed {} for transaction {} in block {} before the shard groups involved in it were ready to leave stage {} ({})",
-        command,
-        tx_rec.id(),
-        block,
-        tx_rec.current_stage(),
-        tx_rec.evidence(),
-    );
-    Some(NoVoteReason::ProposedBeforeShardGroupsReady {
-        transaction_id: *tx_rec.id(),
-        stage: tx_rec.current_stage(),
-        command,
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use tari_consensus_types::Decision;
@@ -1146,13 +1174,13 @@ mod tests {
     }
 
     mod check_ready_to_leave_stage {
-        use tari_engine_types::{SubstateVersion, fees::ExhaustBurnRate};
-        use tari_ootle_common_types::ProtocolVersion;
-        use tari_ootle_storage::consensus_models::Evidence;
-        use tari_ootle_transaction::{Network, TransactionId};
+        use tari_engine_types::SubstateVersion;
+        use tari_ootle_storage::consensus_models::{Evidence, TransactionPoolRecord};
+        use tari_ootle_transaction::TransactionId;
         use tari_template_lib_types::ComponentAddress;
 
         use super::*;
+        use crate::hotstuff::command_sequencer::check_ready_to_leave_stage;
 
         fn input_group() -> ShardGroup {
             ShardGroup::new(0, 127)
@@ -1160,19 +1188,6 @@ mod tests {
 
         fn local_group() -> ShardGroup {
             ShardGroup::new(128, 255)
-        }
-
-        fn local_block() -> Block {
-            Block::genesis(
-                Network::LocalNet,
-                ProtocolVersion::V0,
-                Epoch(1),
-                FixedHash::zero(),
-                local_group(),
-                FixedHash::zero(),
-                None,
-                ExhaustBurnRate::new(0),
-            )
         }
 
         /// A committed record at LocalAccepted for a transaction whose local output shard group has accepted. The input
@@ -1215,7 +1230,7 @@ mod tests {
 
         #[test]
         fn all_accept_before_the_input_shard_group_accepted_is_not_voted_for() {
-            let reason = check_ready_to_leave_stage(&local_accepted_record(false), &local_block(), "AllAccept");
+            let reason = check_ready_to_leave_stage(&local_accepted_record(false), local_group(), "AllAccept");
             assert!(
                 matches!(
                     reason,
@@ -1230,7 +1245,7 @@ mod tests {
 
         #[test]
         fn all_accept_after_every_shard_group_accepted_is_voted_for() {
-            let reason = check_ready_to_leave_stage(&local_accepted_record(true), &local_block(), "AllAccept");
+            let reason = check_ready_to_leave_stage(&local_accepted_record(true), local_group(), "AllAccept");
             assert!(reason.is_none(), "unexpected reason: {reason:?}");
         }
     }
@@ -1581,12 +1596,15 @@ mod tests {
     }
 
     mod handle {
-        use std::collections::HashMap;
+        use std::{collections::HashMap, time::Duration};
 
+        use tari_common_types::types::PrivateKey;
         use tari_consensus_types::{PcId, ProposalCertificate, ShardGroupAccumulatedData};
         use tari_engine_types::{
+            commit_result::{AbortReason, ExecuteResult, FeeIntentFallback, FinalizeResult, TransactionResult},
             creation_check::CreationCheck,
-            substate::{Substate, SubstateId},
+            fees::FeeReceipt,
+            substate::{Substate, SubstateDiff, SubstateId},
         };
         use tari_ootle_common_types::{
             ExtraData,
@@ -1595,24 +1613,35 @@ mod tests {
             ProtocolVersion,
             SubstateRequirement,
             SubstateVersion,
+            VersionedSubstateIdRef,
             VotePower,
+            hashing::foreign_quorum_certificate_id_hasher,
         };
         use tari_ootle_storage::consensus_models::{
             BlockCommands,
             BlockHeaderMetadata,
             BlockPledge,
+            CommandOrHash,
             CommandsCommitProof,
             Evidence,
             ForeignProposal,
             ForeignProposalRecord,
             ForeignProposalStatus,
+            LeaderFee,
             LockedEpoch,
             MultiShardAtom,
             TransactionExecution,
             TransactionPoolStatusUpdate,
         };
         use tari_ootle_transaction::{Network, Transaction, TransactionId};
-        use tari_sidechain::{SidechainBlockCommitProof, SidechainBlockHeader};
+        use tari_sidechain::{
+            CommitProofElement,
+            QcSignatures,
+            QuorumCertificate,
+            SidechainBlockCommitProof,
+            SidechainBlockHeader,
+            SignerBitmap,
+        };
         use tari_state_store_rocksdb::{DatabaseOptions, RocksDbStateStore};
         use tari_template_lib_types::{ComponentAddress, crypto::SchnorrSignatureBytes};
         use tempfile::TempDir;
@@ -1654,9 +1683,12 @@ mod tests {
 
         impl VoterFixture {
             fn new() -> Self {
+                Self::in_committee(ShardGroup::all_shards(NUM_PRESHARDS), 1)
+            }
+
+            fn in_committee(shard_group: ShardGroup, num_committees: u32) -> Self {
                 let tmp = tempfile::tempdir().unwrap();
                 let store = RocksDbStateStore::open(tmp.path(), DatabaseOptions::default()).unwrap();
-                let shard_group = ShardGroup::all_shards(NUM_PRESHARDS);
                 let zero = Block::zero_block(NETWORK, NUM_PRESHARDS);
                 let genesis = Block::genesis(
                     NETWORK,
@@ -1695,6 +1727,7 @@ mod tests {
                     epoch_end_grace_period: std::time::Duration::from_secs(5),
                     epoch_end_drain_period: std::time::Duration::from_secs(5),
                     catch_up_request_timeout: std::time::Duration::from_secs(15),
+                    catch_up_page_bytes: crate::hotstuff::DEFAULT_CATCH_UP_PAGE_BYTES,
                 };
                 let (tx_events, _rx_events) = broadcast::channel(16);
                 let manager = ConsensusTransactionManager::new(NoopExecutor, 2160, usize::MAX, usize::MAX);
@@ -1705,8 +1738,14 @@ mod tests {
                     tx_events.downgrade(),
                     manager,
                 );
-                let committee_info =
-                    CommitteeInfo::new(NUM_PRESHARDS, 1, 1, shard_group, Epoch::zero(), VotePower::of(1));
+                let committee_info = CommitteeInfo::new(
+                    NUM_PRESHARDS,
+                    1,
+                    num_committees,
+                    shard_group,
+                    Epoch::zero(),
+                    VotePower::of(1),
+                );
                 let committee = Committee::new(vec![]);
                 Self {
                     store,
@@ -1727,12 +1766,13 @@ mod tests {
                 state_merkle_root: FixedHash,
                 timestamp: u64,
             ) -> Block {
+                let shard_group = self.committee_info.shard_group();
                 let justify = ProposalCertificate::new(
                     justify_block.header().calculate_hash(),
                     *justify_block.parent(),
                     justify_block.height(),
                     justify_block.epoch(),
-                    ShardGroup::all_shards(NUM_PRESHARDS),
+                    shard_group,
                     ProposalCertificate::genesis_signatures(),
                     QuorumDecision::Accept,
                 );
@@ -1744,7 +1784,7 @@ mod tests {
                     None,
                     height,
                     Epoch::zero(),
-                    ShardGroup::all_shards(NUM_PRESHARDS),
+                    shard_group,
                     RistrettoPublicKeyBytes::default(),
                     commands,
                     state_merkle_root,
@@ -1776,7 +1816,6 @@ mod tests {
                             false,
                             LocalNextEpochView::default(),
                             false,
-                            ProposalOrigin::Live,
                             &mut change_set,
                         )
                     })
@@ -1908,6 +1947,13 @@ mod tests {
         }
 
         fn foreign_proposal_record() -> ForeignProposalRecord {
+            foreign_proposal_record_with_commands(ShardGroup::new(0, 127), vec![])
+        }
+
+        fn foreign_proposal_record_with_commands(
+            shard_group: ShardGroup,
+            commands: Vec<CommandOrHash>,
+        ) -> ForeignProposalRecord {
             let metadata = BlockHeaderMetadata {
                 total_leader_fee: 0,
                 timestamp: 0,
@@ -1924,8 +1970,8 @@ mod tests {
                 epoch: 0,
                 epoch_hash: Default::default(),
                 shard_group: tari_sidechain::ShardGroup {
-                    start: 0,
-                    end_inclusive: 127,
+                    start: shard_group.start().as_u32(),
+                    end_inclusive: shard_group.end().as_u32(),
                 },
                 proposed_by: Default::default(),
                 state_merkle_root: Default::default(),
@@ -1935,11 +1981,33 @@ mod tests {
                 accumulated_data: Default::default(),
                 metadata_hash: metadata.calculate_hash(),
             };
-            let proof = CommandsCommitProof::new_latest(vec![], SidechainBlockCommitProof {
+            let qc = CommitProofElement::QuorumCertificate(QuorumCertificate {
+                header_hash: header.calculate_hash(),
+                parent_id: header.parent_id,
+                protocol_version: header.protocol_version,
+                epoch: header.epoch,
+                height: header.height,
+                signatures: QcSignatures::Schnorr {
+                    signers: SignerBitmap::from_indices(1, [0]).unwrap(),
+                    signatures: vec![],
+                },
+                decision: QuorumDecision::Accept,
+            });
+            let proof = CommandsCommitProof::new_latest(commands, SidechainBlockCommitProof {
                 header,
-                proof_elements: vec![],
+                proof_elements: vec![qc],
             });
             ForeignProposalRecord::new(ForeignProposal::new(proof, BlockPledge::default(), metadata))
+        }
+
+        fn substate_id_in(shard_group: ShardGroup) -> SubstateId {
+            (1..=u8::MAX)
+                .map(|seed| SubstateId::from(ComponentAddress::from_array([seed; 32])))
+                .find(|id| {
+                    let shard = VersionedSubstateIdRef::new(id, SubstateVersion::ZERO).to_shard(NUM_PRESHARDS);
+                    shard_group.contains(&shard)
+                })
+                .unwrap()
         }
 
         /// The epoch GC removes a confirmed foreign proposal's proposed-in index entry by the block the record names,
@@ -2070,6 +2138,304 @@ mod tests {
                 "unexpected no_vote_reason: {:?}",
                 decision.no_vote_reason
             );
+        }
+
+        /// When a `ForeignProposal` in a block adopts a fee-intent commit (placing the transaction's stored execution
+        /// into the block's change set via `adopt_fee_intent_only`) and the same block also sequences `AllAccept` for
+        /// that transaction, the vote loop must not charge those execution points a second time against
+        /// `max_block_validation_execution_points`.
+        #[test]
+        #[expect(clippy::too_many_lines)]
+        fn foreign_proposal_adopting_fee_intent_does_not_charge_execution_points_on_all_accept_in_same_block() {
+            let local_sg = ShardGroup::new(1, 128);
+            let foreign_sg = ShardGroup::new(129, 256);
+            let mut fixture = VoterFixture::in_committee(local_sg, 2);
+            fixture
+                .voter
+                .config
+                .consensus_constants
+                .max_block_validation_execution_points = 500;
+
+            let transaction = Transaction::builder_localnet(Epoch(10)).build_and_seal(&PrivateKey::from(1u64));
+            let tx_id = transaction.calculate_id();
+            let mut evidence = Evidence::empty();
+            evidence
+                .add_shard_group(local_sg)
+                .insert_output(substate_id_in(local_sg), SubstateVersion::ZERO)
+                .set_prepare_qc(PcId::zero())
+                .set_accept_qc(PcId::zero());
+            evidence
+                .add_shard_group(foreign_sg)
+                .insert_output(substate_id_in(foreign_sg), SubstateVersion::ZERO)
+                .set_prepare_qc(PcId::zero());
+
+            let foreign_accept_atom = MultiShardAtom {
+                id: tx_id,
+                decision: Decision::Commit,
+                evidence: evidence.clone(),
+                transaction_fee: 0,
+                leader_fee: None,
+                fee_intent_only: true,
+                locked_epoch: fixture.genesis.to_locked_epoch(),
+            };
+            let foreign_proposal = foreign_proposal_record_with_commands(foreign_sg, vec![CommandOrHash::Command(
+                Command::LocalAccept(foreign_accept_atom),
+            )]);
+            let foreign_qc_id: PcId = foreign_quorum_certificate_id_hasher()
+                .chain(foreign_proposal.block_id())
+                .chain(&QuorumDecision::Accept)
+                .finalize_into_array()
+                .into();
+
+            let block_1 = fixture.make_block(
+                &fixture.genesis,
+                &fixture.genesis,
+                NodeHeight(1),
+                BlockCommands::empty(),
+                FixedHash::zero(),
+                10,
+            );
+            fixture
+                .store
+                .with_write_tx(|tx| {
+                    block_1.justify().save(tx)?;
+                    block_1.insert(tx)?;
+                    TransactionRecord::new(transaction).insert(tx)?;
+                    tx.transaction_pool_insert_new(tx_id, Decision::Commit, &evidence, false, false, Epoch(10), 0)?;
+                    let mut rec = tx.transaction_pool_get_all(1)?.pop().unwrap();
+                    rec.update_locked_epoch(fixture.genesis.to_locked_epoch());
+                    rec.set_leader_fee(LeaderFee::default());
+                    rec.set_pending_stage(Some(TransactionPoolStage::LocalAccepted));
+                    rec.set_ready(false);
+                    tx.transaction_pool_add_pending_update(
+                        &block_1.as_leaf(),
+                        &TransactionPoolStatusUpdate::new(rec, false),
+                    )?;
+
+                    let result = ExecuteResult {
+                        finalize: FinalizeResult::new(
+                            tx_id.into_array().into(),
+                            vec![],
+                            vec![],
+                            TransactionResult::Accept(SubstateDiff::new()),
+                            FeeReceipt::default(),
+                        ),
+                        execution_time: Duration::ZERO,
+                        execute_epoch: None,
+                        wasm_execution_points: 1_000,
+                        native_execution_points: 0,
+                    };
+                    let fallback = FeeIntentFallback {
+                        diff: SubstateDiff::new(),
+                        events: vec![],
+                        logs: vec![],
+                        fee_receipt: FeeReceipt::default(),
+                    };
+                    TransactionExecution::new(result, vec![], vec![])
+                        .with_fee_intent_fallback(Some(fallback))
+                        .for_block(block_1.as_leaf(), tx_id)
+                        .insert_if_required(tx)?;
+                    foreign_proposal.save(tx)?;
+                    Ok::<_, HotStuffError>(())
+                })
+                .unwrap();
+
+            let mut all_accept_evidence = evidence;
+            all_accept_evidence
+                .add_shard_group(foreign_sg)
+                .set_accept_qc(foreign_qc_id);
+            let all_accept_atom = MultiShardAtom {
+                id: tx_id,
+                decision: Decision::Commit,
+                evidence: all_accept_evidence,
+                transaction_fee: 0,
+                leader_fee: Some(LeaderFee::default()),
+                fee_intent_only: true,
+                locked_epoch: fixture.genesis.to_locked_epoch(),
+            };
+            let block_2 = fixture.make_block(
+                &block_1,
+                &block_1,
+                NodeHeight(2),
+                BlockCommands::init([
+                    Command::ForeignProposal(foreign_proposal.to_atom()),
+                    Command::AllAccept(all_accept_atom),
+                ])
+                .unwrap(),
+                FixedHash::zero(),
+                20,
+            );
+
+            let decision = fixture.handle_block(&block_2);
+            assert!(
+                decision.no_vote_reason.is_none(),
+                "unexpected no_vote_reason: {:?}",
+                decision.no_vote_reason
+            );
+            assert_eq!(decision.local_decision, Some(QuorumDecision::Accept));
+        }
+
+        /// When a `ForeignProposal` in a block aborts a locally-accepted transaction and the same block sequences
+        /// `SomeAccept` for it, the vote loop votes for the block.
+        #[test]
+        fn foreign_proposal_aborting_transaction_votes_for_some_accept_in_same_block() {
+            let local_sg = ShardGroup::new(1, 128);
+            let foreign_sg = ShardGroup::new(129, 256);
+            let mut fixture = VoterFixture::in_committee(local_sg, 2);
+
+            let transaction = Transaction::builder_localnet(Epoch(10)).build_and_seal(&PrivateKey::from(2u64));
+            let tx_id = transaction.calculate_id();
+            let mut evidence = Evidence::empty();
+            evidence
+                .add_shard_group(local_sg)
+                .insert_output(substate_id_in(local_sg), SubstateVersion::ZERO)
+                .set_prepare_qc(PcId::zero())
+                .set_accept_qc(PcId::zero());
+            evidence
+                .add_shard_group(foreign_sg)
+                .insert_output(substate_id_in(foreign_sg), SubstateVersion::ZERO)
+                .set_prepare_qc(PcId::zero());
+
+            let mut aborted_evidence = evidence.clone();
+            aborted_evidence.abort();
+            let foreign_abort_atom = MultiShardAtom {
+                id: tx_id,
+                decision: Decision::Abort(AbortReason::ExecutionFailure),
+                evidence: aborted_evidence.clone(),
+                transaction_fee: 0,
+                leader_fee: None,
+                fee_intent_only: false,
+                locked_epoch: fixture.genesis.to_locked_epoch(),
+            };
+            let foreign_proposal = foreign_proposal_record_with_commands(foreign_sg, vec![CommandOrHash::Command(
+                Command::LocalAccept(foreign_abort_atom),
+            )]);
+            let foreign_qc_id: PcId = foreign_quorum_certificate_id_hasher()
+                .chain(foreign_proposal.block_id())
+                .chain(&QuorumDecision::Accept)
+                .finalize_into_array()
+                .into();
+
+            let block_1 = fixture.make_block(
+                &fixture.genesis,
+                &fixture.genesis,
+                NodeHeight(1),
+                BlockCommands::empty(),
+                FixedHash::zero(),
+                10,
+            );
+            fixture
+                .store
+                .with_write_tx(|tx| {
+                    block_1.justify().save(tx)?;
+                    block_1.insert(tx)?;
+                    TransactionRecord::new(transaction).insert(tx)?;
+                    tx.transaction_pool_insert_new(tx_id, Decision::Commit, &evidence, false, false, Epoch(10), 0)?;
+                    let mut rec = tx.transaction_pool_get_all(1)?.pop().unwrap();
+                    rec.update_locked_epoch(fixture.genesis.to_locked_epoch());
+                    rec.set_pending_stage(Some(TransactionPoolStage::LocalAccepted));
+                    rec.set_ready(false);
+                    tx.transaction_pool_add_pending_update(
+                        &block_1.as_leaf(),
+                        &TransactionPoolStatusUpdate::new(rec, false),
+                    )?;
+                    foreign_proposal.save(tx)?;
+                    Ok::<_, HotStuffError>(())
+                })
+                .unwrap();
+
+            let mut some_accept_evidence = aborted_evidence;
+            some_accept_evidence
+                .add_shard_group(foreign_sg)
+                .set_accept_qc(foreign_qc_id);
+            let some_accept_atom = MultiShardAtom {
+                id: tx_id,
+                decision: Decision::Abort(AbortReason::ExecutionFailure),
+                evidence: some_accept_evidence,
+                transaction_fee: 0,
+                leader_fee: None,
+                fee_intent_only: false,
+                locked_epoch: fixture.genesis.to_locked_epoch(),
+            };
+            let block_2 = fixture.make_block(
+                &block_1,
+                &block_1,
+                NodeHeight(2),
+                BlockCommands::init([
+                    Command::ForeignProposal(foreign_proposal.to_atom()),
+                    Command::SomeAccept(some_accept_atom),
+                ])
+                .unwrap(),
+                FixedHash::zero(),
+                20,
+            );
+
+            let decision = fixture.handle_block(&block_2);
+            assert!(
+                decision.no_vote_reason.is_none(),
+                "unexpected no_vote_reason: {:?}",
+                decision.no_vote_reason
+            );
+            assert_eq!(decision.local_decision, Some(QuorumDecision::Accept));
+        }
+
+        #[test]
+        fn a_block_at_or_below_last_voted_reports_already_voted_at_height() {
+            let mut fixture = VoterFixture::new();
+            fixture
+                .store
+                .with_write_tx(|tx| {
+                    fixture.genesis.as_last_executed().set(tx)?;
+                    LastVoted {
+                        block_id: *fixture.genesis.id(),
+                        height: NodeHeight(2),
+                        epoch: Epoch::zero(),
+                    }
+                    .set(tx)
+                })
+                .unwrap();
+
+            let block_1 = fixture.make_block(
+                &fixture.genesis,
+                &fixture.genesis,
+                NodeHeight(1),
+                BlockCommands::empty(),
+                FixedHash::zero(),
+                10,
+            );
+            let decision_1 = fixture.handle_block(&block_1);
+            assert!(decision_1.local_decision.is_none());
+            assert!(matches!(
+                decision_1.no_vote_reason,
+                Some(NoVoteReason::AlreadyVotedAtHeight)
+            ));
+
+            let block_2 = fixture.make_block(
+                &block_1,
+                &block_1,
+                NodeHeight(2),
+                BlockCommands::empty(),
+                FixedHash::zero(),
+                20,
+            );
+            let decision_2 = fixture.handle_block(&block_2);
+            assert!(decision_2.local_decision.is_none());
+            assert!(matches!(
+                decision_2.no_vote_reason,
+                Some(NoVoteReason::AlreadyVotedAtHeight)
+            ));
+
+            let block_3 = fixture.make_block(
+                &block_2,
+                &block_2,
+                NodeHeight(3),
+                BlockCommands::empty(),
+                FixedHash::zero(),
+                30,
+            );
+            let decision_3 = fixture.handle_block(&block_3);
+            assert_eq!(decision_3.local_decision, Some(QuorumDecision::Accept));
+            assert!(decision_3.no_vote_reason.is_none());
         }
     }
 

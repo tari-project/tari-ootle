@@ -1,7 +1,7 @@
 //    Copyright 2025 The Tari Project
 //    SPDX-License-Identifier: BSD-3-Clause
 
-use tari_template_lib::types::stealth;
+use tari_template_lib::types::{confidential, stealth};
 
 pub struct WasmLimits {
     /// Maximum number of function arguments
@@ -76,6 +76,13 @@ pub struct WasmLimits {
     /// `__indirect_function_table`. Only active segments count: declarative and passive ones stay
     /// out of every table at instantiation.
     pub max_element_segments: usize,
+    /// Maximum number of targets a single `br_table` may list, its default excluded. Cranelift's
+    /// aarch64 backend emits the jump table inline after a conditional branch to the default
+    /// target, and that branch reaches ±1 MiB, so a table of ~262k targets puts the default out of
+    /// range (CVE-2026-115893). The cap sits far below that on every architecture, so the accepted
+    /// module set is the same on each. `rustc`'s wasm32 output for the built-in templates lists at
+    /// most a few hundred.
+    pub max_br_table_targets: usize,
 }
 
 pub const WASM_LIMITS: WasmLimits = WasmLimits {
@@ -95,6 +102,7 @@ pub const WASM_LIMITS: WasmLimits = WasmLimits {
     max_tables: 4,
     max_table_elements: 16_384,
     max_element_segments: 1,
+    max_br_table_targets: 16_384,
 };
 
 /// Maximum Wasmer metering points a single template invocation may consume. Enforced by the
@@ -828,7 +836,7 @@ pub struct ConfidentialLimits {
 /// aggregate so a single transaction cannot stack enough native verification and substate access to stall the proposing
 /// leader. These are consensus-relevant execution rules enforced uniformly during execution, not mempool heuristics.
 pub const CONFIDENTIAL_LIMITS: ConfidentialLimits = ConfidentialLimits {
-    max_inputs: 1000,
+    max_inputs: confidential::MAX_CONFIDENTIAL_INPUTS,
     max_withdraws_per_transaction: 64,
     max_total_inputs_per_transaction: 1024,
 };

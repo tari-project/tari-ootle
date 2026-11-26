@@ -28,7 +28,7 @@ use tari_ootle_wallet_sdk::{
         stealth_transfer::{TransferFeeParams, TransferOutput},
     },
     crypto::{memo::Memo, pay_to::PayTo},
-    models::{AccountWithAddress, KeyBranch, KeyId, KeyType},
+    models::{AccountWithAddress, KeyType},
 };
 use tari_ootle_walletd_client::{
     WalletDaemonClient,
@@ -186,6 +186,7 @@ impl TrafficSim {
         let addrs = resp.instances.into_iter().filter_map(|instance| {
             if !instance.is_running {
                 log::info!("WARN: stopped wallet instance: {}", instance.name);
+                return None;
             }
             let rpc_port = instance.ports.get("jrpc")?;
             Some((instance.name, format!("http://localhost:{}/json_rpc", rpc_port)))
@@ -241,6 +242,7 @@ impl TrafficSim {
                 owner_account: (*sender_account.component_address()).into(),
                 fee_params: TransferFeeParams::new(UtxoInputSelection::PreferConfidential),
                 input_selection: UtxoInputSelection::ConfidentialOnly,
+                inputs: None,
                 resource_address,
                 badge_usage: Default::default(),
                 transfers: vec![StealthTransfer {
@@ -306,15 +308,11 @@ impl TrafficSim {
             },
         };
 
+        // Without an external view key, the simulation reuses the admin account's key as the viewable-balance key,
+        // and decrypts with the default account's key to match
         let view_public_key = match view_key {
             Some(secret) => RistrettoPublicKey::from_secret_key(&secret).to_byte_type(),
-            None => {
-                exchange_wallet
-                    .client
-                    .create_specific_key(KeyBranch::ElgamalEncryptionViewKey, 0)
-                    .await?
-                    .public_key
-            },
+            None => account.account().owner_public_key,
         };
 
         let max_epoch = exchange_wallet.max_epoch().await?;
@@ -415,8 +413,7 @@ impl TrafficSim {
     ) -> anyhow::Result<()> {
         let mut exchange_wallet = self.connect_exchange_wallet().await?;
 
-        let resp = exchange_wallet.client.accounts_get("sim_default".into()).await?;
-        // let resp = exchange_wallet.client.accounts_get_default().await?;
+        let resp = exchange_wallet.client.accounts_get_default().await?;
         let exchange_account = AccountWithAddress::new(resp.account, resp.address);
         let exchange_account_key_id = exchange_account
             .account
@@ -666,13 +663,16 @@ impl TrafficSim {
         let mut wallet = self.connect_exchange_wallet().await?;
 
         // An externally-supplied view key is imported into the exchange wallet so the daemon can decrypt with it;
-        // otherwise the wallet's own derived ElGamal view key is used.
+        // otherwise the default account's key is used, the key `setup_stablecoin` makes the viewable-balance key
         let view_key_id = match view_key {
             Some(secret) => wallet.client.import_key(secret, KeyType::ViewOnly).await?.key_id,
-            None => KeyId::Derived {
-                key_branch: KeyBranch::ElgamalEncryptionViewKey,
-                index: 0,
-            },
+            None => wallet
+                .client
+                .accounts_get_default()
+                .await?
+                .account
+                .owner_key_id
+                .ok_or_else(|| anyhow::anyhow!("The default account has no owner key to decrypt with"))?,
         };
 
         log::info!(

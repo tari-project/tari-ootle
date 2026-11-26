@@ -11,9 +11,11 @@
 //! - CBOR and JSON serialization/deserialization
 
 mod cargo_toml;
+mod commit_hash;
 mod hash;
 mod metadata;
 
 pub use cargo_toml::{CargoTomlError, from_cargo_toml, from_cargo_toml_str};
+pub use commit_hash::{CommitHash, CommitHashError};
 pub use hash::{MetadataHash, MetadataHashError, MetadataHashWriter};
 pub use metadata::{FunctionDoc, SCHEMA_VERSION, TemplateMetadata, TemplateMetadataError};

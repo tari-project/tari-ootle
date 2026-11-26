@@ -25,7 +25,6 @@ use clap::Subcommand;
 use self::{auth::AuthSubcommand, webrtc::WebRtcSubcommand};
 use crate::command::{
     account::AccountsSubcommand,
-    key::KeysSubcommand,
     proof::ProofsSubcommand,
     transaction::TransactionSubcommand,
     validator::ValidatorSubcommand,
@@ -33,7 +32,6 @@ use crate::command::{
 
 mod account;
 mod auth;
-mod key;
 mod proof;
 pub mod transaction;
 mod validator;
@@ -42,8 +40,6 @@ mod webrtc;
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Subcommand, Clone)]
 pub enum Command {
-    #[clap(subcommand, alias = "keys")]
-    Keys(KeysSubcommand),
     #[clap(subcommand, alias = "transaction")]
     Transactions(TransactionSubcommand),
     #[clap(subcommand, alias = "account")]

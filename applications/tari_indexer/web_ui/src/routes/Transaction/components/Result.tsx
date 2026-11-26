@@ -42,6 +42,7 @@ import type {
   IndexerGetTransactionResultRequest,
   ListRecentTransactionsResponse,
 } from "@tari-project/ootle-ts-bindings";
+import { transactionBody } from "@tari-project/ootle-ts-bindings";
 import { saveAs } from "file-saver";
 import { useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
@@ -121,8 +122,8 @@ function Result({ transaction_id }: Pick<IndexerGetTransactionResultRequest, "tr
   const transactionQuery = useGetTransaction(normalizedId, isValidHash && !cachedEntry);
 
   const txEntry = cachedEntry ?? transactionQuery.data?.transaction;
-  const txV1 = txEntry?.transaction?.V1;
-  const txBody = txV1?.body;
+  const sealedTx = transactionBody(txEntry?.transaction);
+  const txBody = sealedTx?.body;
   const transaction = txBody?.transaction;
 
   if (!isValidHash) {
@@ -159,7 +160,21 @@ function Result({ transaction_id }: Pick<IndexerGetTransactionResultRequest, "tr
     setExpandedPanels((prev) => (isExpanded ? [...prev, panel] : prev.filter((p) => p !== panel)));
   };
 
-  const expandAll = () => setExpandedPanels(["p1", "p2", "p3", "p4", "p5", "p7", "p8", "p9", "p10"]);
+  const hasSubstatesPanel = Boolean((execResult && isAcceptResult(execResult)) || (!finalized && receipt));
+  const visiblePanels = [
+    "p1",
+    "p2",
+    "p10",
+    ...(events.length ? ["p3"] : []),
+    ...(finalize?.logs?.length ? ["p4"] : []),
+    ...(hasSubstatesPanel ? ["p5"] : []),
+    ...(feeReceipt ? ["p7"] : []),
+    "p8",
+    "p9",
+  ];
+  const hasExpandedPanels = visiblePanels.some((panel) => expandedPanels.includes(panel));
+
+  const expandAll = () => setExpandedPanels(visiblePanels);
 
   const collapseAll = () => setExpandedPanels([]);
 
@@ -269,7 +284,7 @@ function Result({ transaction_id }: Pick<IndexerGetTransactionResultRequest, "tr
                   <TableRow>
                     <TableCell>Total Fees</TableCell>
                     <DataTableCell>
-                      {feeReceipt?.total_fees_paid
+                      {feeReceipt?.total_fees_paid != null
                         ? formatCurrency(feeReceipt.total_fees_paid, CURRENCY.DECIMALS, CURRENCY.SYMBOL)
                         : "--"}
                     </DataTableCell>
@@ -336,7 +351,7 @@ function Result({ transaction_id }: Pick<IndexerGetTransactionResultRequest, "tr
                     size="small"
                     startIcon={<KeyboardArrowUpIcon />}
                     onClick={collapseAll}
-                    disabled={expandedPanels.length === 0}
+                    disabled={!hasExpandedPanels}
                   >
                     Collapse All
                   </Button>
@@ -456,7 +471,7 @@ function Result({ transaction_id }: Pick<IndexerGetTransactionResultRequest, "tr
                   <Typography variant="h5">Signers</Typography>
                 </AccordionSummary>
                 <AccordionDetails>
-                  <Signers seal_signature={txV1?.seal_signature} transaction_body={txBody} />
+                  <Signers seal_signature={sealedTx?.seal_signature} transaction_body={txBody} />
                 </AccordionDetails>
               </Accordion>
             </>

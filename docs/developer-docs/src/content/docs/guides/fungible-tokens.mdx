@@ -1,0 +1,283 @@
+---
+title: Fungible Tokens (ERC-20)
+description: How to issue an ERC-20 style token on Tari Ootle. Tokens are native resources, so a template only has to describe the token; balances, transfers, supply and allowances come from the engine and the built-in account.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+import { basePath } from '../../../helpers/path';
+
+### Covered in this guide
+
+- Why Ootle has no ERC-20 contract to write.
+- How each part of the ERC-20 interface maps onto Ootle.
+- A small, reusable token template that issues fixed-supply or mintable tokens.
+- How to create, transfer, approve and `transferFrom` a token, as transactions.
+
+## Tokens are native
+
+On Ethereum, a token is a contract. ERC-20 is the interface that contract agrees to expose, and every
+token contract keeps its own `balances` mapping, its own `totalSupply` and its own transfer logic.
+Wallets, explorers and DEXs trust each contract to keep that bookkeeping right.
+
+On Ootle a fungible token is a **resource**, a first-class object that the engine itself knows about:
+
+- **Supply.** The engine records the total supply on the resource and updates it on every mint and burn.
+- **Balances.** A holder's tokens sit in a vault inside the holder's own account. No central balances
+  mapping exists. A transfer moves tokens from one vault to another.
+- **Transfers.** The engine conserves tokens. A withdrawal produces a bucket that must be deposited, burned
+  or otherwise used before the transaction ends, or the whole transaction fails. Tokens cannot be lost
+  between two steps.
+- **Rules.** Who can mint, burn, freeze, recall, withdraw or deposit is declared once, as access rules on
+  the resource. The engine checks them on every operation, whichever template performs it.
+
+So "writing an ERC-20" on Ootle means writing a template whose only job is to **describe the token once**:
+its symbol, decimals, supply and rules. Every wallet, explorer and template then handles it like any other
+resource, TARI included. You can also skip writing even that, by publishing (or reusing) a **generic token
+template** that takes those parameters as arguments. This guide builds such a template.
+
+## ERC-20 to Ootle
+
+| ERC-20 | Ootle |
+|---|---|
+| `name()`, `symbol()` | Resource metadata, set with `.metadata("name", ..)` and `.with_token_symbol(..)`. The symbol is immutable. |
+| `decimals()` | `.with_divisibility(n)`, up to 18. The default is 18. Amounts are always integers in the smallest unit. |
+| `totalSupply()` | Tracked by the engine. Read it with `ResourceManager::total_supply()` or from the resource substate. |
+| `balanceOf(owner)` | The balance of the holder's vault. Call `balance(resource)` on the account, or read the vault. |
+| `transfer(to, amount)` | `withdraw(resource, amount)` from the sender's account, then `deposit(bucket)` into the receiver's, in one transaction. Wallets do this with `accounts.transfer`. |
+| `approve(spender, amount)` | `approve(spender_badge, resource, expected_current, amount)` on the built-in account. |
+| `allowance(owner, spender)` | `approval(spender_badge, resource)` on the holder's account. |
+| `transferFrom(from, to, amount)` | `withdraw_approved(spender_badge, resource, amount)` on the holder's account, then deposit the bucket. |
+| `Transfer` / `Approval` events | The engine emits `std.vault.withdraw` and `std.vault.deposit` for every movement and `std.resource.mint` for every mint. The account emits `approve` and `withdraw_approved` events. |
+| Mint and burn functions | `.mintable(rule, updater)` and `.burnable(rule, updater)` on the resource, plus a method in your template that calls `mint_fungible` or `burn`. |
+| Pausing, blocklists | `.freezable(..)` and `.recallable(..)`, both off by default. See <a href={basePath("/guides/authorization-and-access/#resource-access-rules")}>Resource Access Rules</a>. |
+| `Ownable` | The resource's `OwnerRule`, and the component's owner for admin methods. |
+
+Two ERC-20 failure modes do not exist here:
+
+- **The `approve` race.** A new allowance is set only if the live allowance still equals `expected_current`.
+  A spender therefore cannot use the old allowance and then the new one on top of it.
+- **Tokens sent to a contract that cannot use them.** A deposit calls the receiving component's method. A
+  component that has no way to take the bucket rejects the transaction, so it cannot silently swallow the tokens.
+
+<Aside type="tip" title="Want privacy?">
+Everything here uses a **public** fungible resource, which is what ERC-20 users expect. Replace
+`ResourceBuilder::public_fungible()` with `confidential()` to hide balances, or `stealth()` to hide balances
+and owners. TARI itself is a stealth resource. See
+<a href={basePath("/concepts/templates-and-assets/")}>Templates and Assets</a> to choose, and
+<a href={basePath("/guides/stealth-resources/")}>Stealth Transfers</a> for how stealth funds move.
+</Aside>
+
+## A generic token template
+
+The template below issues tokens of two kinds. Its parameters are arguments, so you publish it once and
+create as many tokens from it as you like.
+
+- **`create_fixed_supply`** creates the whole supply at once and returns it in a bucket. The resource has
+  **no owner** (`OwnerRule::None`) and minting is off, so nobody, including its creator, can ever create more.
+- **`create_mintable`** creates the token and a small **minter component** that owns the right to mint and burn.
+  The resource's mint and burn rules name that component and are `LOCKED`, so only the minter can mint or burn,
+  and nobody can ever change that. The minter's `mint` and `burn` methods are `deny_all`, which leaves them to
+  the component's owner: the signer of the transaction that created it.
+
+```rust title="crates/engine/tests/templates/fungible_token/src/lib.rs"
+use tari_template_lib::prelude::*;
+
+#[template]
+mod fungible_token {
+    use super::*;
+
+    pub struct FungibleToken {
+        token: ResourceManager,
+    }
+
+    impl FungibleToken {
+        pub fn create_fixed_supply(symbol: String, divisibility: u8, supply: Amount, metadata: Metadata) -> Bucket {
+            ResourceBuilder::public_fungible()
+                .with_owner_rule(OwnerRule::None)
+                .with_metadata(metadata)
+                .with_token_symbol(symbol)
+                .with_divisibility(divisibility)
+                .initial_supply(supply)
+        }
+
+        pub fn create_mintable(symbol: String, divisibility: u8, metadata: Metadata) -> Component<Self> {
+            let address = CallerContext::allocate_component_address(None);
+            let this_component_only = rule!(component(address.get_address()));
+
+            let token = ResourceBuilder::public_fungible()
+                .with_owner_rule(OwnerRule::None)
+                .with_metadata(metadata)
+                .with_token_symbol(symbol)
+                .with_divisibility(divisibility)
+                .mintable(this_component_only.clone(), LOCKED)
+                .burnable(this_component_only, LOCKED)
+                .build();
+
+            Component::new(Self {
+                token: ResourceManager::get(token),
+            })
+            .with_address_allocation(address)
+            .with_access_rules(
+                ComponentAccessRules::new()
+                    .add_method_rule("resource_address", rule!(allow_all))
+                    .add_method_rule("total_supply", rule!(allow_all))
+                    .default(rule!(deny_all)),
+            )
+            .create()
+        }
+
+        pub fn mint(&self, amount: Amount) -> Bucket {
+            self.token.mint_fungible(amount)
+        }
+
+        pub fn burn(&self, bucket: Bucket) {
+            assert_eq!(
+                bucket.resource_address(),
+                self.token.resource_address(),
+                "Not this token"
+            );
+            bucket.burn();
+        }
+
+        pub fn resource_address(&self) -> ResourceAddress {
+            self.token.resource_address()
+        }
+
+        pub fn total_supply(&self) -> Amount {
+            self.token.total_supply()
+        }
+    }
+}
+```
+
+<Aside type="caution" title="An owner bypasses the access rules">
+A resource's owner passes every access rule except recall, `deny_all` included. That is why both
+constructors set `OwnerRule::None`. With the default owner (the creating signer), a "fixed supply" token could
+still be minted by its creator. If you change the owner rule, decide deliberately who that is. See
+<a href={basePath("/guides/authorization-and-access/")}>Authorization and Access</a>.
+</Aside>
+
+Adapt the template to your token's policy. Typical changes:
+
+- **Let holders burn their own tokens.** Use `.burnable(rule!(allow_all), LOCKED)`.
+- **Cap the supply.** Store a `max_supply` in the component and assert it in `mint`.
+- **Hand minting to a multisig or a badge.** Change the component's owner rule with `.with_owner_rule(..)`,
+  for example to a rule over an admin badge.
+- **Keep metadata editable.** Use `.update_metadata(rule, updater)`. With no owner the metadata is otherwise
+  fixed for good.
+
+To compile and publish the template, follow
+<a href={basePath("/guides/publishing-templates/")}>Publishing Templates</a>. Anyone can then create tokens
+from it by its template address. If you reuse a template someone else has published, read its code first.
+The token's rules are whatever that code sets.
+
+## Using a token
+
+The transactions below are the tests in
+[`crates/engine/tests/fungible_token_tutorial.rs`](https://github.com/tari-project/tari-ootle/blob/development/crates/engine/tests/fungible_token_tutorial.rs),
+which run in CI against the template above. They are built with the Rust `TransactionBuilder`
+(<a href={basePath("/guides/transaction-overview/")}>Transaction Overview</a>). A transaction manifest or the
+wallet daemon's `transactions.submit_manifest` takes the same calls. Fees are off in these tests. On a network,
+add a fee instruction such as `.pay_fee_from_component(account, max_fee)`.
+
+### Create a fixed-supply token
+
+Call `create_fixed_supply` and deposit the returned bucket into your account. `supply` is in the smallest unit,
+so with 6 decimal places, `21_000_000_000_000` is 21 million tokens.
+
+```rust title="crates/engine/tests/fungible_token_tutorial.rs"
+test.transaction()
+    .call_function(template, "create_fixed_supply", args![
+        "EXT",
+        6u8,
+        Amount::from(21_000_000_000_000u64),
+        metadata!["name" => "Example Token"],
+    ])
+    .put_last_instruction_output_on_workspace("supply")
+    .call_method(alice, "deposit", args![Workspace("supply")])
+    .build_and_seal(&alice_key),
+```
+
+### Create a mintable token and mint
+
+The minter is created and used in the same transaction, which makes the signer its owner:
+
+```rust title="crates/engine/tests/fungible_token_tutorial.rs"
+test.transaction()
+    .call_function(template, "create_mintable", args![
+        "EXT",
+        6u8,
+        metadata!["name" => "Example Token"]
+    ])
+    .put_last_instruction_output_on_workspace("token")
+    .call_method("token", "mint", args![Amount::from(1_000_000_000u64)])
+    .put_last_instruction_output_on_workspace("minted")
+    .call_method(alice, "deposit", args![Workspace("minted")])
+    .build_and_seal(&alice_key),
+```
+
+A `mint` from anyone else is rejected with `Access Denied`. Burning works the same way: withdraw the tokens and
+pass the bucket to the minter's `burn`.
+
+### Transfer
+
+A transfer is a withdrawal from the sender's account and a deposit into the receiver's, in one atomic
+transaction:
+
+```rust title="crates/engine/tests/fungible_token_tutorial.rs"
+test.transaction()
+    .call_method(alice, "withdraw", args![token, Amount::from(250_000_000u64)])
+    .put_last_instruction_output_on_workspace("payment")
+    .call_method(bob, "deposit", args![Workspace("payment")])
+    .build_and_seal(&alice_key),
+```
+
+In a wallet this is just a transfer of the resource. The wallet daemon's `accounts.transfer` takes any
+`resource_address`, and creates the receiver's account if it does not exist yet.
+
+### Approve and `transferFrom`
+
+Often you do not need allowances at all. A user who wants to pay a component withdraws a bucket and passes it to
+the component in the same transaction, which ERC-20 cannot do.
+
+For a pull payment, the built-in account has allowances. The holder approves a **spender badge**. This can be a
+public key (as here), a component (`NonFungibleAddress::caller_component_badge(addr)`) or a template
+(`NonFungibleAddress::direct_caller_template_badge(addr)`):
+
+```rust title="crates/engine/tests/fungible_token_tutorial.rs"
+test.transaction()
+    .call_method(alice, "approve", args![
+        bob_badge.clone(),
+        token,
+        Amount::zero(),
+        Amount::from(400u64)
+    ])
+    .build_and_seal(&alice_key),
+```
+
+The spender then withdraws up to the approved amount from the holder's account:
+
+```rust title="crates/engine/tests/fungible_token_tutorial.rs"
+test.transaction()
+    .call_method(alice, "withdraw_approved", args![
+        bob_badge.clone(),
+        token,
+        Amount::from(300u64)
+    ])
+    .put_last_instruction_output_on_workspace("pulled")
+    .call_method(bob, "deposit", args![Workspace("pulled")])
+    .build_and_seal(&bob_key),
+```
+
+Each pull lowers the allowance, and a pull beyond what is left fails with `Amount exceeds approval`. To change
+an allowance, pass the current value as `expected_current`. An `amount` of zero revokes it. The details are in
+<a href={basePath("/guides/authorization-and-access/")}>Authorization and Access</a>.
+
+## Summary
+
+- A fungible token is a native resource. The engine keeps its supply, balances and rules.
+- A token template only describes the token. One generic template can issue any number of tokens.
+- Use `OwnerRule::None` and `LOCKED` rules for any promise holders should be able to rely on.
+- Transfers are withdraw-and-deposit. Allowances are `approve` and `withdraw_approved` on the built-in account.
+
+**Next:** the full resource API in <a href={basePath("/guides/resources/")}>Resources</a>.

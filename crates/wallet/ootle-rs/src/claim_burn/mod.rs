@@ -4,13 +4,13 @@
 //! Claiming Layer 1 (minotari) burns on the Ootle network.
 //!
 //! When TARI is burned on the L1 base layer, the burn output can be claimed into an Ootle account
-//! by submitting a proof. [`ClaimBurn`] builds the claim transaction: it mints the burned funds as
-//! a confidential UTXO and immediately spends it into a stealth output owned by the claiming
+//! by submitting a proof. [`ClaimBurn`] builds the claim transaction: the claim reveals the burned
+//! funds in a bucket, which the same transaction pays into a stealth output owned by the claiming
 //! account (revealing a small amount to pay the fee).
 //!
-//! The L1 burn output is a stealth output addressed to the claiming account, so the transaction is
-//! sealed with a derived stealth claim key `s = H(p·R) + p` (not the account key). [`prepare`] returns
-//! that sealer alongside the unsigned transaction.
+//! The L1 burn output names a stealth claim key derived for the claiming account, so the transaction
+//! is sealed with the derived stealth claim key `s = H(p·R) + p` (not the account key). [`prepare`]
+//! returns that sealer alongside the unsigned transaction.
 //!
 //! [`prepare`]: ClaimBurn::prepare
 //!
@@ -21,8 +21,8 @@
 //!     TransactionRequest,
 //! };
 //!
-//! // `claim_proof` and `encrypted_data` come from the L1 (minotari) wallet's burn output.
-//! let (unsigned_tx, sealer) = ClaimBurn::new(&provider, claim_proof, encrypted_data)
+//! // `claim_proof` comes from the L1 (minotari) wallet's burn output.
+//! let (unsigned_tx, sealer) = ClaimBurn::new(&provider, claim_proof, max_epoch)
 //!     .with_max_fee(1000u64)
 //!     .prepare()
 //!     .await?;
@@ -44,17 +44,17 @@ use tari_crypto::{
     ristretto::{RistrettoPublicKey, RistrettoSecretKey},
 };
 // Re-export the burn proof types so callers don't need to reach into `tari_ootle_common_types`.
-pub use tari_ootle_common_types::engine_types::confidential::{ClaimBurnOutputData, MinotariBurnClaimProof};
+pub use tari_ootle_common_types::engine_types::confidential::MinotariBurnClaimProof;
 use tari_ootle_common_types::engine_types::stealth::validate_transfer;
 use tari_ootle_transaction::{Epoch, Transaction, UnsealedTransaction, UnsignedTransaction};
 use tari_ootle_wallet_crypto::{StealthCryptoApi, memo::Memo};
-use tari_template_lib_types::{Amount, EncryptedData, constants::TARI_TOKEN, stealth::RevealedOutput};
+use tari_template_lib_types::{Amount, constants::TARI_TOKEN, stealth::RevealedOutput};
 
 use crate::{
     Address,
     provider::{Provider, WalletProvider},
     signer,
-    stealth::{BurnClaimStatementSpec, Output, StealthProviderError},
+    stealth::{Output, ResolvedStealthTransferSpec, StealthProviderError},
     transaction::TransactionSealSigner,
     wallet::{NetworkWallet, OotleWallet, WalletResult},
 };
@@ -68,7 +68,6 @@ const DEFAULT_CLAIM_MEMO: &str = "Burnt funds claimed from L1";
 pub struct ClaimBurn<'a, P> {
     provider: &'a P,
     claim_proof: MinotariBurnClaimProof,
-    encrypted_data: EncryptedData,
     max_fee: Amount,
     max_epoch: Epoch,
     recipient: Option<Address>,
@@ -78,20 +77,13 @@ pub struct ClaimBurn<'a, P> {
 impl<'a, P: Provider> ClaimBurn<'a, P> {
     /// Create a new burn claim builder.
     ///
-    /// `claim_proof` and `encrypted_data` are produced by the L1 (minotari) wallet for the burn
-    /// output being claimed (the wallet daemon bundles them as `ClaimBurnProofContents`).
+    /// `claim_proof` is produced by the L1 (minotari) wallet for the burn output being claimed.
     /// `max_epoch` is the last epoch the claim transaction may be sequenced in. It is required:
     /// every transaction carries a bounded validity window.
-    pub fn new(
-        provider: &'a P,
-        claim_proof: MinotariBurnClaimProof,
-        encrypted_data: EncryptedData,
-        max_epoch: Epoch,
-    ) -> Self {
+    pub fn new(provider: &'a P, claim_proof: MinotariBurnClaimProof, max_epoch: Epoch) -> Self {
         Self {
             provider,
             claim_proof,
-            encrypted_data,
             max_fee: Amount::zero(),
             max_epoch,
             recipient: None,
@@ -146,7 +138,6 @@ impl<'a, P: WalletProvider<Wallet = OotleWallet>> ClaimBurn<'a, P> {
         let Self {
             provider,
             claim_proof,
-            encrypted_data,
             max_fee,
             max_epoch,
             recipient,
@@ -189,10 +180,6 @@ impl<'a, P: WalletProvider<Wallet = OotleWallet>> ClaimBurn<'a, P> {
             return Err(StealthProviderError::BurnClaimOwnershipProofInvalid.into());
         }
 
-        let decrypted = wallet
-            .decrypt_burn_claim_output(&encrypted_data, &claim_proof.commitment, &sender_offset_public_key)
-            .await?;
-
         let max_fee = u64::try_from(max_fee.to_u128()).map_err(|_| StealthProviderError::UnexpectedError {
             details: "max_fee exceeds u64::MAX".to_string(),
         })?;
@@ -203,8 +190,9 @@ impl<'a, P: WalletProvider<Wallet = OotleWallet>> ClaimBurn<'a, P> {
             .into());
         }
 
-        // Reveal `max_fee` to pay the fee; the remainder becomes a stealth output owned by the claimant.
-        let claimed_amount = decrypted.value();
+        // Reveal `max_fee` to pay the fee; the remainder becomes a stealth output owned by the claimant. The ownership
+        // proof checked above binds `claim_proof.value` to the burn commitment.
+        let claimed_amount = claim_proof.value;
         let final_amount = claimed_amount.checked_sub(max_fee).filter(|amount| *amount > 0).ok_or(
             StealthProviderError::BurnClaimFeeTooHigh {
                 claimed: claimed_amount,
@@ -218,11 +206,10 @@ impl<'a, P: WalletProvider<Wallet = OotleWallet>> ClaimBurn<'a, P> {
         let memo = memo.unwrap_or_else(|| Memo::new_message(DEFAULT_CLAIM_MEMO).expect("valid memo"));
         let output = Output::new(recipient, TARI_TOKEN, final_amount).with_memo(memo);
         let transfer = wallet
-            .create_burn_claim_statement(BurnClaimStatementSpec {
-                commitment: claim_proof.commitment,
-                encrypted_data: encrypted_data.clone(),
-                sender_offset_public_key,
-                output,
+            .create_transfer_statement(ResolvedStealthTransferSpec {
+                inputs: vec![],
+                revealed_input_amount: Amount::from(claimed_amount),
+                outputs: vec![output],
                 // The claim key seals this transaction, so it is the only badge in scope to take the revealed fee.
                 revealed_output: Some(RevealedOutput::new(Amount::from(max_fee), stealth_claim_pk)),
             })
@@ -236,17 +223,14 @@ impl<'a, P: WalletProvider<Wallet = OotleWallet>> ClaimBurn<'a, P> {
             .into());
         }
 
-        // Re-use the L1 burn output's encrypted data when minting the UTXO. The engine accepts any
-        // encrypted data here, so this is not strictly required, but it keeps the values consistent.
-        let output_data = ClaimBurnOutputData { encrypted_data };
-
         let unsigned_tx = Transaction::builder(network, max_epoch)
             .with_fee_instructions_builder(|builder| {
                 builder
-                    // Mint the burned funds as a confidential UTXO.
-                    .claim_burn(claim_proof, output_data)
-                    // Spend it into the stealth output, revealing `max_fee` for the fee.
-                    .stealth_transfer(TARI_TOKEN, transfer)
+                    // Reveal the burned funds in a bucket.
+                    .claim_burn(claim_proof)
+                    .put_last_instruction_output_on_workspace("claimed")
+                    // Pay the bucket into the stealth output, revealing `max_fee` for the fee.
+                    .stealth_transfer_with_input_bucket(TARI_TOKEN, transfer, "claimed")
                     .put_last_instruction_output_on_workspace("fee")
                     .pay_fee_from_bucket("fee")
             })
@@ -258,8 +242,8 @@ impl<'a, P: WalletProvider<Wallet = OotleWallet>> ClaimBurn<'a, P> {
 
 /// Seals a burn claim transaction with the derived stealth claim key `s`.
 ///
-/// This is the only key that can satisfy the spend condition on the minted burn UTXO, so it is used
-/// instead of the wallet's account key. Implements [`TransactionSealSigner`] (for
+/// The engine accepts a claim only when the claim key the burn output names signs it, so this key is
+/// used instead of the wallet's account key. Implements [`TransactionSealSigner`] (for
 /// [`TransactionRequest::build`](crate::TransactionRequest::build)) and [`NetworkWallet`] (for dry-run
 /// fee estimation). A burn claim needs no additional authorizations — the seal authorizes the spend.
 #[derive(Clone)]

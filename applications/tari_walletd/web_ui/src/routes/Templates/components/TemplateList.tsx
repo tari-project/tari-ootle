@@ -11,25 +11,41 @@ import Table from "@mui/material/Table";
 import TableContainer from "@mui/material/TableContainer";
 import TemplateItem from "@routes/Templates/components/TemplateItem";
 import useAccountStore from "@store/accountStore";
-import { decodeOotleAddress } from "@tari-project/ootle-ts-bindings";
 import { handleChangePage, handleChangeRowsPerPage } from "@utils/helpers";
-import { Fragment, useState } from "react";
+import { Dispatch, Fragment, SetStateAction, useState } from "react";
+import { buildAuthoredTemplatesQuery, extractAuthorPublicKey } from "./templateListHelpers";
 
 const COLUMNS = ["Address", "Name", "ABI Version", ""];
 
 export default function TemplateList() {
   const ootleAddress = useAccountStore((s) => s.address);
-  const address = ootleAddress ? decodeOotleAddress(ootleAddress) : null;
-
-  const [page, setPage] = useState(0);
+  const authorPublicKey = extractAuthorPublicKey(ootleAddress);
   const [rowsPerPage, setRowsPerPage] = useState(10);
+
+  return (
+    <TemplateListContent
+      key={authorPublicKey ?? "none"}
+      authorPublicKey={authorPublicKey}
+      rowsPerPage={rowsPerPage}
+      setRowsPerPage={setRowsPerPage}
+    />
+  );
+}
+
+function TemplateListContent({
+  authorPublicKey,
+  rowsPerPage,
+  setRowsPerPage,
+}: {
+  authorPublicKey: string | null;
+  rowsPerPage: number;
+  setRowsPerPage: Dispatch<SetStateAction<number>>;
+}) {
+  const [page, setPage] = useState(0);
   const [openItem, setOpenItem] = useState<string | undefined>();
 
-  const { data, isLoading, isError, error } = useListTemplatesAuthored({
-    author_public_key: address?.accountPublicKey || "",
-    page: page,
-    page_size: rowsPerPage,
-  });
+  const { request, enabled } = buildAuthoredTemplatesQuery(authorPublicKey, page, rowsPerPage);
+  const { data, isLoading, isError, error } = useListTemplatesAuthored(request, { enabled });
 
   const headers = COLUMNS.map((c) => <TableCell key={c}>{c}</TableCell>);
 

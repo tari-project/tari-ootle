@@ -52,7 +52,7 @@ impl UncommittedTemplateCache {
         if let Some(loaded) = self.cache.get(&address) {
             return Ok(loaded);
         }
-        let loaded = WasmModule::load_template_from_code(binary)?;
+        let loaded = WasmModule::load(binary)?;
         self.cache.insert(address, loaded.clone());
         Ok(loaded)
     }

@@ -13,7 +13,6 @@ use crate::{
     AllocatableAddressType,
     ComponentReference,
     Instruction,
-    IntoSigned,
     Signable,
     TRANSACTION_SIGNING_CONTEXT,
     Transaction,
@@ -287,12 +286,11 @@ fn a_signature_over_the_builder_message_verifies_once_fee_instructions_are_appli
         .pay_fee_from_component(ComponentAddress::from_array([2; 32]), 1000u64);
     assert!(!builder.clone().build_unsigned().fee_instructions().is_empty());
 
-    let message = builder.to_signing_message(&seal_signer);
-    let signature = TransactionSignature::new(
-        RistrettoPublicKey::from_secret_key(&signer_secret).to_byte_type(),
-        TRANSACTION_SIGNING_CONTEXT.sign(&signer_secret, &message),
-    );
-    let unsealed = builder.into_signed(signature);
+    let signer = RistrettoPublicKey::from_secret_key(&signer_secret).to_byte_type();
+    let authorizers: crate::AuthorizerSet = [signer].into_iter().collect();
+    let message = builder.to_signing_message(crate::AuthorizationContext::new(&seal_signer, &authorizers));
+    let signature = TransactionSignature::new(signer, TRANSACTION_SIGNING_CONTEXT.sign(&signer_secret, &message));
+    let unsealed = builder.with_signatures(vec![signature]);
 
     assert!(unsealed.verify_all_signatures(&seal_signer));
     assert!(unsealed.seal(&seal_secret).verify_all_signatures());
@@ -327,30 +325,6 @@ fn auto_filled_inputs_and_referenced_substates_skip_undeclarable_ids() {
             .collect::<Vec<_>>(),
         vec![SubstateId::from(component)]
     );
-}
-
-#[test]
-fn auto_filled_inputs_include_migrate_args() {
-    use tari_engine_types::substate::SubstateId;
-    use tari_template_lib_types::ObjectKey;
-
-    let target = ComponentAddress::new(ObjectKey::from_array([10; 32]));
-    let migrate_arg = ComponentAddress::new(ObjectKey::from_array([12; 32]));
-    let new_template = TemplateAddress::from_array([0x42; 32]);
-
-    let transaction = Transaction::builder_localnet(Epoch(1))
-        .with_auto_fill_inputs()
-        .update_component_template_address_with_migrate(target, new_template, "migrate", args![migrate_arg])
-        .build_unsigned();
-
-    let inputs = transaction
-        .inputs()
-        .iter()
-        .map(|input| input.substate_id().clone())
-        .collect::<std::collections::HashSet<_>>();
-    let expected = std::collections::HashSet::from([SubstateId::from(target), SubstateId::from(migrate_arg)]);
-    assert_eq!(inputs, expected);
-    assert_eq!(transaction.to_referenced_substates().unwrap(), expected);
 }
 
 #[test]
@@ -415,17 +389,34 @@ fn auto_filled_inputs_and_referenced_substates_include_stealth_script_path_args(
         !res_decl.is_write(),
         "stealth transfer + bucket assert must stay a read"
     );
+    let utxo_id = SubstateId::Utxo(UtxoAddress::new(custom_resource, commitment.into()));
+    let utxo_decl = transaction.inputs().get(&utxo_id).unwrap();
+    assert!(utxo_decl.is_write(), "spent stealth UTXO input must be write-declared");
 
     let referenced = transaction.to_referenced_substates().unwrap();
     let expected = HashSet::from([
         SubstateId::Resource(custom_resource),
-        SubstateId::Utxo(UtxoAddress::new(custom_resource, commitment.into())),
+        utxo_id,
         SubstateId::from(bound_component),
     ]);
     assert_eq!(referenced, expected);
+    let expected_inputs: HashSet<_> = transaction.inputs().iter().map(|i| i.substate_id().clone()).collect();
+    assert_eq!(expected_inputs, expected);
     assert_eq!(
         transaction.referenced_templates_iter().copied().collect::<Vec<_>>(),
         vec![script_template]
+    );
+
+    let tari_tx = Transaction::builder_localnet(Epoch(1))
+        .with_auto_fill_inputs()
+        .stealth_transfer(tari_template_lib_types::constants::TARI_TOKEN, statement.clone())
+        .build_and_seal(&secret);
+    assert!(
+        !tari_tx
+            .to_referenced_substates()
+            .unwrap()
+            .contains(&SubstateId::Resource(tari_template_lib_types::constants::TARI_TOKEN)),
+        "implicit TARI_TOKEN resource must not be emitted by to_referenced_substates"
     );
 
     let workspace_tx = Transaction::builder_localnet(Epoch(1))
@@ -437,6 +428,89 @@ fn auto_filled_inputs_and_referenced_substates_include_stealth_script_path_args(
         workspace_tx.to_referenced_substates().unwrap(),
         HashSet::from([SubstateId::from(bound_component)]),
     );
+}
+
+#[test]
+fn auto_filled_inputs_and_referenced_substates_skip_utxos_created_by_earlier_stealth_transfers() {
+    use std::collections::HashSet;
+
+    use tari_engine_types::substate::SubstateId;
+    use tari_template_lib_types::{
+        Amount,
+        EncryptedData,
+        ObjectKey,
+        ResourceAddress,
+        UtxoAddress,
+        crypto::{PedersenCommitmentBytes, RangeProofBytes, RistrettoPublicKeyBytes, UtxoTag},
+        stealth::{
+            SpendAuthorization,
+            StealthInput,
+            StealthInputsStatement,
+            StealthOutputsStatement,
+            StealthTransferStatement,
+            StealthUnspentOutput,
+            UnspentOutput,
+        },
+    };
+
+    fn transfer(input: PedersenCommitmentBytes, output: PedersenCommitmentBytes) -> StealthTransferStatement {
+        StealthTransferStatement {
+            inputs_statement: StealthInputsStatement::new(vec![StealthInput::new(input)], Amount::ZERO),
+            outputs_statement: StealthOutputsStatement {
+                outputs: vec![StealthUnspentOutput {
+                    output: UnspentOutput {
+                        commitment: output,
+                        sender_public_nonce: RistrettoPublicKeyBytes::zero(),
+                        encrypted_data: EncryptedData::empty(),
+                        minimum_value_promise: 0,
+                        viewable_balance_proof: None,
+                    },
+                    auth: SpendAuthorization::Key(RistrettoPublicKeyBytes::zero()),
+                    tag: UtxoTag::new(0),
+                }],
+                revealed_output: None,
+                agg_range_proof: RangeProofBytes::empty(),
+            },
+            balance_proof: None,
+            covenant_claims: vec![],
+        }
+    }
+
+    let fee_input = PedersenCommitmentBytes::from_array([1; 32]);
+    let fee_output = PedersenCommitmentBytes::from_array([2; 32]);
+    let on_chain = PedersenCommitmentBytes::from_array([3; 32]);
+    let intermediate = PedersenCommitmentBytes::from_array([4; 32]);
+    let final_output = PedersenCommitmentBytes::from_array([5; 32]);
+    let resource = ResourceAddress::new(ObjectKey::from_array([0x77; 32]));
+    let other_resource = ResourceAddress::new(ObjectKey::from_array([0x78; 32]));
+    let secret = RistrettoSecretKey::random(&mut rand::rng());
+
+    let transaction = Transaction::builder_localnet(Epoch(1))
+        .with_auto_fill_inputs()
+        .with_fee_instructions_builder(|builder| builder.stealth_transfer(resource, transfer(fee_input, fee_output)))
+        .stealth_transfer(resource, transfer(on_chain, intermediate))
+        // Spends the output of the previous transfer.
+        .stealth_transfer(resource, transfer(intermediate, final_output))
+        // Fee instructions run first, so this spends the output of the fee transfer.
+        .stealth_transfer(resource, transfer(fee_output, PedersenCommitmentBytes::from_array([6; 32])))
+        // The same commitment under another resource addresses a separate, on-chain UTXO.
+        .stealth_transfer(other_resource, transfer(intermediate, PedersenCommitmentBytes::from_array([7; 32])))
+        .build_and_seal(&secret);
+
+    let expected = HashSet::from([
+        SubstateId::Resource(resource),
+        SubstateId::Resource(other_resource),
+        SubstateId::Utxo(UtxoAddress::new(resource, fee_input.into())),
+        SubstateId::Utxo(UtxoAddress::new(resource, on_chain.into())),
+        SubstateId::Utxo(UtxoAddress::new(other_resource, intermediate.into())),
+    ]);
+    let inputs = transaction
+        .inputs()
+        .iter()
+        .map(|input| input.substate_id().clone())
+        .collect::<HashSet<_>>();
+    assert_eq!(inputs, expected);
+    assert_eq!(transaction.to_referenced_substates().unwrap(), expected);
 }
 
 #[test]
@@ -660,7 +734,10 @@ fn cbor_decode_rejects_oversized_inputs_signatures_and_blob_hashes() {
         tari_template_lib_types::crypto::RistrettoPublicKeyBytes::zero(),
         TRANSACTION_SIGNING_CONTEXT.sign(
             &RistrettoSecretKey::default(),
-            &base_unsigned.to_signing_message(&tari_template_lib_types::crypto::RistrettoPublicKeyBytes::zero()),
+            &base_unsigned.to_signing_message(crate::AuthorizationContext::new(
+                &tari_template_lib_types::crypto::RistrettoPublicKeyBytes::zero(),
+                &crate::AuthorizerSet::new(),
+            )),
         ),
     );
     let sigs = vec![dummy_sig; MAX_SIGNATURES_PER_TRANSACTION + 1];
@@ -705,4 +782,122 @@ fn fee_and_merged_inputs_widen_read_declarations_to_writes() {
     let write_builder = Transaction::builder_localnet(Epoch(1)).add_input(InputDeclaration::write(account));
     let merged = read_builder.merge(write_builder).build_unsigned();
     assert!(merged.inputs()[0].is_write());
+}
+
+#[test]
+fn merge_preserves_and_shifts_named_workspace_keys_and_handles_max_workspace_id() {
+    let address = TemplateAddress::from_array([9; 32]);
+
+    let a = Transaction::builder_localnet(Epoch(1))
+        .put_last_instruction_output_on_workspace("first")
+        .allocate_component_address("comp_a");
+
+    let b = Transaction::builder_localnet(Epoch(1))
+        .put_last_instruction_output_on_workspace("second")
+        .allocate_component_address("comp_b");
+
+    let merged = a
+        .merge(b)
+        .call_method(CallFromWorkspace::new("comp_b"), "use_merged", args![
+            Workspace("first"),
+            Workspace("second.1")
+        ])
+        .build_unsigned();
+
+    assert_eq!(merged.instructions()[4], Instruction::CallMethod {
+        call: ComponentReference::Workspace(3),
+        method: "use_merged".try_into().unwrap(),
+        args: vec![
+            InstructionArg::Workspace(WorkspaceOffsetId::new(0)),
+            InstructionArg::Workspace(WorkspaceOffsetId::new(2).with_offset(1)),
+        ],
+    });
+
+    // Merging an empty builder after allocating WorkspaceId::MAX must not panic.
+    let at_max = Transaction::builder_localnet(Epoch(1)).add_instruction(Instruction::AllocateAddress {
+        allocatable_type: AllocatableAddressType::Component,
+        workspace_id: WorkspaceId::MAX,
+    });
+    let empty = Transaction::builder_localnet(Epoch(1)).call_function(address, "noop", args![]);
+    let merged_at_max = at_max.merge(empty).build_unsigned();
+    assert_eq!(merged_at_max.instructions().len(), 2);
+}
+
+#[test]
+#[should_panic(expected = "workspace key 'dup' collides during merge")]
+fn merge_rejects_colliding_workspace_keys() {
+    let a = Transaction::builder_localnet(Epoch(1)).put_last_instruction_output_on_workspace("dup");
+    let b = Transaction::builder_localnet(Epoch(1)).put_last_instruction_output_on_workspace("dup");
+    let _unused = a.merge(b);
+}
+
+#[test]
+fn stealth_transfer_resolves_workspace_resource_offset() {
+    use tari_template_lib_types::{Amount, crypto::RistrettoPublicKeyBytes, stealth::StealthTransferStatement};
+
+    use crate::ResourceAddressRef;
+
+    let statement = StealthTransferStatement::revealed_only(
+        Amount::from(10u64),
+        Amount::from(10u64),
+        RistrettoPublicKeyBytes::zero(),
+    );
+    let tx = Transaction::builder_localnet(Epoch(1))
+        .put_last_instruction_output_on_workspace("tuple_out")
+        .stealth_transfer(String::from("tuple_out.1"), statement)
+        .build_unsigned();
+
+    match &tx.instructions()[1] {
+        Instruction::StealthTransfer {
+            resource_address_ref, ..
+        } => {
+            assert_eq!(
+                *resource_address_ref,
+                ResourceAddressRef::Workspace(WorkspaceOffsetId::new(0).with_offset(1))
+            );
+        },
+        other => panic!("expected StealthTransfer, got {other:?}"),
+    }
+}
+
+#[test]
+fn auto_fill_inputs_leaves_blob_arguments_undeclared() {
+    let blob_comp = ComponentAddress::from_array([3; 32]);
+    let blob_bytes = tari_bor::encode(&blob_comp).unwrap();
+
+    let tx = Transaction::builder_localnet(Epoch(1))
+        .with_auto_fill_inputs()
+        .add_blob("arg_blob", blob_bytes)
+        .call_function(TemplateAddress::default(), "f", args![Blob("arg_blob")])
+        .build_unsigned();
+
+    assert!(
+        tx.inputs().is_empty(),
+        "an address inside a blob argument must not be auto-declared, got {:?}",
+        tx.inputs()
+    );
+}
+
+#[test]
+fn merge_keeps_other_builders_declared_inputs() {
+    use tari_ootle_common_types::InputDeclaration;
+
+    let merged_comp = ComponentAddress::from_array([4; 32]);
+    let merged_arg_comp = ComponentAddress::from_array([5; 32]);
+
+    let other = Transaction::builder_localnet(Epoch(1))
+        .add_input(InputDeclaration::read(merged_comp))
+        .call_method(merged_comp, "inspect", args![merged_arg_comp]);
+
+    let tx = Transaction::builder_localnet(Epoch(1))
+        .with_auto_fill_inputs()
+        .merge(other)
+        .build_unsigned();
+
+    let declared = tx
+        .inputs()
+        .iter()
+        .map(|decl| (decl.substate_id().clone(), decl.is_write()))
+        .collect::<Vec<_>>();
+    assert_eq!(declared, vec![(merged_comp.into(), false)]);
 }

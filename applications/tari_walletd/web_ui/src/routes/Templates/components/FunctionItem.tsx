@@ -12,35 +12,11 @@ import {
   useTheme,
 } from "@mui/material";
 import { NestedCell } from "@routes/Templates/components/StyledTableComponents";
-import { FunctionDef, Type as FuncType } from "@tari-project/ootle-ts-bindings";
+import { FunctionDef } from "@tari-project/ootle-ts-bindings";
+import { formatType } from "./formatType";
 
 interface FunctionItemProps {
   functionDef: FunctionDef;
-}
-
-// TODO - move to helpers
-function getTypeAsString(funcType: FuncType): string {
-  if (typeof funcType === "string") {
-    return funcType;
-  }
-
-  const funcTypeKeys = Object.keys(funcType);
-  if (funcTypeKeys.length > 0) {
-    switch (funcTypeKeys[0]) {
-      case "Vec": {
-        return getTypeAsString(funcType["Vec" as keyof typeof funcType]);
-      }
-      case "Tuple": {
-        return JSON.stringify(funcType["Tuple" as keyof typeof funcType]);
-      }
-      case "Other": {
-        const other = funcType["Other" as keyof typeof funcType] as { name: string };
-        return other.name;
-      }
-    }
-  }
-
-  return "Unknown";
 }
 
 export default function FunctionItem({ functionDef }: FunctionItemProps) {
@@ -50,13 +26,14 @@ export default function FunctionItem({ functionDef }: FunctionItemProps) {
   const migrates_from = typeof kind === "object" && "Migration" in kind ? kind.Migration.from : null;
 
   const argumentItems = args.map(({ name, arg_type }) => {
+    const formattedType = formatType(arg_type);
     return (
-      <TableRow key={`arg_${name}:${arg_type}`}>
+      <TableRow key={`arg_${name}:${formattedType}`}>
         <NestedCell>
           <code>{name}</code>
         </NestedCell>
         <NestedCell>
-          <code>{getTypeAsString(arg_type)}</code>
+          <code>{formattedType}</code>
         </NestedCell>
       </TableRow>
     );
@@ -94,14 +71,14 @@ export default function FunctionItem({ functionDef }: FunctionItemProps) {
           </Tooltip>
         )}
         {migrates_from && (
-          <Tooltip title={`Migrates a component from ${getTypeAsString(migrates_from)}`}>
+          <Tooltip title={`Migrates a component from ${formatType(migrates_from)}`}>
             <Chip label="migration" size="small" color="info" sx={{ ml: 1 }} />
           </Tooltip>
         )}
       </NestedCell>
       <NestedCell>{argsTable}</NestedCell>
       <NestedCell align="right">
-        <code>{getTypeAsString(output)}</code>
+        <code>{formatType(output)}</code>
       </NestedCell>
     </TableRow>
   );

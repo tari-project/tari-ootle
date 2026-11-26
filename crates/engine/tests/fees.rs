@@ -7,7 +7,7 @@ use tari_engine_types::{
     commit_result::{ExecutionFailureCode, RejectReason, TransactionResult},
     creation_check::NoCreationCheck,
     fees::{FeeReceipt, FeeScale, FeeSource},
-    limits::ENGINE_LIMITS,
+    limits::{ENGINE_LIMITS, NativeExecutionPoints},
     substate::SubstateId,
 };
 use tari_ootle_common_types::InputDeclaration;
@@ -1059,8 +1059,9 @@ fn storage_follows_the_residual_vault_balance_width() {
     }
 }
 
-/// Only `TransactionWeight` and `Storage` are `max_fee`-sensitive. Anything else moving would mean
-/// the three mechanisms above do not account for the whole drift.
+/// Only `TransactionWeight` and `Storage` are `max_fee`-sensitive, beyond `NativeExecution`'s bounded
+/// charge for decoding the `max_fee` literal. Anything else moving would mean the mechanisms above
+/// do not account for the whole drift.
 #[test]
 fn no_charge_other_than_weight_and_storage_moves_with_max_fee() {
     const MAX_FEES: [u64; 6] = [2_000, 65_535, 65_536, 100_000_000, FUNDED - 60_000, FUNDED - 10];
@@ -1071,7 +1072,7 @@ fn no_charge_other_than_weight_and_storage_moves_with_max_fee() {
     let build = state_transaction(&test, account, &key);
     let receipts = meter_across_max_fees(&mut test, &MAX_FEES, &[owner_token], build);
 
-    assert_only_weight_and_storage_move(&MAX_FEES, &receipts);
+    assert_only_weight_and_storage_move(test.fee_table(), &MAX_FEES, &receipts);
 }
 
 /// A publish carries a blob and takes the dedicated `TemplatePublish` pricing path, so it is the
@@ -1094,7 +1095,7 @@ fn a_template_publish_introduces_no_further_max_fee_sensitivity() {
             .build_and_seal(&key)
     });
 
-    assert_only_weight_and_storage_move(&MAX_FEES, &receipts);
+    assert_only_weight_and_storage_move(test.fee_table(), &MAX_FEES, &receipts);
 }
 
 /// The property a caller actually depends on, asserted as the promise itself rather than as a
@@ -1171,11 +1172,28 @@ fn a_wider_max_fee_never_raises_the_storage_charge() {
     );
 }
 
-fn assert_only_weight_and_storage_move(max_fees: &[u64], receipts: &[FeeReceipt]) {
+/// `NativeExecution` is the one other source allowed to move, and only by the engine's per-byte
+/// charge for decoding the wider `max_fee` literal: the accumulated points are floored by the
+/// divisor once, so those few points shift the charge by at most one rounded unit.
+fn assert_only_weight_and_storage_move(fee_table: &FeeTable, max_fees: &[u64], receipts: &[FeeReceipt]) {
     let base = &receipts[0];
     for (max_fee, receipt) in max_fees.iter().zip(receipts) {
         for (source, amount) in receipt.fee_breakdown().iter() {
             if matches!(source, FeeSource::TransactionWeight | FeeSource::Storage) {
+                continue;
+            }
+            if matches!(source, FeeSource::NativeExecution) {
+                let base_amount = base.fee_breakdown().get(*source);
+                let extra_bytes = amount_len(*max_fee).abs_diff(amount_len(max_fees[0]));
+                let extra_points = NativeExecutionPoints::PER_ENGINE_ARG_BYTE * extra_bytes;
+                let bound =
+                    extra_points.div_ceil(fee_table.wasm_points_cost_divisor()) * fee_table.per_wasm_point_cost();
+                assert!(
+                    amount.abs_diff(base_amount) <= bound,
+                    "NativeExecution moved by more than the max_fee literal's width between max_fee {} and {max_fee}: \
+                     {base_amount} -> {amount}",
+                    max_fees[0]
+                );
                 continue;
             }
             assert_eq!(

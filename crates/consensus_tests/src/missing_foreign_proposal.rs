@@ -20,6 +20,7 @@ use crate::support::{Test, TestAddress, TestVnDestination, build_transaction_fro
 /// A replica that has not received a foreign proposal its block carries does not keep the block, so a later delivery
 /// of the block with the foreign proposal is processed rather than discarded as already seen.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[expect(clippy::too_many_lines)]
 async fn a_block_delivered_without_its_foreign_proposals_is_processed_on_a_later_delivery() {
     setup_logger();
     let victim = TestAddress::new("4");
@@ -43,7 +44,11 @@ async fn a_block_delivered_without_its_foreign_proposals_is_processed_on_a_later
                 }
                 match msg {
                     HotstuffMessage::ForeignProposal(_) | HotstuffMessage::ForeignProposalNotification(_) => false,
-                    HotstuffMessage::CatchUpSyncResponse(proposal) => proposal.foreign_proposals.is_empty(),
+                    HotstuffMessage::CatchUpPage(page) => page
+                        .blocks
+                        .iter()
+                        .chain(page.leaf.iter())
+                        .all(|proposal| proposal.foreign_proposals.is_empty()),
                     HotstuffMessage::Proposal(proposal) if !proposal.foreign_proposals.is_empty() => {
                         *captured = Some((from.clone(), (**proposal).clone()));
                         false

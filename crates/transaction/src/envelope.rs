@@ -24,6 +24,31 @@ impl TransactionEnvelope {
     }
 
     pub fn decode(&self) -> Result<Transaction, tari_bor::BorError> {
-        tari_bor::decode::<Transaction>(&self.0)
+        tari_bor::decode_exact::<Transaction>(&self.0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tari_ootle_common_types::{Epoch, crypto::create_key_pair};
+
+    use super::*;
+
+    #[test]
+    fn encode_and_decode_round_trips_and_rejects_trailing_bytes() {
+        let (secret, _) = create_key_pair();
+        let tx = Transaction::builder_localnet(Epoch(1))
+            .drop_all_proofs_in_workspace()
+            .build_and_seal(&secret);
+        let expected_id = tx.calculate_id();
+
+        let envelope = TransactionEnvelope::encode(tx).unwrap();
+        let decoded = envelope.decode().unwrap();
+        assert_eq!(decoded.calculate_id(), expected_id);
+
+        let mut trailing = envelope.0.into_vec();
+        trailing.push(0x00);
+        let malleated = TransactionEnvelope::from_raw(trailing.into_boxed_slice());
+        assert!(malleated.decode().is_err());
     }
 }

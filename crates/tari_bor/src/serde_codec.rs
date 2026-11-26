@@ -16,7 +16,7 @@
 #![cfg(feature = "serde")]
 
 #[cfg(not(feature = "std"))]
-use alloc::vec::Vec;
+use alloc::{format, string::String, vec::Vec};
 use core::fmt;
 
 use minicbor::{
@@ -115,7 +115,18 @@ pub fn to_vec<T: Serialize>(val: T) -> Result<Vec<u8>, EncodeError<core::convert
 /// The target type's recursion is bounded by the stack, so deserializing untrusted input on a
 /// native stack wants [`from_slice_with_max_depth`] and a bound of the caller's choosing.
 pub fn from_slice<'de, T: Deserialize<'de>>(b: &'de [u8]) -> Result<T, DecodeError> {
-    T::deserialize(&mut Deserializer::new(b))
+    let mut de = Deserializer::new(b);
+    let val = T::deserialize(&mut de)?;
+    let consumed = de.decoder.position();
+    if consumed != b.len() {
+        return Err(decode::Error::message(format!(
+            "serde_codec::from_slice: {} trailing bytes remaining on input",
+            b.len() - consumed
+        ))
+        .at(consumed)
+        .into());
+    }
+    Ok(val)
 }
 
 /// Deserialize, rejecting input nested deeper than `max_depth`.
@@ -138,6 +149,16 @@ fn collect_indef_bytes(d: &mut Decoder<'_>) -> Result<Vec<u8>, decode::Error> {
     let mut buf = Vec::with_capacity(total);
     for chunk in chunks {
         buf.extend_from_slice(chunk);
+    }
+    Ok(buf)
+}
+
+fn collect_indef_str(d: &mut Decoder<'_>) -> Result<String, decode::Error> {
+    let chunks: Vec<&str> = d.str_iter()?.collect::<Result<_, _>>()?;
+    let total: usize = chunks.iter().map(|c| c.len()).sum();
+    let mut buf = String::with_capacity(total);
+    for chunk in chunks {
+        buf.push_str(chunk);
     }
     Ok(buf)
 }
@@ -575,7 +596,7 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
             Type::F64 => self.deserialize_f64(visitor),
             Type::Bytes => visitor.visit_borrowed_bytes(self.decoder.bytes()?),
             Type::String => visitor.visit_borrowed_str(self.decoder.str()?),
-            Type::Null => {
+            Type::Null | Type::Undefined => {
                 self.decoder.skip()?;
                 visitor.visit_none()
             },
@@ -591,22 +612,11 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
                 }
             },
             Type::BytesIndef => visitor.visit_byte_buf(collect_indef_bytes(&mut self.decoder)?),
-            Type::StringIndef => {
-                #[cfg(feature = "std")]
-                let mut buf = std::string::String::new();
-                #[cfg(not(feature = "std"))]
-                let mut buf = alloc::string::String::new();
-                for b in self.decoder.str_iter()? {
-                    buf += b?;
-                }
-                visitor.visit_string(buf)
-            },
-            t @ (Type::F16 | Type::Undefined | Type::Simple | Type::Break | Type::Unknown(_)) => {
-                Err(decode::Error::type_mismatch(t)
-                    .with_message("unexpected type")
-                    .at(self.decoder.position())
-                    .into())
-            },
+            Type::StringIndef => visitor.visit_string(collect_indef_str(&mut self.decoder)?),
+            t @ (Type::F16 | Type::Simple | Type::Break | Type::Unknown(_)) => Err(decode::Error::type_mismatch(t)
+                .with_message("unexpected type")
+                .at(self.decoder.position())
+                .into()),
         }
     }
 
@@ -667,23 +677,39 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
     }
 
     fn deserialize_str<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Self::Error> {
-        visitor.visit_borrowed_str(self.decoder.str()?)
+        if Type::StringIndef == self.decoder.datatype()? {
+            visitor.visit_string(collect_indef_str(&mut self.decoder)?)
+        } else {
+            visitor.visit_borrowed_str(self.decoder.str()?)
+        }
     }
 
     fn deserialize_string<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Self::Error> {
-        visitor.visit_str(self.decoder.str()?)
+        if Type::StringIndef == self.decoder.datatype()? {
+            visitor.visit_string(collect_indef_str(&mut self.decoder)?)
+        } else {
+            visitor.visit_str(self.decoder.str()?)
+        }
     }
 
     fn deserialize_bytes<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Self::Error> {
-        visitor.visit_borrowed_bytes(self.decoder.bytes()?)
+        if Type::BytesIndef == self.decoder.datatype()? {
+            visitor.visit_byte_buf(collect_indef_bytes(&mut self.decoder)?)
+        } else {
+            visitor.visit_borrowed_bytes(self.decoder.bytes()?)
+        }
     }
 
     fn deserialize_byte_buf<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Self::Error> {
-        visitor.visit_bytes(self.decoder.bytes()?)
+        if Type::BytesIndef == self.decoder.datatype()? {
+            visitor.visit_byte_buf(collect_indef_bytes(&mut self.decoder)?)
+        } else {
+            visitor.visit_bytes(self.decoder.bytes()?)
+        }
     }
 
     fn deserialize_option<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Self::Error> {
-        if Type::Null == self.decoder.datatype()? {
+        if matches!(self.decoder.datatype()?, Type::Null | Type::Undefined) {
             self.decoder.skip()?;
             visitor.visit_none()
         } else {
@@ -729,15 +755,30 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
 
     fn deserialize_tuple<V: Visitor<'de>>(self, len: usize, visitor: V) -> Result<V::Value, Self::Error> {
         let p = self.decoder.position();
-        let n = self.decoder.array()?;
-        if Some(len as u64) != n {
-            return Err(
-                decode::Error::message(format!("invalid length {n:?}, was expecting: {len}"))
+        match self.decoder.array()? {
+            Some(n) => {
+                if n != len as u64 {
+                    return Err(
+                        decode::Error::message(format!("invalid length {n}, was expecting: {len}"))
+                            .at(p)
+                            .into(),
+                    );
+                }
+                visitor.visit_seq(Seq::new(self, Some(n)))
+            },
+            None => {
+                let val = visitor.visit_seq(Seq::new(self, None))?;
+                if BREAK != self.current()? {
+                    return Err(decode::Error::message(format!(
+                        "invalid indefinite tuple length, was expecting: {len}"
+                    ))
                     .at(p)
-                    .into(),
-            );
+                    .into());
+                }
+                self.read()?;
+                Ok(val)
+            },
         }
-        visitor.visit_seq(Seq::new(self, n))
     }
 
     fn deserialize_tuple_struct<V: Visitor<'de>>(
@@ -770,13 +811,31 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'de> {
         visitor: V,
     ) -> Result<V::Value, Self::Error> {
         let p = self.decoder.position();
-        if Type::Map == self.decoder.datatype()? {
-            let m = self.decoder.map()?;
-            if m != Some(1) {
-                return Err(decode::Error::message("invalid enum map length").at(p).into());
-            }
+        match self.decoder.datatype()? {
+            Type::String | Type::StringIndef => visitor.visit_enum(UnitEnum::new(self)),
+            Type::Map => {
+                if self.decoder.map()? != Some(1) {
+                    return Err(decode::Error::message("invalid enum map length").at(p).into());
+                }
+                visitor.visit_enum(VariantEnum::new(self))
+            },
+            Type::MapIndef => {
+                self.decoder.map()?;
+                if BREAK == self.current()? {
+                    return Err(decode::Error::message("invalid enum map length").at(p).into());
+                }
+                let val = visitor.visit_enum(VariantEnum::new(self))?;
+                if BREAK != self.current()? {
+                    return Err(decode::Error::message("invalid enum map length").at(p).into());
+                }
+                self.read()?;
+                Ok(val)
+            },
+            t => Err(decode::Error::type_mismatch(t)
+                .with_message("expected enum string or single-entry map")
+                .at(p)
+                .into()),
         }
-        visitor.visit_enum(Enum::new(self))
     }
 
     fn deserialize_identifier<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Self::Error> {
@@ -925,17 +984,17 @@ impl<'de> SeqAccess<'de> for ByteSeqAccessOwned {
     }
 }
 
-struct Enum<'a, 'de: 'a> {
+struct UnitEnum<'a, 'de: 'a> {
     deserializer: &'a mut Deserializer<'de>,
 }
 
-impl<'a, 'de> Enum<'a, 'de> {
+impl<'a, 'de> UnitEnum<'a, 'de> {
     fn new(d: &'a mut Deserializer<'de>) -> Self {
         Self { deserializer: d }
     }
 }
 
-impl<'de> EnumAccess<'de> for Enum<'_, 'de> {
+impl<'de> EnumAccess<'de> for UnitEnum<'_, 'de> {
     type Error = DecodeError;
     type Variant = Self;
 
@@ -944,11 +1003,58 @@ impl<'de> EnumAccess<'de> for Enum<'_, 'de> {
     }
 }
 
-impl<'de> VariantAccess<'de> for Enum<'_, 'de> {
+impl<'de> VariantAccess<'de> for UnitEnum<'_, 'de> {
     type Error = DecodeError;
 
     fn unit_variant(self) -> Result<(), Self::Error> {
         Ok(())
+    }
+
+    fn newtype_variant_seed<T: DeserializeSeed<'de>>(self, _seed: T) -> Result<T::Value, Self::Error> {
+        Err(decode::Error::message("expected map for newtype enum variant")
+            .at(self.deserializer.decoder.position())
+            .into())
+    }
+
+    fn tuple_variant<V: Visitor<'de>>(self, _len: usize, _v: V) -> Result<V::Value, Self::Error> {
+        Err(decode::Error::message("expected map for tuple enum variant")
+            .at(self.deserializer.decoder.position())
+            .into())
+    }
+
+    fn struct_variant<V: Visitor<'de>>(self, _fields: &'static [&'static str], _v: V) -> Result<V::Value, Self::Error> {
+        Err(decode::Error::message("expected map for struct enum variant")
+            .at(self.deserializer.decoder.position())
+            .into())
+    }
+}
+
+struct VariantEnum<'a, 'de: 'a> {
+    deserializer: &'a mut Deserializer<'de>,
+}
+
+impl<'a, 'de> VariantEnum<'a, 'de> {
+    fn new(d: &'a mut Deserializer<'de>) -> Self {
+        Self { deserializer: d }
+    }
+}
+
+impl<'de> EnumAccess<'de> for VariantEnum<'_, 'de> {
+    type Error = DecodeError;
+    type Variant = Self;
+
+    fn variant_seed<V: DeserializeSeed<'de>>(self, seed: V) -> Result<(V::Value, Self::Variant), Self::Error> {
+        seed.deserialize(&mut *self.deserializer).map(|v| (v, self))
+    }
+}
+
+impl<'de> VariantAccess<'de> for VariantEnum<'_, 'de> {
+    type Error = DecodeError;
+
+    fn unit_variant(self) -> Result<(), Self::Error> {
+        Err(decode::Error::message("unexpected map for unit enum variant")
+            .at(self.deserializer.decoder.position())
+            .into())
     }
 
     fn newtype_variant_seed<T: DeserializeSeed<'de>>(self, seed: T) -> Result<T::Value, Self::Error> {
@@ -1063,5 +1169,141 @@ mod tests {
             };
             super::roundtrip(&v);
         }
+    }
+
+    #[test]
+    fn from_slice_rejects_trailing_bytes() {
+        let mut bytes = to_vec(42u32).unwrap();
+        bytes.push(0x00);
+        assert!(from_slice::<u32>(&bytes).is_err());
+        assert!(from_slice_with_max_depth::<u32>(&bytes, 16).is_err());
+    }
+
+    #[test]
+    fn indef_bytes_and_strings_deserialize_into_typed_targets() {
+        // Indefinite-length byte string: 0x5f (start indef bstr), 0x42 "hi", 0x41 "!", 0xff (break)
+        let indef_bytes = [0x5f, 0x42, b'h', b'i', 0x41, b'!', 0xff];
+        mod raw_bytes {
+            use serde::{Deserializer, de::Visitor};
+            pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<u8>, D::Error> {
+                struct V;
+                impl<'de> Visitor<'de> for V {
+                    type Value = Vec<u8>;
+
+                    fn expecting(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                        f.write_str("bytes")
+                    }
+
+                    fn visit_bytes<E: serde::de::Error>(self, v: &[u8]) -> Result<Self::Value, E> {
+                        Ok(v.to_vec())
+                    }
+
+                    fn visit_byte_buf<E: serde::de::Error>(self, v: Vec<u8>) -> Result<Self::Value, E> {
+                        Ok(v)
+                    }
+                }
+                d.deserialize_byte_buf(V)
+            }
+        }
+        #[derive(Debug, PartialEq, Eq, Deserialize)]
+        struct ByteBufWrapper(#[serde(with = "raw_bytes")] Vec<u8>);
+        let got: ByteBufWrapper = from_slice(&indef_bytes).unwrap();
+        assert_eq!(got.0, b"hi!");
+
+        mod via_deserialize_bytes {
+            use serde::{Deserializer, de::Visitor};
+            pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<u8>, D::Error> {
+                struct V;
+                impl<'de> Visitor<'de> for V {
+                    type Value = Vec<u8>;
+
+                    fn expecting(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                        f.write_str("bytes")
+                    }
+
+                    fn visit_bytes<E: serde::de::Error>(self, v: &[u8]) -> Result<Self::Value, E> {
+                        Ok(v.to_vec())
+                    }
+
+                    fn visit_byte_buf<E: serde::de::Error>(self, v: Vec<u8>) -> Result<Self::Value, E> {
+                        Ok(v)
+                    }
+                }
+                d.deserialize_bytes(V)
+            }
+        }
+        #[derive(Debug, PartialEq, Eq, Deserialize)]
+        struct BytesWrapper(#[serde(with = "via_deserialize_bytes")] Vec<u8>);
+        let got_bytes: BytesWrapper = from_slice(&indef_bytes).unwrap();
+        assert_eq!(got_bytes.0, b"hi!");
+
+        // Indefinite-length text string: 0x7f (start indef tstr), 0x62 "hi", 0x61 "!", 0xff (break)
+        let indef_str = [0x7f, 0x62, b'h', b'i', 0x61, b'!', 0xff];
+        let got_str: String = from_slice(&indef_str).unwrap();
+        assert_eq!(got_str, "hi!");
+        let got_cow: std::borrow::Cow<'_, str> = from_slice(&indef_str).unwrap();
+        assert_eq!(got_cow, "hi!");
+        // Borrowed &str cannot borrow across indefinite-length chunks and must fail cleanly
+        assert!(from_slice::<&str>(&indef_str).is_err());
+    }
+
+    #[test]
+    fn undefined_deserializes_via_any_and_option() {
+        use crate::Value;
+
+        // CBOR undefined (0xf7) matches minicbor::Decode for Value and check_value_form.
+        let undef = [0xf7];
+        assert_eq!(from_slice::<Value>(&undef).unwrap(), Value::Null);
+        assert_eq!(from_slice::<Option<u32>>(&undef).unwrap(), None);
+
+        // IEEE 754 binary16 (0xf9) remains rejected without minicbor's half feature.
+        assert!(from_slice::<Value>(&[0xf9, 0x3e, 0x00]).is_err());
+    }
+
+    #[test]
+    fn indef_tuples_enforce_exact_element_count() {
+        assert_eq!(from_slice::<(u8, u8)>(&[0x9f, 0x01, 0x02, 0xff]).unwrap(), (1, 2));
+        assert!(from_slice::<(u8, u8)>(&[0x9f, 0x01, 0xff]).is_err());
+        assert!(from_slice::<(u8, u8)>(&[0x9f, 0x01, 0x02, 0x03, 0xff]).is_err());
+        assert!(from_slice::<(u8, u8)>(&[0x9f, 0x01, 0x02]).is_err());
+    }
+
+    #[test]
+    fn enum_deserialization_enforces_map_and_unit_boundaries() {
+        #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+        enum SampleEnum {
+            Unit,
+            Newtype(u32),
+            Tuple(u8, u8),
+            Struct { a: u8 },
+        }
+
+        roundtrip(&SampleEnum::Unit);
+        roundtrip(&SampleEnum::Newtype(7));
+        roundtrip(&SampleEnum::Tuple(3, 4));
+        roundtrip(&SampleEnum::Struct { a: 9 });
+
+        // Indefinite-length 1-entry map for a newtype variant succeeds and consumes 0xff.
+        let indef_newtype = [0xbf, 0x67, b'N', b'e', b'w', b't', b'y', b'p', b'e', 0x07, 0xff];
+        assert_eq!(
+            from_slice::<SampleEnum>(&indef_newtype).unwrap(),
+            SampleEnum::Newtype(7)
+        );
+
+        // Indefinite-length map with an extra entry must fail.
+        let indef_extra = [
+            0xbf, 0x67, b'N', b'e', b'w', b't', b'y', b'p', b'e', 0x07, 0x61, b'x', 0x01, 0xff,
+        ];
+        assert!(from_slice::<SampleEnum>(&indef_extra).is_err());
+
+        // Unit variant wrapped in a 1-entry map {"Unit": 42} inside a 2-tuple header must not
+        // leave the map's value on the stream for the second tuple element.
+        let unit_in_map_smuggle = [0x82, 0xa1, 0x64, b'U', b'n', b'i', b't', 0x18, 0x2a];
+        assert!(from_slice::<(SampleEnum, u32)>(&unit_in_map_smuggle).is_err());
+
+        // Non-unit variant encoded as a bare string inside a 2-element array must not consume
+        // the sibling array element as its payload.
+        let bare_newtype_steal = [0x9f, 0x67, b'N', b'e', b'w', b't', b'y', b'p', b'e', 0x07, 0xff];
+        assert!(from_slice::<Vec<SampleEnum>>(&bare_newtype_steal).is_err());
     }
 }

@@ -27,9 +27,8 @@ Shows all information about the VN:
 - all the committees (with the respective shard space) that VN is part of
 - list of all VNs
 
-There is also functionality to register the VNs.
-Auto-update of frontend.
-Source code for this is in the `tari_validator_node_web_ui`
+Epoch stats refresh every 2 minutes.
+Source code for this is in `web_ui`.
 
 ### JSON-RPC
 
@@ -39,31 +38,73 @@ with `--enable-permissive-cors`. Requests must address the node by `localhost`, 
 `validator_node.json_rpc_allowed_hosts` (`--json-rpc-allowed-host`); any other host name gets `421 Misdirected Request`.
 
 - submit_transaction
-- register_template
+- get_transaction
+- get_transaction_result
+- get_state
+- get_substate
+- list_blocks
+- get_tx_pool
+- get_block
+- get_blocks
+- get_filtered_blocks_count
+- get_template
 - get_identity
-- register_validator_node
 - get_mempool_stats
 - get_epoch_manager_stats
 - get_shard_key
 - get_committee
 - get_all_vns
+- get_consensus_status
+- get_diagnostic_events
+- clear_diagnostic_events
+- create_backup_snapshot
+- add_peer
 - get_comms_stats
 - get_connections
-- create_backup_snapshot
+- prepare_layer_one_transaction
 
 #### Linux
 
 ```
-sudo apt-get install git curl build-essential cmake clang pkg-config libssl-dev libsqlite3-dev sqlite3 npm
+sudo apt-get install git curl build-essential cmake clang pkg-config libssl-dev libsqlite3-dev sqlite3
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
 ```
 
 ### From source
 
+The package sets `publish = false`, so `cargo install tari_validator_node` does not install it from crates.io. Build it from this workspace:
+
 ```
-cargo install tari_validator_node
+cargo build --release -p tari_validator_node
 ```
+
+A release build with the default `web_ui` feature runs `pnpm install` and `pnpm run build` in `web_ui/`.
+
+### Identity recovery and fee claims
+
+Configure `validator_node.fee_claim_public_key` with the public key of an account in your wallet before starting
+this validator. Startup refuses an unset or zero key. The wallet holds the claim secret and claims fees using its
+existing account workflow; the validator's recovery phrase recovers only its node identity.
+
+`generate-identity` creates an identity without requiring a fee claim key. When it generates a new seed, it writes
+the 24 recovery words to `<identity_file>.recovery-<public_key>.txt`, with owner-only permissions on Unix. Logs
+contain the backup path, never the words. Back up that file off the validator host and keep it secret.
+
+Restore an identity with:
+
+```sh
+tari_validator_node generate-identity --seed-words-file /secure/path/recovery.txt
+```
+
+`--seed-words "<24 words>"` also works, but a file avoids putting the words in shell history and process arguments.
+For encrypted recovery words, supply `--seed-passphrase` (or `TARI_VN_SEED_PASSPHRASE`). Seed input flags must
+precede an explicit `start` subcommand. The `generate-identity` subcommand also accepts them after its name.
+A matching existing identity loads without rewriting it. Replacing a different identity requires
+`generate-identity --overwrite`; invalid words or a wrong passphrase leave the existing identity intact.
+
+On a replacement host, configure the same wallet account public key for fee claims and recover that account
+through the wallet's own backup process. Stop the original validator before starting the recovered identity.
 
 ### Backups
 

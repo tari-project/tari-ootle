@@ -20,7 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { Divider, FormControl, InputLabel, MenuItem, Select, SelectChangeEvent } from "@mui/material";
+import { Alert, Divider, FormControl, InputLabel, MenuItem, Select, SelectChangeEvent } from "@mui/material";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import { useTheme } from "@mui/material/styles";
@@ -33,6 +33,7 @@ import {
 } from "@tari-project/ootle-ts-bindings";
 import { stealthDecryptUtxoBalance } from "@utils/json_rpc";
 import { useState } from "react";
+import { formatDecryptedBalance, validateDecryptUtxoForm } from "./decryptBalanceHelpers";
 
 import SearchedRange from "./SearchedRange";
 
@@ -47,35 +48,59 @@ const KEY_BRANCHES: KeyBranch[] = [
 ];
 
 function DecryptUtxoBalanceForm() {
-  const [formState, setFormState] = useState({
-    resourceAddress: null,
-    utxoId: null,
-    minimumExpectedValue: null,
-    maximumExpectedValue: 100000000,
+  const [formState, setFormState] = useState<{
+    resourceAddress: string;
+    utxoId: string;
+    minimumExpectedValue: string;
+    maximumExpectedValue: string;
+    keyBranch: KeyBranch;
+    keyId: string;
+  }>({
+    resourceAddress: "",
+    utxoId: "",
+    minimumExpectedValue: "",
+    maximumExpectedValue: "100000000",
     keyBranch: "elgamal_encryption_view_key",
-    keyId: 0,
+    keyId: "0",
   });
   const [balance, setBalance] = useState<StealthUtxosDecryptValueResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
 
   const onViewBalanceClicked = async () => {
-    const resp = await stealthDecryptUtxoBalance({
-      resource_address: formState.resourceAddress!,
-      ids: [formState.utxoId!],
-      minimum_expected_value: formState.minimumExpectedValue ? BigInt(formState.minimumExpectedValue) : null,
-      maximum_expected_value: BigInt(formState.maximumExpectedValue),
-      view_key_id: { Derived: { key_branch: formState.keyBranch, index: BigInt(formState.keyId) } },
-    } as StealthUtxosDecryptValueRequest);
+    const validated = validateDecryptUtxoForm(formState);
+    if (!validated.ok) {
+      setError(validated.error);
+      return;
+    }
 
-    setBalance(resp);
+    setError(null);
+    setIsLoading(true);
+    try {
+      const resp = await stealthDecryptUtxoBalance({
+        resource_address: validated.resourceAddress,
+        ids: [validated.utxoId],
+        minimum_expected_value: validated.minimumExpectedValue,
+        maximum_expected_value: validated.maximumExpectedValue,
+        view_key_id: { Derived: { key_branch: formState.keyBranch, index: validated.keyId } },
+      } as StealthUtxosDecryptValueRequest);
+
+      setBalance(resp);
+    } catch (e: unknown) {
+      setBalance(null);
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const balances =
     balance &&
-    Object.keys(balance?.values).map((key) => {
+    Object.keys(balance.values).map((key) => {
       return (
         <Box key={key}>
           <Typography>
-            {key}: {balance.values[key]?.toString() || "Failed not decrypt value"}
+            {key}: {formatDecryptedBalance(balance.values[key])}
           </Typography>
         </Box>
       );
@@ -84,6 +109,7 @@ function DecryptUtxoBalanceForm() {
   const searched = balance && <SearchedRange searched={balance.searched} />;
 
   const onChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setError(null);
     setFormState({
       ...formState,
       [e.target.name]: e.target.value,
@@ -91,9 +117,10 @@ function DecryptUtxoBalanceForm() {
   };
 
   const onSelectChange = (e: SelectChangeEvent) => {
+    setError(null);
     setFormState({
       ...formState,
-      [e.target.name]: e.target.value,
+      [e.target.name]: e.target.value as KeyBranch,
     });
   };
 
@@ -116,46 +143,43 @@ function DecryptUtxoBalanceForm() {
             ))}
           </Select>
         </FormControl>
-        <TextField
-          name="keyId"
-          label="Key ID"
-          value={formState.keyId || ""}
-          onChange={onChange}
-          style={{ flexGrow: 1 }}
-        />
+        <TextField name="keyId" label="Key ID" value={formState.keyId} onChange={onChange} style={{ flexGrow: 1 }} />
         <TextField
           name="resourceAddress"
           label="Resource Address"
-          value={formState.resourceAddress || ""}
+          value={formState.resourceAddress}
           onChange={onChange}
           style={{ flexGrow: 1 }}
         />
-        <TextField
-          name="utxoId"
-          label="UTXO ID"
-          value={formState.utxoId || ""}
-          onChange={onChange}
-          style={{ flexGrow: 1 }}
-        />
+        <TextField name="utxoId" label="UTXO ID" value={formState.utxoId} onChange={onChange} style={{ flexGrow: 1 }} />
         <TextField
           name="minimumExpectedValue"
           label="Minimum Expected Value"
-          value={formState.minimumExpectedValue || ""}
+          value={formState.minimumExpectedValue}
           onChange={onChange}
           style={{ flexGrow: 1 }}
         />
         <TextField
           name="maximumExpectedValue"
           label="Maximum Expected Value"
-          value={formState.maximumExpectedValue || ""}
+          value={formState.maximumExpectedValue}
           onChange={onChange}
           style={{ flexGrow: 1 }}
         />
 
-        <Button variant="contained" onClick={onViewBalanceClicked} disabled={!formState.resourceAddress}>
-          Decrypt
+        <Button
+          variant="contained"
+          onClick={onViewBalanceClicked}
+          disabled={isLoading || !formState.resourceAddress.trim() || !formState.utxoId.trim()}
+        >
+          {isLoading ? "Decrypting..." : "Decrypt"}
         </Button>
       </Box>
+      {error && (
+        <Alert severity="error" sx={{ marginBottom: 2 }}>
+          {error}
+        </Alert>
+      )}
       {searched}
       {balances && (
         <>

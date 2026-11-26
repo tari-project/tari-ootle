@@ -26,7 +26,7 @@ mod walker;
 mod byte_counter;
 
 pub use byte_counter::ByteCounter;
-pub use depth::{check_nesting_depth, count_data_items, count_data_items_bounded};
+pub use depth::{ItemCountError, check_nesting_depth, count_data_items, count_data_items_bounded};
 pub use error::BorError;
 pub use macros::__cbor_macro;
 pub use minicbor::{self, CborLen, Decode, Encode};
@@ -143,10 +143,10 @@ pub fn to_value<T: Encode<()> + ?Sized>(val: &T) -> Result<Value, BorError> {
 
 /// Decode a value out of a dynamic [`Value`] tree by re-encoding to bytes and decoding via the
 /// target type. Useful for tests and dynamic conversion; for production paths prefer to
-/// `decode` the original bytes directly.
+/// `decode_exact` the original bytes directly.
 pub fn from_value<T: for<'b> Decode<'b, ()>>(val: &Value) -> Result<T, BorError> {
     let bytes = encode(val)?;
-    decode(&bytes)
+    decode_exact(&bytes)
 }
 
 /// Decode a single value from a byte slice (unit context). Extra trailing bytes are ignored.

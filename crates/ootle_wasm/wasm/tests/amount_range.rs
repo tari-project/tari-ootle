@@ -18,6 +18,13 @@ const OUT_OF_RANGE: [&str; 4] = [
     "-1",
 ];
 
+/// 2^128, 2^128 + 5 and -1: each one is a valid `u128` once reduced modulo 2^128.
+const REVEALED_OUT_OF_RANGE: [&str; 3] = [
+    "340282366920938463463374607431768211456",
+    "340282366920938463463374607431768211461",
+    "-1",
+];
+
 fn bigint(value: &str) -> BigInt {
     BigInt::new(&JsValue::from_str(value)).unwrap()
 }
@@ -39,7 +46,7 @@ fn assert_rejected<T>(param: &str, value: &str, result: Result<T, JsError>) {
 
 #[wasm_bindgen_test]
 fn stealth_inputs_statement_rejects_out_of_range_revealed_amount() {
-    for value in OUT_OF_RANGE {
+    for value in REVEALED_OUT_OF_RANGE {
         assert_rejected(
             "revealed_amount_microtari",
             value,
@@ -55,7 +62,7 @@ fn stealth_inputs_statement_rejects_out_of_range_revealed_amount() {
 
 #[wasm_bindgen_test]
 fn stealth_outputs_statement_rejects_out_of_range_revealed_amount() {
-    for value in OUT_OF_RANGE {
+    for value in REVEALED_OUT_OF_RANGE {
         assert_rejected(
             "revealed_output_amount_microtari",
             value,
@@ -87,7 +94,7 @@ fn stealth_output_witness_rejects_out_of_range_amounts() {
 
 #[wasm_bindgen_test]
 fn stealth_transfer_statement_rejects_out_of_range_revealed_amounts() {
-    for value in OUT_OF_RANGE {
+    for value in REVEALED_OUT_OF_RANGE {
         assert_rejected(
             "revealed_input_amount_microtari",
             value,
@@ -134,7 +141,14 @@ fn amount_given_as_a_js_number_is_rejected() {
 
 #[wasm_bindgen_test]
 fn in_range_revealed_amounts_are_preserved() {
-    for value in ["0", "1", "5", "18446744073709551615"] {
+    for value in [
+        "0",
+        "1",
+        "5",
+        "18446744073709551615",
+        "18446744073709551616",
+        "340282366920938463463374607431768211455",
+    ] {
         let statement = ootle_wasm::build_stealth_inputs_statement(&[], bigint(value))
             .unwrap_or_else(|_| panic!("revealed amount {value} was rejected"));
         assert!(

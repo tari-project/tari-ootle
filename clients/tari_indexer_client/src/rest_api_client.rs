@@ -29,6 +29,8 @@ use crate::{
         GetResourceResponse,
         GetSubstateRequest,
         GetSubstateResponse,
+        GetSubstateVersionsRequest,
+        GetSubstateVersionsResponse,
         GetSubstatesRequest,
         GetSubstatesResponse,
         GetTemplateDefinitionResponse,
@@ -186,6 +188,15 @@ impl IndexerRestApiClient {
         req: GetSubstatesRequest,
     ) -> Result<GetSubstatesResponse, IndexerRestClientError> {
         self.send_post("substates/fetch", req).await
+    }
+
+    /// The live version of each substate in `req`, unproven. See [`GetSubstateVersionsResponse`] for what the
+    /// versions can be relied on for.
+    pub async fn get_substate_versions(
+        &self,
+        req: GetSubstateVersionsRequest,
+    ) -> Result<GetSubstateVersionsResponse, IndexerRestClientError> {
+        self.send_post("substates/versions", req).await
     }
 
     pub async fn submit_transaction(

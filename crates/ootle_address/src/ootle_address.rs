@@ -88,7 +88,7 @@ impl OotleAddress {
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
-        let mut buf = Vec::with_capacity(Self::MIN_BYTE_LENGTH);
+        let mut buf = Vec::with_capacity(self.byte_length());
         self.encode_to_writer(&mut buf).unwrap();
         buf
     }
@@ -198,7 +198,12 @@ impl OotleAddress {
 
     pub fn decode_bech32(s: &str) -> Result<Self, OotleAddressError> {
         const KL: usize = RistrettoPublicKeyBytes::length();
-        let (hrp, data) = bech32::decode(s)?;
+        let checked = bech32::primitives::decode::UncheckedHrpstring::new(s)
+            .map_err(bech32::DecodeError::Parse)?
+            .validate_and_remove_checksum::<Bech32m>()
+            .map_err(bech32::DecodeError::Checksum)?;
+        let hrp = checked.hrp();
+        let data: Vec<u8> = checked.byte_iter().collect();
         let network = network_from_hrp(&hrp).ok_or(OotleAddressError::UnrecognisedHrp { hrp })?;
         if data.len() < KL * 2 {
             return Err(OotleAddressError::AddressLengthTooShort {
@@ -236,8 +241,10 @@ impl OotleAddress {
     }
 
     pub fn to_bech32_string(&self) -> String {
-        let tag_len = self.destination_tag_len();
-        let mut s = String::with_capacity(119 + tag_len);
+        let hrp = hrp_from_network(self.network);
+        let data_chars = (self.encoded_bech32_payload_len() * 8).div_ceil(5);
+        // hrp + '1' separator (1) + data_chars + checksum (6)
+        let mut s = String::with_capacity(hrp.len() + 1 + data_chars + 6);
         self.encode_bech32_to_fmt(&mut s).unwrap();
         s
     }
@@ -438,9 +445,24 @@ mod tests {
     }
 
     #[test]
+    fn it_rejects_legacy_bech32_checksum() {
+        let addr = sample(2);
+        let hrp = hrp_from_network(addr.network());
+        let mut payload = Vec::with_capacity(64);
+        payload.extend_from_slice(addr.account_public_key().as_bytes());
+        payload.extend_from_slice(addr.view_only_key().as_bytes());
+        let legacy_bech32 = bech32::encode::<bech32::Bech32>(hrp, &payload).unwrap();
+
+        let err = OotleAddress::decode_bech32(&legacy_bech32).unwrap_err();
+        assert!(matches!(err, OotleAddressError::Bech32DecodeError(_)));
+    }
+
+    #[test]
     fn it_encodes_and_decodes_from_bytes() {
         let addr = sample(3);
         let bytes = addr.to_bytes();
+        assert_eq!(bytes.len(), addr.byte_length());
+        assert_eq!(bytes.capacity(), addr.byte_length());
         let decoded = OotleAddress::from_bytes(&bytes).unwrap();
         assert_eq!(addr.network(), decoded.network());
         assert_eq!(addr.view_only_key(), decoded.view_only_key());
@@ -469,11 +491,18 @@ mod tests {
             let destination_tag = DestinationTag::new_checked(vec![1; DestinationTag::MAX_LEN]).unwrap();
             let addr = sample(10).with_destination_tag(destination_tag.clone());
             let bytes = addr.to_bytes();
+            assert_eq!(bytes.len(), addr.byte_length());
+            assert_eq!(bytes.capacity(), addr.byte_length());
             let decoded = OotleAddress::from_bytes(&bytes).unwrap();
             assert_eq!(addr.network(), decoded.network());
             assert_eq!(addr.view_only_key(), decoded.view_only_key());
             assert_eq!(addr.account_public_key(), decoded.account_public_key());
             assert_eq!(addr.destination_tag(), Some(&destination_tag));
+
+            let bech32_str = addr.to_bech32_string();
+            assert_eq!(bech32_str.len(), bech32_str.capacity());
+            let decoded_bech32 = OotleAddress::decode_bech32(&bech32_str).unwrap();
+            assert_eq!(decoded_bech32, addr);
         }
 
         #[test]

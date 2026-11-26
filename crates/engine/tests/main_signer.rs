@@ -3,14 +3,7 @@
 
 use ootle_byte_type::ToByteType;
 use tari_crypto::ristretto::RistrettoSecretKey;
-use tari_ootle_transaction::{
-    MainSigner,
-    Transaction,
-    TransactionBuilder,
-    TransactionSignature,
-    args,
-    builder::MainIntent,
-};
+use tari_ootle_transaction::{MainSigner, Transaction, TransactionBuilder, args, builder::MainIntent};
 use tari_template_lib::types::{NonFungibleAddress, OwnerRule, SubstateOwnerRule, crypto::RistrettoPublicKeyBytes};
 use tari_template_test_tooling::{TemplateTest, support::assert_error::assert_reject_reason};
 use tari_utilities::hex::from_hex;
@@ -19,7 +12,7 @@ const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
 const TEMPLATE_PATHS: &[&str] = &["tests/templates/caller_context"];
 const TEMPLATE_NAME: &str = "CallerContextTest";
 
-/// Signs `builder` with each of `signers` in order and seals it with the test's key, which the transaction does not
+/// Signs `builder` with each of `signers` and seals it with the test's key, which the transaction does not
 /// authorize.
 fn co_signed(
     test: &TemplateTest,
@@ -28,12 +21,10 @@ fn co_signed(
     signers: &[&RistrettoSecretKey],
 ) -> Transaction {
     let seal_public_key = test.to_public_key_bytes();
-    let unsigned = builder.with_main_signer(main_signer).build_unsigned();
-    let signatures = signers
-        .iter()
-        .map(|secret| TransactionSignature::sign(secret, &seal_public_key, &unsigned))
-        .collect();
-    unsigned.with_signatures(signatures).seal(test.secret_key())
+    builder
+        .with_main_signer(main_signer)
+        .authorize(&seal_public_key, signers.iter().copied())
+        .seal(test.secret_key())
 }
 
 fn signer_proofs(transaction: &Transaction) -> Vec<NonFungibleAddress> {

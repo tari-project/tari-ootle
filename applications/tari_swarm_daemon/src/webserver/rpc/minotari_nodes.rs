@@ -27,7 +27,7 @@ pub async fn create(
 ) -> Result<BaseNodeCreateResponse, anyhow::Error> {
     let instance_id = context
         .process_manager()
-        .create_instance(req.name, InstanceType::MinoTariNode, HashMap::new())
+        .create_instance(Some(req.name), InstanceType::MinoTariNode, HashMap::new())
         .await?;
 
     Ok(BaseNodeCreateResponse { instance_id })

@@ -3,6 +3,7 @@
 
 import { ApiError } from "@api/helpers/types";
 import queryClient from "@api/queryClient";
+import { retryUnlessAuth } from "@api/queryClientHelpers";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { ComponentAddress, ComponentAddressOrName, TransferNftRequest } from "@tari-project/ootle-ts-bindings";
 import { nftList, nftTransfer } from "@utils/json_rpc";
@@ -22,7 +23,7 @@ export const useNFTsList = (account: ComponentAddress, offset: number, limit: nu
     refetchOnWindowFocus: false,
     refetchOnMount: false,
     refetchInterval: false,
-    retry: 2,
+    retry: retryUnlessAuth(2),
     retryDelay: (attemptIndex) => Math.min(2000 * 2 ** attemptIndex, 8000),
   });
 };

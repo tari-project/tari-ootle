@@ -73,7 +73,7 @@ pub async fn stream_utxo_updates(
         )));
     }
 
-    info!(
+    debug!(
         target: LOG_TARGET,
         "Starting UTXO update stream for {} shard(s)",
         req.shard_state_versions.len()

@@ -19,13 +19,14 @@ pub use cache::{
     WasmModuleCache,
 };
 
+mod branch_table_limit;
 mod bulk_metering;
 mod engine;
 mod metering;
 mod module_shape;
 mod process;
 
-pub use module_shape::ModuleStructure;
+pub use module_shape::{ModuleStructure, validate_module_structure};
 pub use process::WasmProcess;
 
 mod instance_cache;

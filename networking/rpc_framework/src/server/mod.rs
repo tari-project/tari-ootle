@@ -387,18 +387,23 @@ where
 
         debug!(
             target: LOG_TARGET,
-            "Peer RPC server is shutting down because the protocol notification stream ended. Waiting for {} active \
-             session(s) to complete",
+            "Peer RPC server is shutting down because the protocol notification stream ended. Aborting {} active \
+             session(s)",
             self.tasks.len()
         );
 
-        // Drain in-flight sessions so that returning from serve means every per-session service instance
-        // (and anything it owns, e.g. a state store handle) has been dropped. This is bounded: the
-        // notification stream only ends once networking has shut down, so each session errors out at its
-        // next substream read/write — which also closes any in-progress response stream — and handler
-        // futures are bounded by the client deadline.
+        // The notification stream ends when networking shuts down, but a session's substream can outlive it:
+        // a QUIC connection stays open while any of its streams is held, so a peer can keep a session busy
+        // indefinitely. Sessions are therefore aborted, and awaiting each aborted task ensures every per-session
+        // service instance (and anything it owns, e.g. a state store handle) has been dropped by the time serve
+        // returns.
+        for task in &self.tasks {
+            task.handle.abort();
+        }
         while let Some((peer_id, result)) = self.tasks.next().await {
-            if let Err(err) = result {
+            if let Err(err) = result &&
+                err.is_panic()
+            {
                 error!(
                     target: LOG_TARGET,
                     "Session task for peer `{}` panicked while shutting down: {}", peer_id, err

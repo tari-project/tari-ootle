@@ -23,7 +23,8 @@ const LOG_TARGET: &str = "tari::ootle::engine::crypto::covenant";
 /// the per-output range proofs verified elsewhere in the transfer pipeline.
 ///
 /// `revealed_amount` is the exact net cleartext outflow of the partition; the caller bounds it against the script's
-/// permitted allowance. Amounts above `u64::MAX` are rejected by `commit_amount` below (the range-proof domain).
+/// permitted allowance. It is public and carries no range proof, so it is committed at full `Amount` width.
+#[must_use]
 pub fn validate_covenant_balance_proof(
     condition_root: &Hash32,
     revealed_amount: Amount,
@@ -45,9 +46,7 @@ pub fn validate_covenant_balance_proof(
         return false;
     };
 
-    let Some(revealed_commit) = commit_amount(&RistrettoSecretKey::default(), revealed_amount) else {
-        return false;
-    };
+    let revealed_commit = commit_amount(&RistrettoSecretKey::default(), revealed_amount);
 
     let public_excess = agg_inputs - &agg_outputs - revealed_commit.as_public_key();
 

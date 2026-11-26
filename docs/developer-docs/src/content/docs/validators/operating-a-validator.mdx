@@ -1,0 +1,129 @@
+---
+title: Operating a Validator
+description: Day-to-day operation of a Tari Ootle validator node. Claiming fees, backing up and restoring state, upgrading, logs and health checks.
+---
+
+import { Aside, Steps } from "@astrojs/starlight/components";
+import { basePath } from '../../../helpers/path';
+
+### Covered in this guide
+
+- Claiming validator fees from a wallet.
+- Backing up and restoring the node's state and keys.
+- Upgrading safely.
+- Logs, health checks and database maintenance.
+
+## Claiming fees
+
+The validator's share of each fee goes into a fee pool for the shard and the configured
+`fee_claim_public_key`. The node never claims anything itself. You claim from the Ootle wallet that holds the
+matching account:
+
+```sh
+# Show the claimable fees, per shard
+tari_wallet_cli validator get-fees
+# Claim one shard's fees into your account
+tari_wallet_cli validator claim-fees --shard <shard>
+```
+
+By default the claim arrives as a stealth output to the account's own key. `--revealed` deposits it into the
+account's public vault instead. How much there is to claim depends on the network's burn rate; see
+<a href={basePath("/concepts/tokenomics/#fees")}>Tokenomics</a>.
+
+Because only the public key is on the validator, a compromised validator host cannot spend its fees. On a
+replacement host, configure the same `fee_claim_public_key`. The wallet account is recovered through the
+wallet's own backup, not the validator's seed phrase.
+
+## Backups
+
+Back up two different things:
+
+- **Keys and configuration, once.** `validator_node_id.json`, its seed phrase and `config/config.toml`. Without
+  the identity the node is a different validator. See
+  <a href={basePath("/validators/run-a-validator-node/#create-the-identity")}>Create the identity</a>.
+- **State, optionally.** A node can always rebuild its state by syncing from its peers. A snapshot only makes a
+  recovery faster.
+
+To take a state snapshot while the node runs:
+
+```sh
+curl -s -X POST http://127.0.0.1:18200/json_rpc -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"create_backup_snapshot","params":{}}'
+```
+
+It writes `<data_dir>/backups/<UTC timestamp>/`, holding a RocksDB checkpoint (`rocksdb/`) and a copy of
+`global_storage.sqlite`. The snapshot excludes keys and configuration. The checkpoint hard-links the store's files,
+so it is fast, but it holds those files on disk while it exists. Copy it off the host, then delete it. The node
+refuses another snapshot while one is still under `backups/`.
+
+To restore a snapshot:
+
+<Steps>
+
+1. Stop the node.
+2. Replace `<data_dir>/rocksdb/` and `<data_dir>/global_storage.sqlite` with the snapshot's copies. Delete any
+   `global_storage.sqlite-journal` left behind, or SQLite applies it to the restored copy.
+3. **Wait until the network is in a later epoch than the one in which the node stopped.**
+4. Start the node. It syncs the blocks it missed.
+
+</Steps>
+
+Step 3 matters. The snapshot holds the node's record of the heights it has voted and proposed at. Within the
+same epoch, a restored node could vote again at a height it already used, and other validators treat that as
+equivocation. Votes belong to one epoch, so after an epoch change the old record no longer matters.
+
+## Upgrades
+
+Ootle upgrades are coordinated. A release that changes consensus or the engine activates its changes at a
+scheduled epoch, and every validator must run it before then. Follow the release announcements and upgrade
+in good time.
+
+<Steps>
+
+1. Stop the node and wait for it to exit.
+2. Replace the binary or pull the new image tag.
+3. Start the node. Any database migrations run at startup.
+
+</Steps>
+
+A node refuses to start if the new binary schedules an activation at an epoch the node has already passed,
+which happens when a node runs the old release past the activation. Its stored state no longer matches the
+network's. `--allow-past-protocol-activation` overrides the check, but use it only for a node whose state you are
+about to discard and resync.
+
+Keep the previous binary until the new one has run through an epoch change.
+
+## Logs
+
+The node writes logs to `log/validator-node/` under the base path. The files are `ootle`, `consensus`,
+`engine`, `network`, `libp2p` and `other`, each rotated at 100 MB with 5 old files kept. To change a file's
+filter or rotation, edit its `[validator_node.logging.files.<name>]` table.
+
+Standard output carries `warn,tari=info` by default. `RUST_LOG` replaces that filter, and
+`validator_node.logging.console_format = "json"` prints one JSON object per line for a log shipper. `log4rs.yml`
+files from older releases are ignored.
+
+## Health and monitoring
+
+- `GET http://127.0.0.1:18200/health` answers when the node is up. Use it for container or supervisor health checks.
+- `get_identity`, `get_epoch_manager_stats`, `get_mempool_stats` and `get_connections` on the JSON-RPC show what
+  the node is doing.
+- Scrape `GET /_metrics` on the metrics listener with Prometheus. The
+  <a href={basePath("/reference/metrics/")}>Metrics</a> page lists what each metric means.
+
+Watch for a node that is not keeping up. A validator that misses enough proposals is suspended. The
+<a href={basePath("/reference/validator-node-requirements/")}>requirements</a> page explains which resource is
+usually the cause.
+
+## Database maintenance
+
+RocksDB compacts itself in the background. To compact it fully, for example after a large prune, stop the node
+and run:
+
+```sh
+tari_validator_node --network mainnet compact-db
+```
+
+The compiled template cache under `data/validator_node/` is bounded by
+`validator_node.templates.max_disk_cache_size_bytes` (10 GiB by default). It is safe to delete while the node is stopped.
+Templates are recompiled on demand.

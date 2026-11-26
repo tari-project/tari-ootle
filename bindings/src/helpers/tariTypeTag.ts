@@ -9,6 +9,7 @@ export enum TariTypeTag {
   NonFungibleAddress = 130,
   ResourceAddress = 131,
   VaultId = 132,
+  BucketId = 133,
   TransactionReceipt = 134,
   ProofId = 135,
   ClaimedOutputTombstoneAddress = 136,
@@ -17,4 +18,5 @@ export enum TariTypeTag {
   AllocatedComponentAddress = 139,
   AllocatedResourceAddress = 140,
   Utxo = 141,
+  ConfidentialOutput = 142,
 }

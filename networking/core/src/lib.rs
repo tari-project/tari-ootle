@@ -16,6 +16,7 @@ mod worker;
 mod error;
 pub use error::NetworkingError;
 
+mod address_scope;
 mod builder;
 mod config;
 mod connection;

@@ -27,7 +27,6 @@ import Transactions from "@routes/Transactions/Transactions";
 import useAccountStore from "@store/accountStore";
 import AccessTokens from "./Components/AccessTokens";
 import Accounts from "./Components/Accounts";
-import Keys from "./Components/Keys";
 import "./Wallet.css";
 
 function Wallet() {
@@ -49,14 +48,6 @@ function Wallet() {
       <Grid size={12}>
         <StyledPaper>
           <Transactions account={account!} />
-        </StyledPaper>
-      </Grid>
-      <Grid size={12}>
-        <SecondaryHeading>Keys</SecondaryHeading>
-      </Grid>
-      <Grid size={12}>
-        <StyledPaper>
-          <Keys />
         </StyledPaper>
       </Grid>
       <Grid size={12}>

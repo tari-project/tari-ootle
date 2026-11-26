@@ -138,6 +138,10 @@ const VERIFICATION_CHECK_INTERVAL: Duration = Duration::from_secs(5);
 /// versions. A burst's versions are promoted on the next leaf, so this bounds how far promotion trails the stream at
 /// one probe per group a second.
 const BURST_PROBE_MIN_INTERVAL: Duration = Duration::from_secs(1);
+/// `tokio::time::interval` panics on a zero period, which would kill the reporting task, and a
+/// zero work interval also turns error/pause cooldowns into tight loops, so configured intervals
+/// are raised to this floor.
+const MIN_WORK_INTERVAL: Duration = Duration::from_secs(1);
 /// The soonest a shard group syncs a missing checkpoint again once its stream shows the committee has entered the
 /// epoch after it. Committee members commit the checkpoint within moments of each other, and one that has not yet costs
 /// a reopen, so this bounds the reopens to one a period. See [`CheckpointRetryBackoff`] for how it grows.
@@ -216,7 +220,7 @@ impl NetworkWideStateSync {
         epoch_manager: EpochManagerHandle<PeerAddress>,
         networking: NetworkingHandle<TariMessagingSpec>,
         storage: SqliteIndexerStore,
-        config: NetworkWideStateSyncConfig,
+        mut config: NetworkWideStateSyncConfig,
         notify: Notify<IndexerEvent>,
         transaction_event_notify: Notify<TransactionEvent>,
         validator_status: ValidatorStatusMonitor,
@@ -228,6 +232,7 @@ impl NetworkWideStateSync {
         #[cfg(feature = "metrics")] substate_cache_metrics: SubstateCacheMetrics,
         #[cfg(feature = "metrics")] substate_manager: SubstateManager,
     ) -> Self {
+        config.work_interval = config.work_interval.max(MIN_WORK_INTERVAL);
         Self {
             epoch_manager,
             networking,
@@ -974,8 +979,8 @@ impl NetworkWideStateSync {
             Ok(Some(probe)) => {
                 self.consensus_epoch.observe(probe.tip.shard_group, probe.tip.epoch);
                 self.observe_tip(&probe);
-                // Record the quorum-signed state root so the read path can skip re-validating
-                // commit proofs for this tip. A failure here must not abort the state sync.
+                // Record the quorum-signed state root so the read path knows how recent anchors
+                // citing it are. A failure here must not abort the state sync.
                 if let Err(e) = self.persist_verified_tip(probe.tip).await {
                     warn!(target: LOG_TARGET, "⚠️ Failed to record verified state root for shard group {}: {}", shard_group, e);
                 }

@@ -55,10 +55,17 @@ impl WebRtcSubcommand {
                     args.webrtc_permissions_token = Some(serde_json::from_str(token.as_ref())?);
                 }
 
+                let signaling_server_token = args
+                    .signaling_server_token
+                    .ok_or_else(|| anyhow!("Missing signaling server token (pass --url or signaling_server_token)"))?;
+                let permissions = args.webrtc_permissions_token.ok_or_else(|| {
+                    anyhow!("Missing WebRTC permissions token (pass --url or webrtc_permissions_token)")
+                })?;
+
                 let _resp = client
                     .webrtc_start(WebRtcStartRequest {
-                        signaling_server_token: args.signaling_server_token.unwrap(),
-                        permissions: args.webrtc_permissions_token.unwrap(),
+                        signaling_server_token,
+                        permissions,
                     })
                     .await?;
             },

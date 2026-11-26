@@ -23,26 +23,7 @@
 import { DataTableCell } from "@components/StyledComponents";
 import { Chip, Table, TableBody, TableCell, TableContainer, TableHead, TableRow } from "@mui/material";
 import type { LogEntry } from "@tari-project/ootle-ts-bindings";
-
-function getLogLevelColor(
-  level: string,
-): "default" | "primary" | "secondary" | "error" | "info" | "success" | "warning" {
-  switch (level.toLowerCase()) {
-    case "error":
-      return "error";
-    case "warn":
-    case "warning":
-      return "warning";
-    case "info":
-      return "info";
-    case "debug":
-      return "secondary";
-    case "trace":
-      return "default";
-    default:
-      return "primary";
-  }
-}
+import { getLogLevelColor } from "./logsHelpers";
 
 export default function Logs({ data }: { data: Array<LogEntry> }) {
   return (
@@ -55,16 +36,14 @@ export default function Logs({ data }: { data: Array<LogEntry> }) {
           </TableRow>
         </TableHead>
         <TableBody>
-          {data.map(({ level, message }: LogEntry, index: number) => {
-            return (
-              <TableRow key={index}>
-                <DataTableCell>
-                  <Chip label={level} size="small" color={getLogLevelColor(level)} variant="outlined" />
-                </DataTableCell>
-                <DataTableCell>{message}</DataTableCell>
-              </TableRow>
-            );
-          })}
+          {data.map(({ level, message }: LogEntry, index: number) => (
+            <TableRow key={index}>
+              <DataTableCell>
+                <Chip label={level} size="small" color={getLogLevelColor(level)} variant="outlined" />
+              </DataTableCell>
+              <DataTableCell sx={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{message}</DataTableCell>
+            </TableRow>
+          ))}
         </TableBody>
       </Table>
     </TableContainer>

@@ -106,14 +106,14 @@ pub fn write_substate_plan<W: std::io::Write>(
     // deletes every record an Up created and restores every record a Down destroyed, so the version live after it is
     // the lowest one touched: the version that was live at the checkpoint. If an Up created that lowest version, it
     // came after the checkpoint too, every record is deleted, and the substate is removed.
-    use std::collections::HashMap;
+    use std::collections::BTreeMap;
     struct Agg {
         shard: Shard,
         lowest: SubstateVersion,
         lowest_created_after_checkpoint: bool,
         highest: SubstateVersion,
     }
-    let mut by_id: HashMap<&SubstateId, Agg> = HashMap::new();
+    let mut by_id: BTreeMap<&SubstateId, Agg> = BTreeMap::new();
     for row in rows {
         let created = row.transition == RewindTransitionKind::UpReverted;
         let entry = by_id.entry(&row.substate_id).or_insert_with(|| Agg {
@@ -222,16 +222,28 @@ mod tests {
         let mut writer = AuditWriter::new(&mut buf).unwrap();
         write_substate_plan(&mut writer, &mut AuditCounters::default(), rows).unwrap();
         writer.finish().unwrap();
-        let mut out = AuditReader::new(buf.as_slice())
+        AuditReader::new(buf.as_slice())
             .unwrap()
             .records()
             .filter_map(|r| match r.unwrap() {
                 AuditRecord::SubstateSummary(s) => Some(s),
                 _ => None,
             })
-            .collect::<Vec<_>>();
-        out.sort_by(|a, b| a.substate_id.cmp(&b.substate_id));
-        out
+            .collect()
+    }
+
+    #[test]
+    fn summaries_are_emitted_in_deterministic_substate_id_order() {
+        use RewindTransitionKind::*;
+        let rows = [
+            row(9, 10, 0, UpReverted),
+            row(2, 10, 0, UpReverted),
+            row(5, 10, 0, UpReverted),
+        ];
+        let out = summaries(&rows);
+        assert_eq!(out.len(), 3);
+        assert!(out[0].substate_id < out[1].substate_id);
+        assert!(out[1].substate_id < out[2].substate_id);
     }
 
     #[test]

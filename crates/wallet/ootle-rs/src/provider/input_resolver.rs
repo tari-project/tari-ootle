@@ -416,6 +416,7 @@ mod tests {
                 access_rules: ComponentAccessRules::new(),
                 entity_id: EntityId::from_array([0; EntityId::LENGTH]),
                 upgrade_rule: Default::default(),
+                rules_updater: None,
             },
             body: ComponentBody::from_cbor_value(tari_bor::to_value(&vec![vault_id]).unwrap()),
         };

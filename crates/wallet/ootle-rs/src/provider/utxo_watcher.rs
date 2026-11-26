@@ -859,14 +859,30 @@ mod tests {
 
     #[tokio::test]
     async fn decode_utxo_stream_rejects_update_outside_open_shard() {
-        let frames = collect_frames(vec![UtxoUpdatePayload {
+        let before_sos = collect_frames(vec![UtxoUpdatePayload {
             sos: None,
             update: Some(unspent_update(1, 0x22)),
             eos: None,
         }])
         .await;
-        assert_eq!(frames.len(), 1);
-        assert!(matches!(frames[0], Err(UtxoWatcherError::DecodeError(_))));
+        assert_eq!(before_sos.len(), 1);
+        assert!(matches!(before_sos[0], Err(UtxoWatcherError::DecodeError(_))));
+
+        let after_eos = collect_frames(vec![
+            UtxoUpdatePayload {
+                sos: Some(sos_payload(1, 10, 0)),
+                update: None,
+                eos: Some(protobuf::EndOfShard { max_state_version: 10 }),
+            },
+            UtxoUpdatePayload {
+                sos: None,
+                update: Some(unspent_update(1, 0x22)),
+                eos: None,
+            },
+        ])
+        .await;
+        assert_eq!(after_eos.len(), 3);
+        assert!(matches!(after_eos.last(), Some(Err(UtxoWatcherError::DecodeError(_)))));
     }
 
     #[tokio::test]

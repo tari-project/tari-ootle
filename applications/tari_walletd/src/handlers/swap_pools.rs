@@ -29,6 +29,14 @@ use crate::handlers::{
 
 const LOG_TARGET: &str = "tari::ootle::wallet_daemon::handlers::swap_pools";
 
+/// Page size requested from the indexer's `/substates/watched` endpoint when scanning watched liquidity pools.
+const FILTERED_WATCHED_PAGE_SIZE: u64 = 200;
+
+/// Maximum number of watched liquidity pools inspected per filtered `swap_pools.list` call. Bounded below the
+/// indexer's 10,000 offset limit so a single JSON-RPC call cannot make an unbounded number of round trips or fail
+/// past the indexer's offset cap.
+const MAX_FILTERED_WATCHED_POOLS_SCANNED: u64 = 400;
+
 pub async fn handle_get_exchange_rate(
     context: &HandlerContext,
     token: Option<&Bearer>,
@@ -98,9 +106,10 @@ pub async fn handle_list(
     let offset = req.offset.unwrap_or(0);
 
     // When filtering by resource pair, we need to over-fetch because not all pools will match.
-    // Page through watched pools from the beginning, skip `offset` matching pools, and collect up to `limit`.
+    // Page through watched pools from the beginning, skip `offset` matching pools, and collect up to `limit`,
+    // scanning at most `MAX_FILTERED_WATCHED_POOLS_SCANNED` watched pools so a filtered request remains bounded.
     let fetch_limit = if req.resource_pair.is_some() {
-        50u64
+        FILTERED_WATCHED_PAGE_SIZE
     } else {
         limit as u64
     };
@@ -109,11 +118,19 @@ pub async fn handle_list(
     let mut pools = Vec::with_capacity(limit);
 
     loop {
+        if req.resource_pair.is_some() && watched_offset >= MAX_FILTERED_WATCHED_POOLS_SCANNED {
+            break;
+        }
+        let page_limit = if req.resource_pair.is_some() {
+            fetch_limit.min(MAX_FILTERED_WATCHED_POOLS_SCANNED - watched_offset)
+        } else {
+            fetch_limit
+        };
         let watched = sdk
             .get_network_interface()
             .list_watched_substates(
                 Some(LIQUIDITY_POOL_TEMPLATE_ADDRESS),
-                Some(fetch_limit),
+                Some(page_limit),
                 Some(watched_offset),
             )
             .await?;
@@ -157,13 +174,14 @@ pub async fn handle_list(
             }
         }
 
-        if req.resource_pair.is_none() || pools.len() >= limit || (batch_len as u64) < fetch_limit {
+        watched_offset += batch_len as u64;
+        if req.resource_pair.is_none() ||
+            pools.len() >= limit ||
+            (batch_len as u64) < page_limit ||
+            watched_offset >= MAX_FILTERED_WATCHED_POOLS_SCANNED
+        {
             break;
         }
-        watched_offset = match watched_offset.checked_add(batch_len as u64) {
-            Some(next) => next,
-            None => break,
-        };
     }
 
     Ok(SwapPoolsListResponse { pools })
@@ -228,7 +246,7 @@ mod tests {
     use url::Url;
 
     use super::*;
-    use crate::handlers::test_support::{FakeIndexer, TestDaemon};
+    use crate::handlers::test_support::TestDaemon;
 
     #[tokio::test]
     async fn exchange_rate_rejects_zero_desired_output_and_list_short_circuits_zero_limit() {
@@ -277,10 +295,23 @@ mod tests {
             }
         }
 
-        fn add_pool(&mut self, seed: u8, resource_a: ResourceAddress, resource_b: ResourceAddress) -> ComponentAddress {
-            let pool_addr = ComponentAddress::from_array([seed; 32]);
-            let vault_a_id = VaultId::new(ObjectKey::from_array([seed.wrapping_add(100); ObjectKey::LENGTH]));
-            let vault_b_id = VaultId::new(ObjectKey::from_array([seed.wrapping_add(200); ObjectKey::LENGTH]));
+        fn add_pool(
+            &mut self,
+            index: u16,
+            resource_a: ResourceAddress,
+            resource_b: ResourceAddress,
+        ) -> ComponentAddress {
+            let mut key_bytes = [0u8; ObjectKey::LENGTH];
+            key_bytes[..2].copy_from_slice(&index.to_le_bytes());
+            let pool_addr = ComponentAddress::new(ObjectKey::from_array(key_bytes));
+
+            let mut va_bytes = key_bytes;
+            va_bytes[2] = 1;
+            let vault_a_id = VaultId::new(ObjectKey::from_array(va_bytes));
+
+            let mut vb_bytes = key_bytes;
+            vb_bytes[2] = 2;
+            let vault_b_id = VaultId::new(ObjectKey::from_array(vb_bytes));
 
             let state = tari_bor::to_value(&(vault_a_id, vault_b_id)).unwrap();
             let component = Component {
@@ -335,7 +366,7 @@ mod tests {
             Query(req): Query<ListWatchedSubstatesRequest>,
         ) -> Json<ListWatchedSubstatesResponse> {
             let offset = req.offset.unwrap_or(0) as usize;
-            let limit = req.limit.unwrap_or(50) as usize;
+            let limit = req.limit.unwrap_or(50).min(200) as usize;
             let substates = state.watched.iter().skip(offset).take(limit).cloned().collect();
             Json(ListWatchedSubstatesResponse { substates })
         }
@@ -368,26 +399,33 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn handle_list_applies_offset_to_filtered_resource_pair_matches() {
+    async fn handle_list_applies_offset_to_filtered_resource_pair_matches_across_batches() {
         let r1 = ResourceAddress::new(ObjectKey::from_array([1; ObjectKey::LENGTH]));
         let r2 = ResourceAddress::new(ObjectKey::from_array([2; ObjectKey::LENGTH]));
         let r3 = ResourceAddress::new(ObjectKey::from_array([3; ObjectKey::LENGTH]));
 
         let mut mock = MockPoolIndexer::new();
-        // Watched pool 0 does not match (r1, r2); pools 1 and 2 match.
-        let _unmatched = mock.add_pool(10, r1, r3);
-        let match_first = mock.add_pool(11, r1, r2);
-        let match_second = mock.add_pool(12, r2, r1);
+        // Match 1 sits in the first 200-item batch (index 1), match 2 sits in the second batch (index 205), and a
+        // third match sits at index 401 past MAX_FILTERED_WATCHED_POOLS_SCANNED (400) so the bounded scan stops first.
+        let mut match_first = None;
+        let mut match_second = None;
+        for idx in 0..405u16 {
+            match idx {
+                1 => match_first = Some(mock.add_pool(idx, r1, r2)),
+                205 => match_second = Some(mock.add_pool(idx, r2, r1)),
+                401 => {
+                    mock.add_pool(idx, r1, r2);
+                },
+                _ => {
+                    mock.add_pool(idx, r1, r3);
+                },
+            }
+        }
+        let match_first = match_first.unwrap();
+        let match_second = match_second.unwrap();
         let url = mock.spawn().await;
 
-        let fake = FakeIndexer::spawn().await;
-        let daemon = TestDaemon::start_with_indexer(&fake, IndexerTrust::Trust).await;
-        daemon
-            .context
-            .wallet_sdk()
-            .get_network_interface()
-            .set_endpoints(vec![url])
-            .unwrap();
+        let daemon = TestDaemon::start_with_indexer_url(url.as_str(), IndexerTrust::Trust).await;
 
         let page_0 = handle_list(&daemon.context, Some(&daemon.session), SwapPoolsListRequest {
             limit: Some(1),

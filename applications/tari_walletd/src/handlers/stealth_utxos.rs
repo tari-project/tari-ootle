@@ -176,8 +176,8 @@ pub async fn handle_get_value_lookup_info(
 mod tests {
     use ootle_byte_type::ToByteType;
     use tari_crypto::{keys::PublicKey as _, ristretto::RistrettoPublicKey};
-    use tari_ootle_common_types::{Epoch, signature::SignatureOutput};
-    use tari_ootle_transaction::UnsignedTransaction;
+    use tari_ootle_common_types::Epoch;
+    use tari_ootle_transaction::{AuthorizationContext, AuthorizerSet, TransactionSignature, UnsignedTransaction};
     use tari_ootle_wallet_sdk::{
         apis::key_manager::KeyManagerApiError,
         models::{KeyBranch, KeyId, KeyType, StealthUtxoSpendKeyId},
@@ -227,6 +227,8 @@ mod tests {
         let public_nonce = nonce_pk.to_byte_type();
         let (_, seal_pk) = RistrettoPublicKey::random_keypair(&mut rand::rng());
         let seal_public_key = seal_pk.to_byte_type();
+        let authorizers = AuthorizerSet::new();
+        let context = AuthorizationContext::new(&seal_public_key, &authorizers);
         let tx = UnsignedTransaction::new(Network::LocalNet.as_byte(), Epoch(1));
         let valid_view_key = KeyId::derived(KeyBranch::ViewOnlyKey, 0);
         let valid_account_key = KeyId::derived(KeyBranch::Account, 0);
@@ -243,8 +245,8 @@ mod tests {
                 public_nonce,
             };
             let err = km
-                .sign_with_stealth_key::<_, _>(&spend_key, &seal_public_key, &tx)
-                .map(|_: SignatureOutput| ())
+                .sign_with_stealth_key(&spend_key, context, &tx)
+                .map(|_: TransactionSignature| ())
                 .unwrap_err();
             assert!(
                 matches!(err, KeyManagerApiError::NotASigningKey { key_id } if key_id == KeyId::derived(branch, 0)),
@@ -262,8 +264,8 @@ mod tests {
             public_nonce,
         };
         let err = km
-            .sign_with_stealth_key::<_, _>(&spend_with_imported_view, &seal_public_key, &tx)
-            .map(|_: SignatureOutput| ())
+            .sign_with_stealth_key(&spend_with_imported_view, context, &tx)
+            .map(|_: TransactionSignature| ())
             .unwrap_err();
         assert!(
             matches!(err, KeyManagerApiError::NotASigningKey { key_id } if key_id == imported_view),
@@ -276,8 +278,8 @@ mod tests {
             public_nonce,
         };
         let err = km
-            .sign_with_stealth_key::<_, _>(&spend_with_unknown, &seal_public_key, &tx)
-            .map(|_: SignatureOutput| ())
+            .sign_with_stealth_key(&spend_with_unknown, context, &tx)
+            .map(|_: TransactionSignature| ())
             .unwrap_err();
         assert!(
             matches!(err, KeyManagerApiError::KeyNotFound { key_id } if key_id == KeyId::imported(999)),
@@ -291,8 +293,8 @@ mod tests {
                 public_nonce,
             };
             let err = km
-                .sign_with_stealth_key::<_, _>(&spend_key, &seal_public_key, &tx)
-                .map(|_: SignatureOutput| ())
+                .sign_with_stealth_key(&spend_key, context, &tx)
+                .map(|_: TransactionSignature| ())
                 .unwrap_err();
             assert!(
                 matches!(err, KeyManagerApiError::InvalidKeyId { .. }),
@@ -305,9 +307,10 @@ mod tests {
             view_key_id: valid_view_key,
             public_nonce,
         };
-        let sig: SignatureOutput = km
-            .sign_with_stealth_key(&valid_spend_key, &seal_public_key, &tx)
-            .unwrap();
-        assert_ne!(sig.public_key, km.get_public_key(valid_account_key).unwrap().public_key);
+        let sig: TransactionSignature = km.sign_with_stealth_key(&valid_spend_key, context, &tx).unwrap();
+        assert_ne!(
+            *sig.public_key(),
+            km.get_public_key(valid_account_key).unwrap().public_key.to_byte_type()
+        );
     }
 }

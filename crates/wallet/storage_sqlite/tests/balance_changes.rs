@@ -2026,13 +2026,7 @@ fn multi_lock_finalize_merges_vault_backed_stealth_spends() {
 
     let mut diff = SubstateDiff::new();
     diff.down(SubstateId::Utxo(spent.to_utxo_address()), SubstateVersion::ZERO);
-    diff.up(
-        SubstateId::Utxo(change.to_utxo_address()),
-        Substate::new(SubstateVersion::ZERO, Utxo {
-            output: None,
-            is_frozen: false,
-        }),
-    );
+    diff.up(SubstateId::Utxo(change.to_utxo_address()), live_utxo_substate(&change));
     diff.up(
         SubstateId::Vault(stealth_vault),
         Substate::new(
@@ -2139,13 +2133,7 @@ fn multi_lock_finalize_deletes_net_zero_vault_backed_stealth_row() {
 
     let mut diff = SubstateDiff::new();
     diff.down(SubstateId::Utxo(spent.to_utxo_address()), SubstateVersion::ZERO);
-    diff.up(
-        SubstateId::Utxo(change.to_utxo_address()),
-        Substate::new(SubstateVersion::ZERO, Utxo {
-            output: None,
-            is_frozen: false,
-        }),
-    );
+    diff.up(SubstateId::Utxo(change.to_utxo_address()), live_utxo_substate(&change));
     diff.up(
         SubstateId::Vault(stealth_vault),
         Substate::new(

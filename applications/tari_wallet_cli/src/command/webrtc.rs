@@ -74,9 +74,9 @@ fn build_start_request(mut args: StartArgs) -> anyhow::Result<WebRtcStartRequest
     let signaling_server_token = args
         .signaling_server_token
         .ok_or_else(|| anyhow!("Missing signaling server token (pass --url or signaling_server_token)"))?;
-    let permissions = args.webrtc_permissions_token.ok_or_else(|| {
-        anyhow!("Missing WebRTC permissions token (pass --url or webrtc_permissions_token)")
-    })?;
+    let permissions = args
+        .webrtc_permissions_token
+        .ok_or_else(|| anyhow!("Missing WebRTC permissions token (pass --url or webrtc_permissions_token)"))?;
 
     Ok(WebRtcStartRequest {
         signaling_server_token,

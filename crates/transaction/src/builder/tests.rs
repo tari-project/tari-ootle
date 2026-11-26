@@ -389,17 +389,34 @@ fn auto_filled_inputs_and_referenced_substates_include_stealth_script_path_args(
         !res_decl.is_write(),
         "stealth transfer + bucket assert must stay a read"
     );
+    let utxo_id = SubstateId::Utxo(UtxoAddress::new(custom_resource, commitment.into()));
+    let utxo_decl = transaction.inputs().get(&utxo_id).unwrap();
+    assert!(utxo_decl.is_write(), "spent stealth UTXO input must be write-declared");
 
     let referenced = transaction.to_referenced_substates().unwrap();
     let expected = HashSet::from([
         SubstateId::Resource(custom_resource),
-        SubstateId::Utxo(UtxoAddress::new(custom_resource, commitment.into())),
+        utxo_id,
         SubstateId::from(bound_component),
     ]);
     assert_eq!(referenced, expected);
+    let expected_inputs: HashSet<_> = transaction.inputs().iter().map(|i| i.substate_id().clone()).collect();
+    assert_eq!(expected_inputs, expected);
     assert_eq!(
         transaction.referenced_templates_iter().copied().collect::<Vec<_>>(),
         vec![script_template]
+    );
+
+    let tari_tx = Transaction::builder_localnet(Epoch(1))
+        .with_auto_fill_inputs()
+        .stealth_transfer(tari_template_lib_types::constants::TARI_TOKEN, statement.clone())
+        .build_and_seal(&secret);
+    assert!(
+        !tari_tx
+            .to_referenced_substates()
+            .unwrap()
+            .contains(&SubstateId::Resource(tari_template_lib_types::constants::TARI_TOKEN)),
+        "implicit TARI_TOKEN resource must not be emitted by to_referenced_substates"
     );
 
     let workspace_tx = Transaction::builder_localnet(Epoch(1))
@@ -411,6 +428,89 @@ fn auto_filled_inputs_and_referenced_substates_include_stealth_script_path_args(
         workspace_tx.to_referenced_substates().unwrap(),
         HashSet::from([SubstateId::from(bound_component)]),
     );
+}
+
+#[test]
+fn auto_filled_inputs_and_referenced_substates_skip_utxos_created_by_earlier_stealth_transfers() {
+    use std::collections::HashSet;
+
+    use tari_engine_types::substate::SubstateId;
+    use tari_template_lib_types::{
+        Amount,
+        EncryptedData,
+        ObjectKey,
+        ResourceAddress,
+        UtxoAddress,
+        crypto::{PedersenCommitmentBytes, RangeProofBytes, RistrettoPublicKeyBytes, UtxoTag},
+        stealth::{
+            SpendAuthorization,
+            StealthInput,
+            StealthInputsStatement,
+            StealthOutputsStatement,
+            StealthTransferStatement,
+            StealthUnspentOutput,
+            UnspentOutput,
+        },
+    };
+
+    fn transfer(input: PedersenCommitmentBytes, output: PedersenCommitmentBytes) -> StealthTransferStatement {
+        StealthTransferStatement {
+            inputs_statement: StealthInputsStatement::new(vec![StealthInput::new(input)], Amount::ZERO),
+            outputs_statement: StealthOutputsStatement {
+                outputs: vec![StealthUnspentOutput {
+                    output: UnspentOutput {
+                        commitment: output,
+                        sender_public_nonce: RistrettoPublicKeyBytes::zero(),
+                        encrypted_data: EncryptedData::empty(),
+                        minimum_value_promise: 0,
+                        viewable_balance_proof: None,
+                    },
+                    auth: SpendAuthorization::Key(RistrettoPublicKeyBytes::zero()),
+                    tag: UtxoTag::new(0),
+                }],
+                revealed_output: None,
+                agg_range_proof: RangeProofBytes::empty(),
+            },
+            balance_proof: None,
+            covenant_claims: vec![],
+        }
+    }
+
+    let fee_input = PedersenCommitmentBytes::from_array([1; 32]);
+    let fee_output = PedersenCommitmentBytes::from_array([2; 32]);
+    let on_chain = PedersenCommitmentBytes::from_array([3; 32]);
+    let intermediate = PedersenCommitmentBytes::from_array([4; 32]);
+    let final_output = PedersenCommitmentBytes::from_array([5; 32]);
+    let resource = ResourceAddress::new(ObjectKey::from_array([0x77; 32]));
+    let other_resource = ResourceAddress::new(ObjectKey::from_array([0x78; 32]));
+    let secret = RistrettoSecretKey::random(&mut rand::rng());
+
+    let transaction = Transaction::builder_localnet(Epoch(1))
+        .with_auto_fill_inputs()
+        .with_fee_instructions_builder(|builder| builder.stealth_transfer(resource, transfer(fee_input, fee_output)))
+        .stealth_transfer(resource, transfer(on_chain, intermediate))
+        // Spends the output of the previous transfer.
+        .stealth_transfer(resource, transfer(intermediate, final_output))
+        // Fee instructions run first, so this spends the output of the fee transfer.
+        .stealth_transfer(resource, transfer(fee_output, PedersenCommitmentBytes::from_array([6; 32])))
+        // The same commitment under another resource addresses a separate, on-chain UTXO.
+        .stealth_transfer(other_resource, transfer(intermediate, PedersenCommitmentBytes::from_array([7; 32])))
+        .build_and_seal(&secret);
+
+    let expected = HashSet::from([
+        SubstateId::Resource(resource),
+        SubstateId::Resource(other_resource),
+        SubstateId::Utxo(UtxoAddress::new(resource, fee_input.into())),
+        SubstateId::Utxo(UtxoAddress::new(resource, on_chain.into())),
+        SubstateId::Utxo(UtxoAddress::new(other_resource, intermediate.into())),
+    ]);
+    let inputs = transaction
+        .inputs()
+        .iter()
+        .map(|input| input.substate_id().clone())
+        .collect::<HashSet<_>>();
+    assert_eq!(inputs, expected);
+    assert_eq!(transaction.to_referenced_substates().unwrap(), expected);
 }
 
 #[test]

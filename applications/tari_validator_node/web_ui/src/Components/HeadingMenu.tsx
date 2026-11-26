@@ -30,28 +30,28 @@ import ListItemIcon from "@mui/material/ListItemIcon";
 import ListItemText from "@mui/material/ListItemText";
 import Menu from "@mui/material/Menu";
 import MenuItem from "@mui/material/MenuItem";
-import MenuList from "@mui/material/MenuList";
-import { useState } from "react";
+import { type MouseEvent, type ReactNode, useId, useState } from "react";
 
 interface IMenuItem {
   title: string;
   fn: () => void;
-  icon?: any;
+  icon?: ReactNode;
 }
 
 interface Props {
   menuTitle: string;
   menuItems?: IMenuItem[];
   showArrow?: boolean;
-  lastSort?: any;
+  lastSort?: { column: string; order: number };
   columnName?: string;
-  sortFunction?: any;
+  sortFunction?: (column: string, order: number) => void;
 }
 
 function HeadingMenu({ menuTitle, menuItems, showArrow, lastSort, columnName, sortFunction }: Props) {
-  const [anchorEl, setAnchorEl] = useState(null);
+  const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
+  const menuId = useId();
 
-  function handleClick(event: any) {
+  function handleClick(event: MouseEvent<HTMLButtonElement>) {
     if (anchorEl !== event.currentTarget) {
       setAnchorEl(event.currentTarget);
     }
@@ -61,14 +61,22 @@ function HeadingMenu({ menuTitle, menuItems, showArrow, lastSort, columnName, so
     setAnchorEl(null);
   }
 
+  function handleItemClick(fn: () => void) {
+    handleClose();
+    fn();
+  }
+
+  const isSortedColumn = Boolean(lastSort && columnName && lastSort.column === columnName);
+  const nextOrder = lastSort?.order === 1 ? -1 : 1;
+
   return (
     <div className="heading-menu">
       <>
         <Button
-          aria-owns={anchorEl ? "simple-menu" : undefined}
+          aria-controls={anchorEl ? menuId : undefined}
           aria-haspopup="true"
+          aria-expanded={anchorEl ? "true" : undefined}
           onClick={handleClick}
-          // onMouseOver={handleClick}
           startIcon={showArrow && <UnfoldMoreIcon />}
           style={{
             textTransform: "none",
@@ -79,33 +87,26 @@ function HeadingMenu({ menuTitle, menuItems, showArrow, lastSort, columnName, so
           {menuTitle}
         </Button>
         <Menu
-          id="simple-menu"
+          id={menuId}
           anchorEl={anchorEl}
           open={Boolean(anchorEl)}
           onClose={handleClose}
-          MenuListProps={{ onMouseLeave: handleClose }}
+          MenuListProps={{ onMouseLeave: handleClose, style: { outline: "none" }, className: "annoying" }}
         >
-          <MenuList style={{ outline: "none" }} className="annoying">
-            {menuItems?.map((item, index) => (
-              <MenuItem key={index} onClick={item.fn}>
-                <ListItemIcon>{item.icon ? item.icon : <FilterListOutlinedIcon fontSize="small" />}</ListItemIcon>
-                <ListItemText>{item.title}</ListItemText>
-              </MenuItem>
-            ))}
-          </MenuList>
+          {menuItems?.map((item, index) => (
+            <MenuItem key={index} onClick={() => handleItemClick(item.fn)}>
+              <ListItemIcon>{item.icon ? item.icon : <FilterListOutlinedIcon fontSize="small" />}</ListItemIcon>
+              <ListItemText>{item.title}</ListItemText>
+            </MenuItem>
+          ))}
         </Menu>
       </>
-      {lastSort && (
-        <IconButton>
-          {lastSort.column === columnName ? (
-            lastSort.order === 1 ? (
-              <KeyboardArrowUpIcon onClick={() => sortFunction(columnName, -1)} />
-            ) : (
-              <KeyboardArrowDownIcon onClick={() => sortFunction(columnName, 1)} />
-            )
-          ) : (
-            ""
-          )}
+      {isSortedColumn && columnName && sortFunction && (
+        <IconButton
+          aria-label={`Sort ${menuTitle} ${nextOrder === 1 ? "ascending" : "descending"}`}
+          onClick={() => sortFunction(columnName, nextOrder)}
+        >
+          {lastSort?.order === 1 ? <KeyboardArrowUpIcon /> : <KeyboardArrowDownIcon />}
         </IconButton>
       )}
     </div>

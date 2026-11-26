@@ -22,10 +22,10 @@
 
 import useAuthStore from "@store/authStore";
 import { DefaultError, MutationCache, QueryCache, QueryClient } from "@tanstack/react-query";
-import { isAuthError } from "@tari-project/wallet_jrpc_client";
+import { shouldRetryQuery, shouldTriggerReauth } from "./queryClientHelpers";
 
 const handleError = (error: DefaultError) => {
-  if (isAuthError(error) && !(error.cause as any)?.method.startsWith("auth")) {
+  if (shouldTriggerReauth(error)) {
     console.log("APP: Authentication error detected. Reauth flow.", error);
     useAuthStore.getState().setNeedsReauth(true);
   }
@@ -34,7 +34,7 @@ const handleError = (error: DefaultError) => {
 const queryClient = new QueryClient({
   queryCache: new QueryCache({ onError: handleError }),
   mutationCache: new MutationCache({ onError: handleError }),
-  defaultOptions: { queries: { retry: 3, structuralSharing: true } },
+  defaultOptions: { queries: { retry: shouldRetryQuery, structuralSharing: true } },
 });
 
 export default queryClient;

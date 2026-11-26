@@ -40,7 +40,7 @@ import {
   UtxoAddress,
   UtxoInputSelection,
 } from "@tari-project/ootle-ts-bindings";
-import { parseAmountToBaseUnits } from "@utils/helpers";
+import { divisibilityOrDefault, parseAmountToBaseUnits } from "@utils/helpers";
 import { swapPoolGetExchangeRate, swapPoolsList, transactionsWaitResult } from "@utils/json_rpc";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import ConfirmationStep from "../steps/ConfirmationStep";
@@ -582,7 +582,7 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
             onBack={handleBack}
             onConfirm={handleConfirm}
             token_symbol={props.token_symbol}
-            divisibility={balanceEntry?.divisibility || 6}
+            divisibility={divisibilityOrDefault(balanceEntry?.divisibility, 6)}
             poolRate={poolRate}
           />
         );

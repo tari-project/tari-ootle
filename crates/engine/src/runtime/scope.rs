@@ -7,7 +7,7 @@ use indexmap::IndexSet;
 use tari_engine_types::{indexed_value::IndexedWellKnownTypes, lock::LockId, substate::SubstateId};
 use tari_template_lib::{
     models::{AddressAllocationId, BucketId, ProofId},
-    types::{EntityId, TemplateAddress, VaultId, constants::TARI_TOKEN},
+    types::{ComponentAddress, EntityId, TemplateAddress, constants::TARI_TOKEN},
 };
 
 use crate::runtime::{AuthorizationScope, RuntimeError, locking::LockedSubstate};
@@ -34,12 +34,10 @@ pub struct CallScope {
     /// store or drop it.
     shown_proofs: IndexSet<ProofId>,
     component_lock: Option<LockedSubstate>,
-    /// For a resource auth hook frame, the vaults of the component whose action triggered the hook, indexed from that
-    /// component's state when the frame is pushed. The hook may read these vaults, so that it can judge the action
-    /// against the acting component's holdings, but nothing that component owns enters this frame's scope. The
-    /// acting component's frame is suspended for the hook call and the hook frame cannot write it, so the index
-    /// holds for the life of the frame.
-    acting_component_vaults: IndexSet<VaultId>,
+    /// For a resource auth hook frame, the component whose action triggered the hook. The hook may read that
+    /// component's vaults, so that it can judge the action against the acting component's holdings, but nothing
+    /// that component owns enters this frame's scope.
+    acting_component: Option<ComponentAddress>,
     lock_scope: IndexSet<LockId>,
     bucket_scope: IndexSet<BucketId>,
     address_allocation_scope: IndexSet<AddressAllocationId>,
@@ -58,7 +56,7 @@ impl CallScope {
             inherited_buckets: IndexSet::new(),
             shown_proofs: IndexSet::new(),
             component_lock: None,
-            acting_component_vaults: IndexSet::new(),
+            acting_component: None,
             lock_scope: IndexSet::new(),
             bucket_scope: IndexSet::new(),
             address_allocation_scope: IndexSet::new(),
@@ -182,15 +180,20 @@ impl CallScope {
         self.component_lock.take()
     }
 
-    /// Whether `address` is one of the acting component's vaults this resource auth hook frame may read.
-    pub fn is_acting_component_vault(&self, address: &SubstateId) -> bool {
-        address
-            .as_vault_id()
-            .is_some_and(|vault_id| self.acting_component_vaults.contains(&vault_id))
+    pub fn acting_component(&self) -> Option<&ComponentAddress> {
+        self.acting_component.as_ref()
     }
 
-    fn set_acting_component_vaults(&mut self, acting_component_vaults: IndexSet<VaultId>) {
-        self.acting_component_vaults = acting_component_vaults;
+    fn set_acting_component(&mut self, acting_component: Option<ComponentAddress>) {
+        self.acting_component = acting_component;
+    }
+
+    /// Whether `address` is reachable from the state of the component this frame executes on. For a vault this is
+    /// exact for the life of the frame: the frame holds the component's lock, every vault a state update adds is
+    /// attached here, and a vault never leaves a component's state. A vault the frame created stays in `orphans`
+    /// until it is attached.
+    pub fn is_component_owned(&self, address: &SubstateId) -> bool {
+        self.component_owned.contains(address)
     }
 
     pub fn owned_nodes(&self) -> &IndexSet<SubstateId> {
@@ -606,8 +609,8 @@ impl CallFrame {
 pub struct HookFrame {
     /// The hook frame's argument scope, in place of the one derived from the call's arguments.
     pub arg_scope: IndexedWellKnownTypes,
-    /// The vaults of the component whose action triggered the hook, empty if no component triggered it.
-    pub acting_component_vaults: IndexSet<VaultId>,
+    /// The component whose action triggered the hook, if a component triggered it.
+    pub acting_component: Option<ComponentAddress>,
 }
 
 #[derive(Debug)]
@@ -619,8 +622,8 @@ pub enum PushCallFrame {
         component_lock: LockedSubstate,
         arg_scope: Box<IndexedWellKnownTypes>,
         entity_id: EntityId,
-        /// See [`CallScope::is_acting_component_vault`]. Non-empty for resource auth hook frames only.
-        acting_component_vaults: IndexSet<VaultId>,
+        /// See [`CallScope::acting_component`]. Set for resource auth hook frames only.
+        acting_component: Option<ComponentAddress>,
     },
     MigrationContext {
         template_address: TemplateAddress,
@@ -664,12 +667,12 @@ impl PushCallFrame {
                 component_lock,
                 arg_scope,
                 entity_id,
-                acting_component_vaults,
+                acting_component,
             } => {
                 let mut frame = CallFrame::for_component(template_address, module_name, component_lock, entity_id);
                 frame.scope_mut().include_owned_in_scope(&component_scope);
                 frame.scope_mut().include_refs_in_scope(&arg_scope);
-                frame.scope_mut().set_acting_component_vaults(acting_component_vaults);
+                frame.scope_mut().set_acting_component(acting_component);
                 frame
             },
             Self::MigrationContext {

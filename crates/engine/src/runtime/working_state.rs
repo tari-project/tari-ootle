@@ -2390,7 +2390,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
             &action,
             ActionIdent::Native(NativeAction::Vault(vault_action)) if !vault_action.requires_write_access()
         );
-        if is_vault_read && scope.is_acting_component_vault(address) {
+        if is_vault_read && self.is_acting_component_vault(address) {
             return Ok(());
         }
 
@@ -2413,6 +2413,32 @@ impl<TStore: StateReader> WorkingState<TStore> {
             id: address.clone(),
             requested_owner: Box::new(component_lock.substate_id().clone()),
         })
+    }
+
+    /// Whether the current frame is a resource auth hook frame and `address` is a vault of the component whose
+    /// action triggered the hook. The hook frame is pushed directly on the acting component's frame, which holds
+    /// that component's lock, so the frame below is the acting frame exactly when its lock is on the acting
+    /// component. That frame's component-owned scope holds the vaults of the component's state and was paid for when
+    /// the frame was pushed, so the check is a lookup.
+    fn is_acting_component_vault(&self, address: &SubstateId) -> bool {
+        if !address.is_vault() {
+            return false;
+        }
+        let Some((hook_frame, frames_below)) = self.call_frames.split_last() else {
+            return false;
+        };
+        let Some(acting_component) = hook_frame.scope().acting_component() else {
+            return false;
+        };
+        let Some(acting_frame) = frames_below.last() else {
+            return false;
+        };
+        let holds_acting_lock = acting_frame
+            .scope()
+            .get_current_component_lock()
+            .and_then(|lock| lock.substate_id().as_component_address())
+            .is_some_and(|locked| locked == *acting_component);
+        holds_acting_lock && acting_frame.scope().is_component_owned(address)
     }
 
     /// Enforces the stealth-transfer limits, runs the structural checks of [`CheckedStealthTransfer`] (commitment

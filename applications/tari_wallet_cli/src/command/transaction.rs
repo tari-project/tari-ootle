@@ -330,11 +330,10 @@ fn build_submit_transaction(ctx: &TxBuildContext<'_>, instruction: Instruction) 
         .with_min_epoch(ctx.common.min_epoch.map(Epoch));
 
     if let Some(dump_account) = ctx.dump_account_address {
-        builder = builder.put_last_instruction_output_on_workspace("bucket").call_method(
-            dump_account,
-            "deposit",
-            args![Workspace("bucket")],
-        );
+        builder =
+            builder
+                .put_last_instruction_output_on_workspace("bucket")
+                .call_method(dump_account, "deposit", args![Workspace("bucket")]);
     }
 
     builder.build_unsigned()
@@ -362,11 +361,10 @@ fn build_manifest_transaction(
         .with_min_epoch(ctx.common.min_epoch.map(Epoch));
 
     if let Some(dump_account) = ctx.dump_account_address {
-        builder = builder.put_last_instruction_output_on_workspace("bucket").call_method(
-            dump_account,
-            "deposit",
-            args![Workspace("bucket")],
-        );
+        builder =
+            builder
+                .put_last_instruction_output_on_workspace("bucket")
+                .call_method(dump_account, "deposit", args![Workspace("bucket")]);
     }
 
     let mut transaction = builder.build_unsigned();

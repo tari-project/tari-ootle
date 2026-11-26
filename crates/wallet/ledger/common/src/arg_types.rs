@@ -275,8 +275,13 @@ pub struct SignStreamState {
     display: TxDisplay,
 }
 
+/// The only transaction schema the device signs. Mirrors
+/// `tari_ootle_transaction::SchemaVersion::CURRENT`, which a test in the ledger client crate
+/// asserts.
 pub const EXPECTED_SCHEMA_VERSION: u16 = 2;
-const PUBLIC_KEY_BYTES_LEN: usize = 32;
+/// Borsh encoding of `RistrettoPublicKeyBytes`: a `u32` length prefix followed by the 32-byte
+/// compressed key.
+const SEAL_SIGNER_SEGMENT_LEN: usize = 4 + 32;
 
 impl SignStreamState {
     pub const fn new(mode: SignMode) -> Self {
@@ -358,7 +363,7 @@ fn begin_segment(display: &mut TxDisplay, field: SigningField, data: &[u8]) -> R
             }
             Ok(Some(2))
         },
-        SigningField::SealSigner => Ok(Some(PUBLIC_KEY_BYTES_LEN)),
+        SigningField::SealSigner => Ok(Some(SEAL_SIGNER_SEGMENT_LEN)),
         SigningField::Network => {
             display.network = *data.first().ok_or(OotleStatusWord::BadRequest)?;
             Ok(Some(1))

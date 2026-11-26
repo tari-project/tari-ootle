@@ -16,19 +16,23 @@
 use blake2::{Blake2b512, Digest};
 use curve25519_dalek::{Scalar, constants::RISTRETTO_BASEPOINT_TABLE, ristretto::CompressedRistretto};
 use indexmap::IndexSet;
-use ootle_ledger_common::signing::{
-    NONCE_DOMAIN,
-    SIGNING_CONTEXT,
-    STEALTH_OWNER_LABEL,
-    TX_DOMAIN,
-    TX_DOMAIN_VERSION,
-    TX_LABEL_SEAL,
-    TX_LABEL_SIGNATURE,
-    WALLET_DOMAIN,
-    WALLET_DOMAIN_VERSION,
+use ootle_ledger_common::{
+    OotleStatusWord,
+    arg_types::{SEGMENT_LAST_CHUNK, SignMode, SignStreamState, SigningField, TxDisplay},
+    signing::{
+        NONCE_DOMAIN,
+        SIGNING_CONTEXT,
+        STEALTH_OWNER_LABEL,
+        TX_DOMAIN,
+        TX_DOMAIN_VERSION,
+        TX_LABEL_SEAL,
+        TX_LABEL_SIGNATURE,
+        WALLET_DOMAIN,
+        WALLET_DOMAIN_VERSION,
+    },
 };
 use rand::Rng;
-use tari_ootle_common_types::signature::Sr25519SignatureBytes;
+use tari_ootle_common_types::{InputDeclaration, signature::Sr25519SignatureBytes};
 use tari_ootle_transaction::{
     AuthorizationContext,
     AuthorizerSet,
@@ -38,12 +42,13 @@ use tari_ootle_transaction::{
     Instruction,
     MainSigner,
     PreimageSegment,
+    SchemaVersion,
     TransactionSealSignature,
     TransactionSignature,
     UnsealedTransactionV1,
     UnsignedTransactionV1,
 };
-use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
+use tari_template_lib_types::{ComponentAddress, crypto::RistrettoPublicKeyBytes};
 
 // ---- reference reimplementation of the device recipe (mirrors src/hashing.rs) -------------------
 
@@ -467,40 +472,61 @@ fn nonce_differs_from_the_tari_schnorr_app() {
     assert_ne!(deterministic_nonce(&secret, &pk, &m), tari_schnorr_nonce);
 }
 
-#[test]
-fn sign_stream_state_accepts_canonical_preimages_and_rejects_boundary_spoofing() {
-    use ootle_ledger_common::{
-        OotleStatusWord,
-        arg_types::{SEGMENT_LAST_CHUNK, SignMode, SignStreamState, SigningField, TxDisplay},
-    };
-    use tari_ootle_common_types::InputDeclaration;
-    use tari_template_lib_types::ComponentAddress;
+// ---- device stream validation (`SignStreamState`) ----------------------------------------------
 
-    fn run_stream(
-        mode: SignMode,
-        segments: &[(SigningField, Vec<u8>)],
-        max_chunk: usize,
-    ) -> Result<TxDisplay, OotleStatusWord> {
-        let mut stream = SignStreamState::new(mode);
-        for (field, bytes) in segments {
-            let tag = *field as u8;
-            if bytes.is_empty() {
-                stream.accept_segment(tag | SEGMENT_LAST_CHUNK, &[])?;
-                continue;
-            }
-            let mut chunks = bytes.chunks(max_chunk).peekable();
-            while let Some(chunk) = chunks.next() {
-                let p1 = if chunks.peek().is_none() {
-                    tag | SEGMENT_LAST_CHUNK
-                } else {
-                    tag
-                };
-                stream.accept_segment(p1, chunk)?;
-            }
+type StreamSegments = Vec<(SigningField, Vec<u8>)>;
+
+/// Feeds `segments` through a fresh [`SignStreamState`] as the host transport does: each field
+/// split into APDU chunks of at most `max_chunk` bytes, with [`SEGMENT_LAST_CHUNK`] on the last.
+fn run_stream(
+    mode: SignMode,
+    segments: &[(SigningField, Vec<u8>)],
+    max_chunk: usize,
+) -> Result<TxDisplay, OotleStatusWord> {
+    let mut stream = SignStreamState::new(mode);
+    for (field, bytes) in segments {
+        let tag = field.as_tag();
+        if bytes.is_empty() {
+            stream.accept_segment(tag | SEGMENT_LAST_CHUNK, &[])?;
+            continue;
         }
-        stream.finish()
+        let mut chunks = bytes.chunks(max_chunk).peekable();
+        while let Some(chunk) = chunks.next() {
+            let p1 = if chunks.peek().is_none() {
+                tag | SEGMENT_LAST_CHUNK
+            } else {
+                tag
+            };
+            stream.accept_segment(p1, chunk)?;
+        }
     }
+    stream.finish()
+}
 
+fn to_stream_segments(segments: Vec<PreimageSegment>) -> StreamSegments {
+    segments
+        .into_iter()
+        .map(|segment| (SigningField::try_from(segment.field as u8).unwrap(), segment.bytes))
+        .collect()
+}
+
+fn segment_bytes_mut(segments: &mut StreamSegments, field: SigningField) -> &mut Vec<u8> {
+    let (_, bytes) = segments
+        .iter_mut()
+        .find(|(segment_field, _)| *segment_field == field)
+        .unwrap();
+    bytes
+}
+
+/// What the host recipe streams for one transaction: the authorization preimage, the seal
+/// preimage over three prior signatures, and the summary the device must extract from either.
+struct StreamFixture {
+    add_signer: StreamSegments,
+    seal: StreamSegments,
+    display: TxDisplay,
+}
+
+fn stream_fixture() -> StreamFixture {
     let seal_signer = pk_bytes(&random_scalar());
     let authorizer = pk_bytes(&random_scalar());
     let mut tx = sample_unsigned();
@@ -513,77 +539,80 @@ fn sign_stream_state_accepts_canonical_preimages_and_rejects_boundary_spoofing()
         tx.blobs.push(Blob::from(vec![i; 16])).unwrap();
     }
 
-    let to_pairs = |segments: Vec<PreimageSegment>| -> Vec<(SigningField, Vec<u8>)> {
-        segments
-            .into_iter()
-            .map(|s| (SigningField::try_from(s.field as u8).unwrap(), s.bytes))
-            .collect()
-    };
-
     let authorizers: AuthorizerSet = [authorizer].into_iter().collect();
     let context = AuthorizationContext::new(&seal_signer, &authorizers);
-    let add_signer_segments = to_pairs(TransactionSignature::signing_preimage(context, &tx));
-    let expected_display = TxDisplay {
-        network: tx.network,
-        fee_instruction_count: tx.fee_instructions.len() as u32,
-    };
-    assert_eq!(
-        run_stream(SignMode::AddSigner, &add_signer_segments, 250),
-        Ok(expected_display)
-    );
-    assert_eq!(
-        run_stream(SignMode::AddSigner, &add_signer_segments, 64),
-        Ok(expected_display)
-    );
-
-    let signer = random_scalar();
-    let auth_msg = message(
-        TX_LABEL_SIGNATURE,
-        &TransactionSignature::signing_preimage(context, &tx),
-    );
-    let (auth_pk, auth_sig) = sign(&signer, &auth_msg);
+    let add_signer_preimage = TransactionSignature::signing_preimage(context, &tx);
+    let (auth_pk, auth_sig) = sign(&random_scalar(), &message(TX_LABEL_SIGNATURE, &add_signer_preimage));
     let prior = TransactionSignature::new(
         RistrettoPublicKeyBytes::from_bytes(&auth_pk).unwrap(),
         sig_bytes(&auth_sig),
     );
-    let unsealed = UnsealedTransactionV1::new(tx.clone(), vec![prior.clone(), prior.clone(), prior]);
-    let seal_segments = to_pairs(TransactionSealSignature::signing_preimage(&unsealed));
-    assert_eq!(run_stream(SignMode::Seal, &seal_segments, 250), Ok(expected_display));
-    assert_eq!(run_stream(SignMode::Seal, &seal_segments, 64), Ok(expected_display));
+    let display = TxDisplay {
+        network: tx.network,
+        fee_instruction_count: u32::try_from(tx.fee_instructions.len()).unwrap(),
+    };
+    let unsealed = UnsealedTransactionV1::new(tx, vec![prior.clone(), prior.clone(), prior]);
 
-    // Shifting the network byte into SchemaVersion or appending bytes to SealSigner is rejected.
-    let mut shifted_network = seal_segments.clone();
-    shifted_network
-        .iter_mut()
-        .find(|(field, _)| *field == SigningField::SchemaVersion)
-        .unwrap()
-        .1
-        .push(0x00);
+    StreamFixture {
+        add_signer: to_stream_segments(add_signer_preimage),
+        seal: to_stream_segments(TransactionSealSignature::signing_preimage(&unsealed)),
+        display,
+    }
+}
+
+#[test]
+fn sign_stream_state_accepts_current_schema_preimages() {
+    let fixture = stream_fixture();
+    // The device reads the leading `u32` count of FeeInstructions from that field's first chunk, so
+    // 4 bytes is the smallest chunk size it accepts.
+    for max_chunk in [250, 64, 4] {
+        assert_eq!(
+            run_stream(SignMode::AddSigner, &fixture.add_signer, max_chunk),
+            Ok(fixture.display)
+        );
+        assert_eq!(
+            run_stream(SignMode::Seal, &fixture.seal, max_chunk),
+            Ok(fixture.display)
+        );
+    }
+}
+
+#[test]
+fn sign_stream_state_rejects_v1_schema() {
+    let fixture = stream_fixture();
+    let v1 = SchemaVersion::V1.as_u16().to_le_bytes().to_vec();
+    for (mode, mut segments) in [
+        (SignMode::AddSigner, fixture.add_signer),
+        (SignMode::Seal, fixture.seal),
+    ] {
+        *segment_bytes_mut(&mut segments, SigningField::SchemaVersion) = v1.clone();
+        assert_eq!(run_stream(mode, &segments, 250), Err(OotleStatusWord::BadRequest));
+    }
+}
+
+#[test]
+fn sign_stream_state_rejects_boundary_spoofing() {
+    let fixture = stream_fixture();
+
+    // A trailing byte on SchemaVersion shifts the network byte the device displays and derives
+    // stealth keys under.
+    let mut shifted_network = fixture.seal.clone();
+    segment_bytes_mut(&mut shifted_network, SigningField::SchemaVersion).push(0x00);
     assert_eq!(
         run_stream(SignMode::Seal, &shifted_network, 250),
         Err(OotleStatusWord::BadRequest)
     );
 
-    let mut shifted_seal_signer = add_signer_segments.clone();
-    shifted_seal_signer
-        .iter_mut()
-        .find(|(field, _)| *field == SigningField::SealSigner)
-        .unwrap()
-        .1
-        .push(0x00);
+    let mut extended_seal_signer = fixture.add_signer;
+    segment_bytes_mut(&mut extended_seal_signer, SigningField::SealSigner).push(0x00);
     assert_eq!(
-        run_stream(SignMode::AddSigner, &shifted_seal_signer, 250),
+        run_stream(SignMode::AddSigner, &extended_seal_signer, 250),
         Err(OotleStatusWord::BadRequest)
     );
 
-    // Shifting bytes into Network to spoof display.fee_instruction_count is rejected.
-    let mut shifted_fee_count = seal_segments;
-    shifted_fee_count
-        .iter_mut()
-        .find(|(field, _)| *field == SigningField::Network)
-        .unwrap()
-        .1
-        .extend_from_slice(&[0u8, 0, 0, 0]);
+    // Trailing bytes on Network shift the displayed fee instruction count.
+    let mut shifted_fee_count = fixture.seal;
+    segment_bytes_mut(&mut shifted_fee_count, SigningField::Network).extend_from_slice(&[0u8, 0, 0, 0]);
     assert_eq!(
         run_stream(SignMode::Seal, &shifted_fee_count, 250),
         Err(OotleStatusWord::BadRequest)

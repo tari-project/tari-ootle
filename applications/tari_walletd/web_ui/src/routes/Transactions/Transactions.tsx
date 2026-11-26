@@ -40,7 +40,7 @@ import useMediaQuery from "@mui/material/useMediaQuery";
 import { Account, WalletTransaction } from "@tari-project/ootle-ts-bindings";
 import { XTR_CURRENCY } from "@utils/currency";
 import { emptyRows, formatCurrency, handleChangePage, handleChangeRowsPerPage, shortenString } from "@utils/helpers";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import TimeChip from "./TimeChip";
 
@@ -50,12 +50,29 @@ interface TransactionsProps {
 export default function Transactions({ account }: TransactionsProps) {
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
+  const accountAddress = account?.component_address ?? null;
   const { data, isLoading, error, isError, isRefetching } = useGetAllTransactions({
     status: null,
     // Transactions are linked to the account(s) they involve at submission time, so filtering by account
     // works even for stealth transactions. When no account is given, all transactions are shown.
-    account: account?.component_address ?? null,
+    account: accountAddress,
   });
+
+  const transactions = data?.transactions;
+  const totalTransactions = transactions?.length ?? 0;
+  const maxPage = totalTransactions > 0 ? Math.ceil(totalTransactions / rowsPerPage) - 1 : 0;
+  const clampedPage = Math.min(page, maxPage);
+  const emptyRowCount = emptyRows(clampedPage, rowsPerPage, transactions);
+
+  useEffect(() => {
+    setPage(0);
+  }, [accountAddress]);
+
+  useEffect(() => {
+    if (transactions !== undefined && page > maxPage) {
+      setPage(maxPage);
+    }
+  }, [transactions, page, maxPage]);
 
   const theme = useTheme();
   const isSm = useMediaQuery(theme.breakpoints.down("sm"));
@@ -79,8 +96,8 @@ export default function Transactions({ account }: TransactionsProps) {
               </TableRow>
             </TableHead>
             <TableBody>
-              {data?.transactions
-                ?.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage)
+              {transactions
+                ?.slice(clampedPage * rowsPerPage, clampedPage * rowsPerPage + rowsPerPage)
                 .map((transaction: WalletTransaction) => {
                   const { finalize: result, status, id: hash } = transaction;
                   const { fee_receipt } = result || {};
@@ -110,7 +127,7 @@ export default function Transactions({ account }: TransactionsProps) {
                         <TransactionsStatusChip status={status} />
                       </DataTableCell>
                       <DataTableCell>
-                        {fee_receipt?.total_fees_paid
+                        {fee_receipt?.total_fees_paid != null
                           ? formatCurrency(fee_receipt.total_fees_paid, XTR_CURRENCY)
                           : "--"}
                       </DataTableCell>
@@ -128,24 +145,24 @@ export default function Transactions({ account }: TransactionsProps) {
                     </TableRow>
                   );
                 })}
-              {emptyRows(page, rowsPerPage, data?.transactions) > 0 && (
+              {emptyRowCount > 0 && (
                 <TableRow
                   style={{
-                    height: 57 * emptyRows(page, rowsPerPage, data?.transactions),
+                    height: 57 * emptyRowCount,
                   }}
                 >
-                  <TableCell colSpan={3} />
+                  <TableCell colSpan={4} />
                 </TableRow>
               )}
             </TableBody>
           </Table>
-          {data?.transactions && (
+          {transactions && (
             <TablePagination
               rowsPerPageOptions={[10, 25, 50]}
               component="div"
-              count={data.transactions.length}
+              count={totalTransactions}
               rowsPerPage={rowsPerPage}
-              page={page}
+              page={clampedPage}
               onPageChange={(event, newPage) => handleChangePage(event, newPage, setPage)}
               onRowsPerPageChange={(event) => handleChangeRowsPerPage(event, setRowsPerPage, setPage)}
             />

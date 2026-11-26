@@ -39,6 +39,7 @@ import {
   TableBody,
   TableCell,
   TableContainer,
+  TableHead,
   TableRow,
   Tooltip,
 } from "@mui/material";
@@ -63,10 +64,29 @@ import Logs from "./Logs";
 import Signers from "./Signers";
 import Substates from "./Substates";
 
+export function serializeTransactionJson(data: unknown): string {
+  return JSON.stringify(data, (_key, value) => (typeof value === "bigint" ? value.toString() : value), 2);
+}
+
+export function getTransactionFilename(transactionId: string | undefined): string {
+  const trimmed = transactionId?.trim();
+  return trimmed ? `tx-${trimmed}.json` : "tx-unknown_id.json";
+}
+
+function Empty({ message }: { message: string }) {
+  return (
+    <Stack alignItems="center" sx={{ p: 3 }}>
+      <Typography variant="body2" color="text.secondary">
+        {message}
+      </Typography>
+    </Stack>
+  );
+}
+
 export default function TransactionDetails() {
   const [expandedPanels, setExpandedPanels] = useState<string[]>([]);
   const params = useParams();
-  const transactionId = params.id!;
+  const transactionId = params.id ?? "";
   const { data, isLoading, isError, error } = useTransactionDetails(transactionId);
 
   const handleChange = (panel: string) => (_event: React.SyntheticEvent, isExpanded: boolean) => {
@@ -98,14 +118,6 @@ export default function TransactionDetails() {
     }
   };
 
-  const Empty = ({ message }: { message: string }) => (
-    <Stack alignItems="center" sx={{ p: 3 }}>
-      <Typography variant="body2" color="text.secondary">
-        {message}
-      </Typography>
-    </Stack>
-  );
-
   const renderContent = () => {
     if (isLoading) {
       return <Loading />;
@@ -121,9 +133,9 @@ export default function TransactionDetails() {
 
     const last_update_time = new Date(data.last_update_time);
     const handleDownload = () => {
-      const json = JSON.stringify(data, null, 2);
+      const json = serializeTransactionJson(data);
       const blob = new Blob([json], { type: "application/json" });
-      const filename = `tx-${transactionId}.json` || "tx-unknown_id.json";
+      const filename = getTransactionFilename(transactionId);
       saveAs(blob, filename);
     };
 
@@ -221,7 +233,7 @@ export default function TransactionDetails() {
                         <DataTableCell>{getTransactionFailure(data?.result?.result)}</DataTableCell>
                       </>
                     ) : (
-                      <TableCell>No result yet...</TableCell>
+                      <TableCell colSpan={2}>No result yet...</TableCell>
                     )}
                   </TableRow>
                 </TableBody>
@@ -278,7 +290,7 @@ export default function TransactionDetails() {
             </AccordionDetails>
           </Accordion>
           <Accordion expanded={expandedPanels.includes("panel2")} onChange={handleChange("panel2")}>
-            <AccordionSummary aria-controls="panel2bh-content" id="panel1bh-header">
+            <AccordionSummary aria-controls="panel2bh-content" id="panel2bh-header">
               <Typography variant="h5">Instructions</Typography>
             </AccordionSummary>
             <AccordionDetails>
@@ -291,7 +303,7 @@ export default function TransactionDetails() {
           </Accordion>
           {data.result && (
             <Accordion expanded={expandedPanels.includes("panel3")} onChange={handleChange("panel3")}>
-              <AccordionSummary aria-controls="panel3bh-content" id="panel1bh-header">
+              <AccordionSummary aria-controls="panel3bh-content" id="panel3bh-header">
                 <Typography variant="h5">Events</Typography>
               </AccordionSummary>
               <AccordionDetails>
@@ -301,7 +313,7 @@ export default function TransactionDetails() {
           )}
           {data.result && (
             <Accordion expanded={expandedPanels.includes("panel4")} onChange={handleChange("panel4")}>
-              <AccordionSummary aria-controls="panel4bh-content" id="panel1bh-header">
+              <AccordionSummary aria-controls="panel4bh-content" id="panel4bh-header">
                 <Typography variant="h5">Logs</Typography>
               </AccordionSummary>
               <AccordionDetails>
@@ -311,7 +323,7 @@ export default function TransactionDetails() {
           )}
           {data.result && (
             <Accordion expanded={expandedPanels.includes("panel5")} onChange={handleChange("panel5")}>
-              <AccordionSummary aria-controls="panel5bh-content" id="panel1bh-header">
+              <AccordionSummary aria-controls="panel5bh-content" id="panel5bh-header">
                 <Typography variant="h5">Substates</Typography>
               </AccordionSummary>
               <AccordionDetails>
@@ -386,12 +398,14 @@ function Blobs({ hashes, sizes }: { hashes: string[]; sizes: number[] }) {
   }
   return (
     <Table size="small">
-      <TableBody>
+      <TableHead>
         <TableRow>
           <TableCell sx={{ fontWeight: 600 }}>Index</TableCell>
           <TableCell sx={{ fontWeight: 600 }}>Hash</TableCell>
           <TableCell sx={{ fontWeight: 600 }}>Size</TableCell>
         </TableRow>
+      </TableHead>
+      <TableBody>
         {hashes.map((hash, i) => {
           const size = sizes[i];
           return (

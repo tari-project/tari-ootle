@@ -20,7 +20,14 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import type { Amount, Blobs, NonFungibleId, SubstateId } from "@tari-project/ootle-ts-bindings";
+import {
+  shortenString as bindingsShortenString,
+  shortenSubstateId as bindingsShortenSubstateId,
+  type Amount,
+  type Blobs,
+  type NonFungibleId,
+  type SubstateId,
+} from "@tari-project/ootle-ts-bindings";
 import { Currency } from "@utils/currency";
 import { ChangeEvent } from "react";
 
@@ -129,9 +136,7 @@ export function shortenSubstateId(
   if (substateId === null || substateId === undefined) {
     return "";
   }
-  const string = substateIdToString(substateId);
-  const parts = string.split("_", 2);
-  return parts[0] + "_" + shortenString(parts[1], start, end);
+  return bindingsShortenSubstateId(substateIdToString(substateId), start, end);
 }
 
 export function isSubstateIdString(substateId: SubstateId | string | null | undefined): boolean {
@@ -139,7 +144,19 @@ export function isSubstateIdString(substateId: SubstateId | string | null | unde
     return false;
   }
   const string = substateIdToString(substateId);
-  const SUBSTATE_PREFIXES = ["component_", "vault_", "resource_", "nft_", "commitment_", "txreceipt_", "template_"];
+  const SUBSTATE_PREFIXES = [
+    "component_",
+    "vault_",
+    "resource_",
+    "nft_",
+    "commitment_",
+    "tombstone_",
+    "txreceipt_",
+    "template_",
+    "vnfp_",
+    "utxo_",
+    "coutput_",
+  ];
 
   return SUBSTATE_PREFIXES.some((prefix) => string.startsWith(prefix));
 }
@@ -148,11 +165,7 @@ export function shortenString(string: string | null | undefined, start: number =
   if (string === null || string === undefined) {
     return "";
   }
-  // The number 3 is from the characters for ellipsis
-  if (string.length < start + end + 3) {
-    return string;
-  }
-  return string.substring(0, start) + "..." + string.slice(-end);
+  return bindingsShortenString(string, start, end);
 }
 
 export function emptyRows(page: number, rowsPerPage: number, array: Array<any> | undefined) {
@@ -160,6 +173,14 @@ export function emptyRows(page: number, rowsPerPage: number, array: Array<any> |
     return 0;
   }
   return page > 0 ? Math.max(0, (1 + page) * rowsPerPage - array.length) : 0;
+}
+
+export function clampPageIndex(page: number, rowsPerPage: number, totalItems: number): number {
+  if (totalItems <= 0 || rowsPerPage <= 0 || page <= 0) {
+    return 0;
+  }
+  const maxPage = Math.ceil(totalItems / rowsPerPage) - 1;
+  return Math.min(page, maxPage);
 }
 
 export function handleChangePage(
@@ -304,7 +325,8 @@ export function validateHash(hash: string): boolean {
 const normalizeTimestamp = (rawTimestamp: string | null | undefined): Date | null => {
   if (!rawTimestamp) return null;
 
-  let formatted = rawTimestamp;
+  let formatted = rawTimestamp.trim();
+  if (!formatted) return null;
 
   if (!formatted.includes("T")) {
     formatted = formatted.replace(" ", "T");
@@ -314,7 +336,7 @@ const normalizeTimestamp = (rawTimestamp: string | null | undefined): Date | nul
     formatted = formatted.slice(0, -2);
   }
 
-  if (!/[Z+\-]\d{2}:?\d{2}$/.test(formatted)) {
+  if (!/(?:Z|[+\-]\d{2}:?\d{2})$/.test(formatted)) {
     formatted += "Z";
   }
 
@@ -376,6 +398,11 @@ export function displayNftId(nftId: NonFungibleId): string {
   return `NFT ${JSON.stringify(nftId)}`;
 }
 
+/** Divisibility 0 is whole tokens. Only a missing value takes `fallback`. */
+export function divisibilityOrDefault(value: number | null | undefined, fallback: number): number {
+  return value ?? fallback;
+}
+
 /**
  * Converts a decimal string amount to base units using BigInt arithmetic.
  * e.g. "1000.5" with divisibility=6 → 1_000_500_000n
@@ -387,4 +414,25 @@ export function parseAmountToBaseUnits(amount: string, divisibility: number): bi
   const scaledFrac = fracPart.slice(0, divisibility).padEnd(divisibility, "0");
 
   return BigInt(intPart) * 10n ** BigInt(divisibility) + BigInt(scaledFrac);
+}
+
+export type ParsedFeeInput = { kind: "empty" } | { kind: "valid"; value: bigint } | { kind: "invalid" };
+
+/**
+ * Parse an optional Max Fee input string (in base units / micro-TARI) without throwing.
+ * Empty/whitespace input returns `{ kind: "empty" }`; otherwise a positive base-10 integer is required.
+ */
+export function parseFeeInput(raw: string): ParsedFeeInput {
+  const trimmed = raw.trim();
+  if (trimmed === "") {
+    return { kind: "empty" };
+  }
+  if (!/^\d+$/.test(trimmed)) {
+    return { kind: "invalid" };
+  }
+  const value = BigInt(trimmed);
+  if (value <= 0n) {
+    return { kind: "invalid" };
+  }
+  return { kind: "valid", value };
 }

@@ -13403,6 +13403,7 @@ dependencies = [
  "tari_state_store_rocksdb",
  "tari_state_tree",
  "tari_template_lib_types",
+ "tempfile",
  "thiserror 2.0.21",
 ]
 

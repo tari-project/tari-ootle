@@ -38,14 +38,24 @@ function TransactionReceiptDetails({ address }: { address: string }) {
     return <Alert severity="error">No receipt address provided</Alert>;
   }
 
+  const receipt = data && decodeTransactionReceipt(data.receipt);
+  const hasEvents = Boolean(receipt && receipt.events.length > 0);
+  const substateChangesCount = receipt ? receipt.diff_summary.upped.length + receipt.diff_summary.downed.length : 0;
+  const hasSubstateChanges = substateChangesCount > 0;
+  const hasFeeWithdrawals = Boolean(receipt && receipt.fee_withdrawals.length > 0);
+  const visiblePanels = receipt
+    ? [...(hasEvents ? ["p1"] : []), ...(hasSubstateChanges ? ["p3"] : []), "p4", ...(hasFeeWithdrawals ? ["p5"] : [])]
+    : [];
+  const hasExpandedPanels = visiblePanels.some((panel) => expandedPanels.includes(panel));
+
   const handleChange = (panel: string) => (_event: React.SyntheticEvent, isExpanded: boolean) => {
-    setExpandedPanels((prev) => (isExpanded ? [...prev, panel] : prev.filter((p) => p !== panel)));
+    setExpandedPanels((prev) =>
+      isExpanded ? (prev.includes(panel) ? prev : [...prev, panel]) : prev.filter((p) => p !== panel),
+    );
   };
 
-  const expandAll = () => setExpandedPanels(["p1", "p3", "p4", "p5"]);
+  const expandAll = () => setExpandedPanels(visiblePanels);
   const collapseAll = () => setExpandedPanels([]);
-
-  const receipt = data && decodeTransactionReceipt(data.receipt);
 
   return (
     <FetchStatusCheck
@@ -117,14 +127,14 @@ function TransactionReceiptDetails({ address }: { address: string }) {
                     size="small"
                     startIcon={<KeyboardArrowUpIcon />}
                     onClick={collapseAll}
-                    disabled={expandedPanels.length === 0}
+                    disabled={!hasExpandedPanels}
                   >
                     Collapse All
                   </Button>
                 </Stack>
               </Stack>
 
-              {receipt.events.length > 0 && (
+              {hasEvents && (
                 <Accordion expanded={expandedPanels.includes("p1")} onChange={handleChange("p1")}>
                   <AccordionSummary>
                     <Typography variant="h5">Events ({receipt.events.length})</Typography>
@@ -135,12 +145,10 @@ function TransactionReceiptDetails({ address }: { address: string }) {
                 </Accordion>
               )}
 
-              {receipt.diff_summary.upped.length + receipt.diff_summary.downed.length > 0 && (
+              {hasSubstateChanges && (
                 <Accordion expanded={expandedPanels.includes("p3")} onChange={handleChange("p3")}>
                   <AccordionSummary>
-                    <Typography variant="h5">
-                      Substate Changes ({receipt.diff_summary.upped.length + receipt.diff_summary.downed.length})
-                    </Typography>
+                    <Typography variant="h5">Substate Changes ({substateChangesCount})</Typography>
                   </AccordionSummary>
                   <AccordionDetails>
                     <SubstateChanges upped={receipt.diff_summary.upped} downed={receipt.diff_summary.downed} />
@@ -157,7 +165,7 @@ function TransactionReceiptDetails({ address }: { address: string }) {
                 </AccordionDetails>
               </Accordion>
 
-              {receipt.fee_withdrawals.length > 0 && (
+              {hasFeeWithdrawals && (
                 <Accordion expanded={expandedPanels.includes("p5")} onChange={handleChange("p5")}>
                   <AccordionSummary>
                     <Typography variant="h5">Fee Withdrawals ({receipt.fee_withdrawals.length})</Typography>

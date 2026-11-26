@@ -53,9 +53,10 @@ impl Runner {
 
         let finalize = self.submit_transaction_and_wait(transaction).await?;
         let diff = finalize.result.any_accept().unwrap();
+        let expected_account = derive_account_address_from_public_key(&owner_public_key);
         let account = diff
             .up_iter()
-            .find_map(|(addr, _)| addr.as_component_address())
+            .find_map(|(addr, _)| addr.as_component_address().filter(|addr| *addr == expected_account))
             .unwrap();
         let vault = diff
             .up_iter()
@@ -98,8 +99,8 @@ impl Runner {
                     .sdk
                     .key_manager_api()
                     .get_public_key(KeyId::derived(KeyBranch::Account, idx))?;
-                let account_key = self.sdk.key_manager_api().derive_account_key(idx)?;
-                Ok((key, account_key))
+                let view_only_key_id = KeyId::derived(KeyBranch::ViewOnlyKey, idx);
+                Ok((key, view_only_key_id))
             })
             .collect::<anyhow::Result<Vec<_>>>()?;
 
@@ -142,10 +143,10 @@ impl Runner {
             // up_iter also yields non-owner components (the fee-paying account, the faucet), so skip
             // anything that isn't one of our newly created owner accounts rather than panicking.
             let addr = addr.as_component_address()?;
-            let key_id = owners
+            let (owner_key_id, view_only_key_id) = owners
                 .iter()
                 .find(|(pk, _)| addr == derive_account_address_from_public_key(&pk.public_key().to_byte_type()))
-                .map(|(pk, _)| pk.key_id)?;
+                .map(|(pk, view_only_key_id)| (pk.key_id, *view_only_key_id))?;
             let component = substate.substate_value().component()?;
             let indexed = component.body().to_indexed_well_known_types().ok()?;
             let vault_id = indexed
@@ -154,14 +155,20 @@ impl Runner {
                 .find(|id| **id != XTR_FAUCET_VAULT_ADDRESS)
                 .copied()?;
 
-            Some((addr, vault_id, key_id))
+            Some((addr, vault_id, owner_key_id, view_only_key_id))
         });
 
         let mut accounts = Vec::with_capacity(num_accounts);
-        for (account_addr, vault_id, key_id) in account_addrs {
-            self.sdk
-                .accounts_api()
-                .add_account(None, &account_addr, key_id, key_id, Epoch::zero(), true, false)?;
+        for (account_addr, vault_id, owner_key_id, view_only_key_id) in account_addrs {
+            self.sdk.accounts_api().add_account(
+                None,
+                &account_addr,
+                view_only_key_id,
+                owner_key_id,
+                Epoch::zero(),
+                true,
+                false,
+            )?;
             self.sdk.accounts_api().add_vault(
                 account_addr,
                 vault_id,

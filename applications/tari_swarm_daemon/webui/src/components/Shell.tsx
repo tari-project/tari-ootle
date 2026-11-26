@@ -1,7 +1,7 @@
 //  Copyright 2024 The Tari Project
 //  SPDX-License-Identifier: BSD-3-Clause
 
-import { ReactNode, useEffect, useState } from "react";
+import { ReactNode, useEffect, useId, useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 import { swarmRpc } from "../api/rpc";
 import { readChannels } from "../consensus";
@@ -15,11 +15,21 @@ const RATES = [
   { label: "off", value: 0 },
 ];
 
+type Theme = "dark" | "light";
+
+function readInitialTheme(): Theme {
+  return document.documentElement.dataset.theme === "light" ? "light" : "dark";
+}
+
 function useTheme() {
-  const [theme, setTheme] = useState(() => document.documentElement.dataset.theme ?? "dark");
+  const [theme, setTheme] = useState<Theme>(readInitialTheme);
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
-    localStorage.setItem("swarm.theme", theme);
+    try {
+      localStorage.setItem("swarm.theme", theme);
+    } catch {
+      // Ignore storage write errors (e.g. quota exceeded or read-only storage).
+    }
   }, [theme]);
   return { theme, setTheme };
 }
@@ -36,6 +46,8 @@ function Readout({ label, children }: { label: string; children: ReactNode }) {
 export default function Shell() {
   const swarm = useSwarm();
   const { theme, setTheme } = useTheme();
+  const refreshLabelId = useId();
+  const themeLabelId = useId();
   const { channels, tipEpoch, tipHeight, inStep } = readChannels(swarm.validators, swarm.details);
 
   const running = swarm.validators.filter((v) => v.is_running).length;
@@ -71,21 +83,25 @@ export default function Shell() {
         </nav>
 
         <div className="sidebar-foot">
-          <label>
-            <span className="eyebrow">Refresh every</span>
+          <div className="sidebar-field" role="group" aria-labelledby={refreshLabelId}>
+            <span id={refreshLabelId} className="eyebrow">
+              Refresh every
+            </span>
             <Segmented options={RATES} value={swarm.intervalMs} onChange={swarm.setIntervalMs} />
-          </label>
-          <label>
-            <span className="eyebrow">Theme</span>
+          </div>
+          <div className="sidebar-field" role="group" aria-labelledby={themeLabelId}>
+            <span id={themeLabelId} className="eyebrow">
+              Theme
+            </span>
             <Segmented
               options={[
-                { label: "Dark", value: "dark" },
-                { label: "Light", value: "light" },
+                { label: "Dark", value: "dark" as Theme },
+                { label: "Light", value: "light" as Theme },
               ]}
               value={theme}
               onChange={setTheme}
             />
-          </label>
+          </div>
         </div>
       </aside>
 
@@ -129,7 +145,7 @@ export default function Shell() {
           >
             Mine 1 block
           </ActionButton>
-          <button className="btn sm" onClick={swarm.refresh}>
+          <button type="button" className="btn sm" onClick={swarm.refresh}>
             Refresh
           </button>
         </header>
@@ -143,7 +159,7 @@ export default function Shell() {
         {swarm.toasts.map((toast) => (
           <div className="toast" key={toast.id} role="alert">
             <span className="msg">{toast.message}</span>
-            <button className="btn ghost sm" onClick={() => swarm.dismiss(toast.id)}>
+            <button type="button" className="btn ghost sm" onClick={() => swarm.dismiss(toast.id)}>
               Dismiss
             </button>
           </div>

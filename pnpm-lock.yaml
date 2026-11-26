@@ -2105,8 +2105,8 @@ packages:
   convert-source-map@2.0.0:
     resolution: {integrity: sha512-Kvp459HrV2FEJ1CAsi1Ku+MY3kasH19TFykTz2xWmMeq6bk2NU3XXvfJ+Q61m0xktWwt+1HSYf3JZsTms3aRJg==}
 
-  cookie-es@1.2.2:
-    resolution: {integrity: sha512-+W7VmiVINB+ywl1HGXJXmrqkOhpKrIiVZV6tQuV54ZyQC7MMuBt81Vc336GMLoHBq5hV/F9eXgt5Mnx0Rha5Fg==}
+  cookie-es@1.2.3:
+    resolution: {integrity: sha512-lXVyvUvrNXblMqzIRrxHb57UUVmqsSWlxqt3XIjCkUP0wDAf6uicO6KMbEgYrMNtEvWgWHwe42CKxPu9MYAnWw==}
 
   cookie@1.1.1:
     resolution: {integrity: sha512-ei8Aos7ja0weRpFzJnEA9UHJ/7XQmqglbRwnf2ATjcB9Wq874VKH9kfjjirM6UhU2/E5fFYadylyhFldcqSidQ==}
@@ -2364,8 +2364,8 @@ packages:
     resolution: {integrity: sha512-hjrNztw/VajQwOLsMNT1cbJiH2muO3OROCHnbehc8eY5JyD2gqz4AcMHPqgaOR59DjgUjYAYLeH699g/eWi2jw==}
     engines: {node: '>=18'}
 
-  h3@1.15.6:
-    resolution: {integrity: sha512-oi15ESLW5LRthZ+qPCi5GNasY/gvynSKUQxgiovrY63bPAtG59wtM+LSrlcwvOHAXzGrXVLnI97brbkdPF9WoQ==}
+  h3@1.15.11:
+    resolution: {integrity: sha512-L3THSe2MPeBwgIZVSH5zLdBBU90TOxarvhK9d04IDY2AmVS8j2Jz2LIWtwsGOU3lu2I5jCN7FNvVfY2+XyF+mg==}
 
   hasown@2.0.2:
     resolution: {integrity: sha512-0hJU9SCPvmMzIBdZFqNPXWa6dqh7WdH0cII9y+CyS8rG3nL48Bclra9HmKhVVUHyPWNH5Y7xDwAB7bfgSjkUMQ==}
@@ -4953,7 +4953,7 @@ snapshots:
 
   convert-source-map@2.0.0: {}
 
-  cookie-es@1.2.2: {}
+  cookie-es@1.2.3: {}
 
   cookie@1.1.1: {}
 
@@ -5244,9 +5244,9 @@ snapshots:
 
   globals@17.4.0: {}
 
-  h3@1.15.6:
+  h3@1.15.11:
     dependencies:
-      cookie-es: 1.2.2
+      cookie-es: 1.2.3
       crossws: 0.3.5
       defu: 6.1.7
       destr: 2.0.5
@@ -5937,7 +5937,7 @@ snapshots:
       anymatch: 3.1.3
       chokidar: 5.0.0
       destr: 2.0.5
-      h3: 1.15.6
+      h3: 1.15.11
       lru-cache: 11.2.6
       node-fetch-native: 1.6.7
       ofetch: 1.5.1

@@ -1200,7 +1200,8 @@ impl<TConsensusSpec: ConsensusSpec> OnReceiveLocalProposalHandler<TConsensusSpec
                 Some(b) => b,
                 None => {
                     if tx.parked_block_exists(&justify_block_id)? {
-                        // This case shouldnt happen because the message buffer should not yet send the proposal through
+                        // Validation and unparking both hold a block behind its parked justify block, so this path is
+                        // unreachable.
                         warn!(target: LOG_TARGET, "⚠️ BUG: Justify block {} for candidate block {} is parked", justify_block_id, candidate_block);
                         return Err(ProposalValidationError::JustifyBlockParked {
                             proposed_by: candidate_block.proposed_by().to_string(),

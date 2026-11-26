@@ -9,6 +9,7 @@ use std::{
     fs,
     io,
     io::{BufRead, Seek, SeekFrom, Write, stdout},
+    path::Path,
 };
 
 use anyhow::anyhow;
@@ -53,12 +54,11 @@ fn main() -> anyhow::Result<()> {
             let timer = std::time::Instant::now();
             println!("Generating and writing {} transactions", args.num_transactions,);
 
-            let mut file = std::fs::File::create(&args.output_file)?;
-
             let max_epoch = resolve_max_epoch(&args)?;
             println!("Transactions are valid until epoch {max_epoch}");
 
             let builder = get_transaction_builder(&args, max_epoch)?;
+            let mut file = std::fs::File::create(&args.output_file)?;
             write_transactions(
                 args.num_transactions,
                 builder,
@@ -140,18 +140,7 @@ fn get_transaction_builder(args: &WriteArgs, max_epoch: Epoch) -> anyhow::Result
                 .transpose()
                 .map_err(|_| anyhow!("Failed to parse secret"))?
                 .unwrap_or_else(|| RistrettoSecretKey::random(&mut rand::rng()));
-            let mut manifest_args = parse_args(&args.manifest_args)?;
-            if let Some(args_file) = &args.manifest_args_file {
-                let file = io::BufReader::new(fs::File::open(args_file)?);
-                for ln in file.lines() {
-                    let ln = ln?;
-                    let line = ln.trim();
-                    if line.is_empty() || line.starts_with('#') {
-                        continue;
-                    }
-                    manifest_args.extend(parse_arg(line));
-                }
-            }
+            let manifest_args = load_manifest_args(&args.manifest_args, args.manifest_args_file.as_deref())?;
             let templates = parse_templates(&args.templates)?;
             let inputs = parse_inputs(&args.inputs)?;
             let blobs = parse_blobs(&args.blobs)?;
@@ -365,6 +354,26 @@ fn parse_templates(items: &[String]) -> anyhow::Result<HashMap<String, TemplateA
         .collect()
 }
 
+fn load_manifest_args(
+    cli_args: &[String],
+    args_file: Option<&Path>,
+) -> Result<HashMap<String, ManifestValue>, anyhow::Error> {
+    let mut manifest_args = parse_args(cli_args)?;
+    if let Some(args_file) = args_file {
+        let file = io::BufReader::new(fs::File::open(args_file)?);
+        for ln in file.lines() {
+            let ln = ln?;
+            let line = ln.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let (key, value) = parse_arg(line)?;
+            manifest_args.insert(key, value);
+        }
+    }
+    Ok(manifest_args)
+}
+
 fn parse_args(globals: &[String]) -> Result<HashMap<String, ManifestValue>, anyhow::Error> {
     globals.iter().map(|s| parse_arg(s)).collect()
 }
@@ -376,4 +385,39 @@ fn parse_arg(arg: &str) -> Result<(String, ManifestValue), anyhow::Error> {
         .parse()
         .map_err(|err| anyhow!("Failed to parse arg '{}': {}", name, err))?;
     Ok((name.trim().to_string(), value))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        path::PathBuf,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    use super::*;
+
+    struct TempFile(PathBuf);
+
+    impl Drop for TempFile {
+        fn drop(&mut self) {
+            let _unused = fs::remove_file(&self.0);
+        }
+    }
+
+    #[test]
+    fn load_manifest_args_propagates_errors_from_args_file() {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock after epoch")
+            .as_nanos();
+        let temp = TempFile(std::env::temp_dir().join(format!("tx_gen_args_{}_{}.txt", std::process::id(), nanos)));
+
+        fs::write(&temp.0, "# comment\n\ncount = 42\n").unwrap();
+        let parsed = load_manifest_args(&[], Some(&temp.0)).unwrap();
+        assert!(parsed.contains_key("count"));
+
+        fs::write(&temp.0, "count = 42\nmalformed_line_without_equals\n").unwrap();
+        let err = load_manifest_args(&[], Some(&temp.0)).unwrap_err();
+        assert!(err.to_string().contains("Invalid arg"));
+    }
 }

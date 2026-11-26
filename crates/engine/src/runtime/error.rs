@@ -54,6 +54,7 @@ use tari_template_lib::{
         ResourceType,
         TemplateAddress,
         TransactionReceiptAddress,
+        UtxoId,
         VaultId,
         access_rules::RuleRequirement,
         crypto::PedersenCommitmentBytes,
@@ -198,6 +199,12 @@ pub enum RuntimeError {
         resource_address: ResourceAddress,
         nf_id: NonFungibleId,
     },
+    #[error("Invalid op '{op}' on burnt stealth UTXO {resource_address} id {utxo_id}")]
+    InvalidOpStealthUtxoBurnt {
+        op: &'static str,
+        resource_address: ResourceAddress,
+        utxo_id: UtxoId,
+    },
     #[error("Bucket not found with id {bucket_id}")]
     BucketNotFound { bucket_id: BucketId },
     #[error("Proof not found with id {proof_id}")]
@@ -280,6 +287,13 @@ pub enum RuntimeError {
     AccessDeniedOwnerRequired { action: ActionIdent },
     #[error("Component {component} cannot be upgraded: its upgrade rule is Locked")]
     ComponentUpgradesLocked { component: ComponentAddress },
+    #[error("The access rules and owner rule of component {component} cannot change: its rules updater is Locked")]
+    ComponentRulesLocked { component: ComponentAddress },
+    #[error(
+        "The access rules and owner rule of component {component} are changed only by its own template code: its \
+         rules updater is TemplateManaged"
+    )]
+    ComponentRulesTemplateManaged { component: ComponentAddress },
     #[error("Write attempted in a read-only execution context")]
     WriteInReadOnlyContext,
     #[error("Host operation '{operation}' is forbidden inside a read-only (spend-script) context")]
@@ -615,6 +629,8 @@ impl RuntimeError {
             Self::AccessDeniedAuthHook { .. } |
             Self::AccessDeniedOwnerRequired { .. } |
             Self::ComponentUpgradesLocked { .. } |
+            Self::ComponentRulesLocked { .. } |
+            Self::ComponentRulesTemplateManaged { .. } |
             Self::WriteInReadOnlyContext |
             Self::ForbiddenInReadOnlyContext { .. } |
             Self::WriteOutsideOwnComponent { .. } |
@@ -624,6 +640,7 @@ impl RuntimeError {
 
             Self::VaultFrozen { .. } |
             Self::InvalidOpNonFungibleBurnt { .. } |
+            Self::InvalidOpStealthUtxoBurnt { .. } |
             Self::FreezeResourceMismatch { .. } |
             Self::RecallResourceMismatch { .. } => C::ResourceRestricted,
 

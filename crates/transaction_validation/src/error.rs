@@ -65,6 +65,11 @@ pub enum TransactionValidationError {
          authorization signatures"
     )]
     TransactionNotSigned { transaction_id: TransactionId },
+    #[error(
+        "Transaction {transaction_id} repeats or misorders its authorization signatures: the list must be strictly \
+         ascending by public key"
+    )]
+    AuthorizationsNotCanonical { transaction_id: TransactionId },
     #[error("Network error: {0}")]
     NetworkingError(#[from] NetworkingError),
     #[error("Unknown network byte \"{byte}\": {details}")]
@@ -224,6 +229,7 @@ impl TransactionValidationError {
             Self::InvalidSignature |
             Self::MainSignerDidNotSign { .. } |
             Self::TransactionNotSigned { .. } |
+            Self::AuthorizationsNotCanonical { .. } |
             Self::UnknownNetwork { .. } |
             Self::NetworkMismatch { .. } |
             Self::ContainsPayFeeInstruction { .. } |
@@ -330,6 +336,9 @@ mod tests {
                 public_key: RistrettoPublicKeyBytes::default(),
             },
             TransactionValidationError::TransactionNotSigned {
+                transaction_id: tx_id(),
+            },
+            TransactionValidationError::AuthorizationsNotCanonical {
                 transaction_id: tx_id(),
             },
             TransactionValidationError::NoFeeInstructions {

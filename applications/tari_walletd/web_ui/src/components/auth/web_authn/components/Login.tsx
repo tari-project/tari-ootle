@@ -10,18 +10,23 @@ import { useTheme } from "@mui/material/styles";
 import Typography from "@mui/material/Typography";
 import { WebauthnFinishAuthRequest } from "@tari-project/ootle-ts-bindings";
 import { getClientInstance, webauthnStartAuth } from "@utils/json_rpc";
-import { Buffer } from "buffer";
-import { FormEvent, useState } from "react";
+import { FormEvent, useRef, useState } from "react";
 import { Form } from "react-router-dom";
+import {
+  assertWebauthnGetSupported,
+  formatWebauthnLoginError,
+  parseWebauthnRequestOptions,
+} from "./webauthnLoginHelpers";
 
 export const getCredential = async (challenge: any, allowCredentials: any) => {
+  const credentials = assertWebauthnGetSupported(navigator.credentials);
   const publicKeyCredentialRequestOptions: PublicKeyCredentialRequestOptions = {
     challenge: challenge,
     allowCredentials: allowCredentials,
     timeout: 60000,
     userVerification: "required",
   };
-  return await navigator.credentials.get({
+  return await credentials.get({
     publicKey: publicKeyCredentialRequestOptions,
   });
 };
@@ -31,9 +36,14 @@ function WebauthnLogin(props: WebauthnProps) {
   const theme = useTheme();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const inFlightRef = useRef(false);
 
   const handleLogin = async (e: FormEvent) => {
     e.preventDefault();
+    if (inFlightRef.current) {
+      return;
+    }
+    inFlightRef.current = true;
     setLoading(true);
     setError("");
 
@@ -49,17 +59,8 @@ function WebauthnLogin(props: WebauthnProps) {
         throw new Error("Failed to get challenge");
       }
 
-      const challengeResponse = startAuthResponse.challenge;
-      // @ts-ignore
-      const challenge = Buffer.from(startAuthResponse.challenge.publicKey.challenge, "base64");
+      const { challenge, allowCredentials } = parseWebauthnRequestOptions(startAuthResponse.challenge);
       const loginSessionId = startAuthResponse.session_id;
-      // @ts-ignore
-      let allowCredentials = challengeResponse.publicKey.allowCredentials.map((value: any) => {
-        return {
-          id: Buffer.from(value.id, "base64"),
-          type: value.type,
-        };
-      });
       let credential = await getCredential(challenge, allowCredentials);
 
       if (!credential) {
@@ -78,14 +79,9 @@ function WebauthnLogin(props: WebauthnProps) {
       onAuthenticated();
     } catch (error) {
       console.error(error);
-      if (error instanceof Error) {
-        setError(error.message);
-      } else if (typeof error === "string") {
-        setError(error);
-      } else {
-        setError("An unknown error occurred: " + JSON.stringify(error as any));
-      }
+      setError(formatWebauthnLoginError(error));
     } finally {
+      inFlightRef.current = false;
       setLoading(false);
     }
   };

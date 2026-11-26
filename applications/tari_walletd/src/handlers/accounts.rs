@@ -54,6 +54,7 @@ use tari_ootle_wallet_sdk::{
     },
     models::{
         AccountWithAddress,
+        DerivedKeyIndex,
         KeyBranch,
         NewAccountData,
         TransactionContext,
@@ -173,20 +174,7 @@ pub async fn handle_create(
         .unwrap_or_else(|| accounts_api.has_default_account().map(|b| !b))?;
 
     ensure_seed_recovery_finished(sdk)?;
-    let owner_address = match req.key_index {
-        Some(id) => sdk.key_manager_api().derive_account_address(id)?,
-        None => sdk.key_manager_api().next_account_address()?,
-    };
-
-    let acc = accounts_api
-        .create_account(req.account_name.as_deref(), set_as_default, owner_address)
-        .map_err(|e| {
-            if e.is_name_exists_error() {
-                invalid_request(e)
-            } else {
-                general_error(e)
-            }
-        })?;
+    let acc = create_derived_account(context, req.account_name.as_deref(), set_as_default, req.key_index)?;
 
     info!(
         target: LOG_TARGET,
@@ -245,20 +233,12 @@ pub async fn handle_create_or_get(
         .unwrap_or_else(|| accounts_api.has_default_account().map(|b| !b))?;
 
     ensure_seed_recovery_finished(sdk)?;
-    let wallet_keys = match req.key_index {
-        Some(id) => sdk.key_manager_api().derive_account_address(id)?,
-        None => sdk.key_manager_api().next_account_address()?,
-    };
-
-    let acc = accounts_api
-        .create_account(req.account.as_ref().and_then(|a| a.name()), set_as_default, wallet_keys)
-        .map_err(|e| {
-            if e.is_name_exists_error() {
-                invalid_request(e)
-            } else {
-                general_error(e)
-            }
-        })?;
+    let acc = create_derived_account(
+        context,
+        req.account.as_ref().and_then(|a| a.name()),
+        set_as_default,
+        req.key_index,
+    )?;
 
     info!(
         target: LOG_TARGET,
@@ -269,6 +249,27 @@ pub async fn handle_create_or_get(
         account: acc.account,
         address: acc.address,
         created: true,
+    })
+}
+
+/// Creates a derived account at `key_index`, or at the lowest account key index no account uses.
+fn create_derived_account(
+    context: &HandlerContext,
+    account_name: Option<&str>,
+    is_default: bool,
+    key_index: Option<DerivedKeyIndex>,
+) -> Result<AccountWithAddress, anyhow::Error> {
+    let accounts_api = context.wallet_sdk().accounts_api();
+    let created = match key_index {
+        Some(index) => accounts_api.create_account_at_index(account_name, is_default, index),
+        None => accounts_api.create_next_account(account_name, is_default),
+    };
+    created.map_err(|e| {
+        if e.is_name_exists_error() || e.is_account_exists_error() {
+            invalid_request(e)
+        } else {
+            general_error(e)
+        }
     })
 }
 
@@ -1510,6 +1511,14 @@ pub async fn handle_stealth_transfer(
         Crud::Create,
         Some(*owner_account.component_address()),
     )])?;
+    // Naming exact UTXOs (and thus learning their decrypted totals through the balance check) requires scoped
+    // stealth-UTXO read authority in addition to the transfer-create scope.
+    if req.inputs.is_some() {
+        enforce_scopes(&granted, &[Permission::StealthUtxos(
+            Crud::Read,
+            Some(*owner_account.component_address()),
+        )])?;
+    }
     if owner_account.owner_key_id().is_none() {
         return Err(invalid_params(
             "owner_account",
@@ -1630,6 +1639,7 @@ pub async fn handle_stealth_transfer(
         max_epoch: context.transaction_max_epoch().await?,
         fee_params: req.fee_params,
         input_selection: req.input_selection,
+        inputs: req.inputs,
         resource_address: req.resource_address,
         max_fee: req.max_fee,
         badge_usage: req.badge_usage,
@@ -1688,21 +1698,17 @@ pub async fn handle_stealth_transfer(
             };
 
             let transaction = transfer.transaction;
+            let spent_inputs = transfer.inputs;
             let main_pk = transfer.main_signer.public_key().to_byte_type();
 
-            // Signer api which sign transaction types that require the seal signer public key
-            let main_signer = sdk.signer_api().with_context(&main_pk);
-            // Add additional signature if needed
-            let transaction = match transfer.additional_signer.as_ref() {
-                Some(s) => main_signer.sign(s.key_id, transaction)?,
-                None => transaction.finish(),
-            };
-
-            // Add required UTXO spend key signatures
-            let transaction = transfer
-                .utxo_spend_keys
-                .iter()
-                .try_fold(transaction, |tx, key| main_signer.sign_with_stealth_key(key, tx))?;
+            // The additional signer and every UTXO spend key authorize together, each over the set of all their keys.
+            let additional_signers: Vec<_> = transfer.additional_signer.iter().map(|s| s.key_id).collect();
+            let transaction = sdk.signer_api().authorize(
+                &main_pk,
+                &additional_signers,
+                &transfer.utxo_spend_keys,
+                transaction.finish(),
+            )?;
 
             // Sign and seal the final transaction
             let transaction = sdk.signer_api().sign(transfer.main_signer.key_id, transaction)?;
@@ -1779,6 +1785,7 @@ pub async fn handle_stealth_transfer(
                     } else {
                         required_fees
                     }),
+                    inputs: Some(spent_inputs.clone()),
                     dry_run_result: Some(result),
                 };
                 rounds += 1;
@@ -1815,7 +1822,11 @@ pub async fn handle_stealth_transfer(
                         if settled_statically {
                             return Ok(response);
                         }
-                        return Ok(candidate.expect("BUG: Settle needs a candidate or a static settle"));
+                        // This round was built at the candidate's fee, so its inputs are the ones a
+                        // submission at that fee spends.
+                        let mut answer = candidate.expect("BUG: Settle needs a candidate or a static settle");
+                        answer.inputs = Some(spent_inputs);
+                        return Ok(answer);
                     },
                     FeeEstimateStep::GiveUp => {
                         warn!(
@@ -1858,6 +1869,7 @@ pub async fn handle_stealth_transfer(
             return Ok(StealthTransferResponse {
                 transaction_id: tx_id,
                 required_fees: None,
+                inputs: None,
                 dry_run_result: None,
             });
         }
@@ -3782,6 +3794,7 @@ mod create_stealth_transfer_statement_handler_tests {
             owner_account: watch.clone(),
             fee_params: TransferFeeParams::new(UtxoInputSelection::PreferRevealed),
             input_selection: UtxoInputSelection::PreferRevealed,
+            inputs: None,
             resource_address: test.stealth_resource,
             badge_usage: BadgeUsage::None,
             transfers: vec![],
@@ -4266,5 +4279,35 @@ mod claim_burn_dry_run_failure_tests {
             ClaimBurnError::from_dry_run(TransactionServiceError::ServiceShutdown),
             ClaimBurnError::Network(_)
         ));
+    }
+}
+
+#[cfg(test)]
+mod create_account_handler_tests {
+    use super::*;
+    use crate::handlers::test_support::TestDaemon;
+
+    fn key_index(response: &AccountsCreateResponse) -> Option<DerivedKeyIndex> {
+        response.account.owner_key_id.and_then(|id| id.derived_index())
+    }
+
+    #[tokio::test]
+    async fn accounts_fill_the_lowest_key_index_around_an_explicit_one() {
+        let daemon = TestDaemon::start().await;
+        let create = |key_index| {
+            handle_create(&daemon.context, Some(&daemon.session), AccountsCreateRequest {
+                account_name: None,
+                is_default: None,
+                key_index,
+            })
+        };
+
+        let explicit = create(Some(1000)).await.unwrap();
+        assert_eq!(key_index(&explicit), Some(1000));
+        let next = create(None).await.unwrap();
+        assert_eq!(key_index(&next), Some(0));
+
+        let err = create(Some(1000)).await.unwrap_err();
+        assert!(err.to_string().contains("already exists"), "{err}");
     }
 }

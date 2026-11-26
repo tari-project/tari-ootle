@@ -49,6 +49,8 @@ mod missing_foreign_proposal;
 #[cfg(test)]
 mod output_exists;
 #[cfg(test)]
+mod pacemaker_restart;
+#[cfg(test)]
 mod peer_message_admission;
 #[cfg(test)]
 mod presync;

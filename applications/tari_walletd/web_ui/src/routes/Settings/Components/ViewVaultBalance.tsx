@@ -20,15 +20,19 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { Divider } from "@mui/material";
+import { Alert, Divider } from "@mui/material";
 import Box from "@mui/material/Box";
 import Button from "@mui/material/Button";
 import { useTheme } from "@mui/material/styles";
 import TextField from "@mui/material/TextField";
 import Typography from "@mui/material/Typography";
-import { ConfidentialViewVaultBalanceRequest } from "@tari-project/ootle-ts-bindings";
+import {
+  ConfidentialViewVaultBalanceRequest,
+  ConfidentialViewVaultBalanceResponse,
+} from "@tari-project/ootle-ts-bindings";
 import { confidentialViewVaultBalance } from "@utils/json_rpc";
 import { useState } from "react";
+import { formatDecryptedBalance, validateViewVaultForm } from "./decryptBalanceHelpers";
 
 import SearchedRange from "./SearchedRange";
 
@@ -37,41 +41,52 @@ function ViewVaultBalanceForm() {
     vaultId: "",
     keyId: "",
   });
-  const [vaultBalance, setVaultBalance] = useState<any>(null);
+  const [vaultBalance, setVaultBalance] = useState<ConfidentialViewVaultBalanceResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
 
   const onViewBalanceClicked = async () => {
-    let viewKeyId;
-    try {
-      viewKeyId = BigInt(formState.keyId!);
-    } catch (e) {
-      console.error("keyId is not an integer", e);
-      throw e;
+    const validated = validateViewVaultForm(formState);
+    if (!validated.ok) {
+      setError(validated.error);
+      return;
     }
-    const resp = await confidentialViewVaultBalance({
-      vault_id: formState.vaultId,
-      minimum_expected_value: null,
-      maximum_expected_value: null,
-      view_key_id: viewKeyId,
-    } as ConfidentialViewVaultBalanceRequest);
 
-    setVaultBalance(resp);
+    setError(null);
+    setIsLoading(true);
+    try {
+      const resp = await confidentialViewVaultBalance({
+        vault_id: validated.vaultId,
+        minimum_expected_value: null,
+        maximum_expected_value: null,
+        view_key_id: validated.viewKeyId,
+      } as ConfidentialViewVaultBalanceRequest);
+
+      setVaultBalance(resp);
+    } catch (e: unknown) {
+      setVaultBalance(null);
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const searched = vaultBalance && <SearchedRange searched={vaultBalance.searched} />;
 
   const balances =
     vaultBalance &&
-    Object.keys(vaultBalance?.balances).map((key) => {
+    Object.keys(vaultBalance.balances).map((key) => {
       return (
         <Box key={key}>
           <Typography>
-            {key}: {vaultBalance.balances[key] || "Failed not decrypt value"}
+            {key}: {formatDecryptedBalance(vaultBalance.balances[key])}
           </Typography>
         </Box>
       );
     });
 
   const onChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setError(null);
     setFormState({
       ...formState,
       [e.target.name]: e.target.value,
@@ -87,7 +102,7 @@ function ViewVaultBalanceForm() {
           value={formState.keyId}
           onChange={onChange}
           style={{ flexGrow: 1 }}
-          type="number"
+          slotProps={{ htmlInput: { inputMode: "numeric" } }}
         />
         <TextField
           name="vaultId"
@@ -96,10 +111,19 @@ function ViewVaultBalanceForm() {
           onChange={onChange}
           style={{ flexGrow: 1 }}
         />
-        <Button variant="contained" onClick={onViewBalanceClicked} disabled={!formState.vaultId || !formState.keyId}>
-          Fetch Balance
+        <Button
+          variant="contained"
+          onClick={onViewBalanceClicked}
+          disabled={isLoading || !formState.vaultId.trim() || !formState.keyId.trim()}
+        >
+          {isLoading ? "Fetching..." : "Fetch Balance"}
         </Button>
       </Box>
+      {error && (
+        <Alert severity="error" sx={{ marginBottom: 2 }}>
+          {error}
+        </Alert>
+      )}
       {searched}
       {balances && (
         <>

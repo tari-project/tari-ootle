@@ -32,7 +32,7 @@ import { useTheme } from "@mui/material/styles";
 import TextField from "@mui/material/TextField";
 import { setAccount, setOotleAddress } from "@store/accountStore";
 import type { AccountsCreateResponse } from "@tari-project/ootle-ts-bindings";
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { Form } from "react-router-dom";
 
 function AddAccount({ open, setOpen }: { open: boolean; setOpen: React.Dispatch<React.SetStateAction<boolean>> }) {
@@ -43,27 +43,46 @@ function AddAccount({ open, setOpen }: { open: boolean; setOpen: React.Dispatch<
   const theme = useTheme();
 
   const handleClose = () => {
+    if (isPending) {
+      return;
+    }
     setAccountFormState({ accountName: "" });
     reset();
     setOpen(false);
   };
 
+  useEffect(() => {
+    if (!open || !isSuccess) {
+      return;
+    }
+    const timer = setTimeout(() => {
+      setAccountFormState({ accountName: "" });
+      reset();
+      setOpen(false);
+    }, 3000);
+    return () => clearTimeout(timer);
+  }, [open, isSuccess, reset, setOpen]);
+
   const onSubmitAddAccount = async (e: FormEvent) => {
     e.preventDefault();
+    const accountName = accountFormState.accountName.trim();
+    if (isPending || !accountName) {
+      return;
+    }
     try {
-      const newAccount: AccountsCreateResponse = await mutateAddAccount({ accountName: accountFormState.accountName });
+      const newAccount: AccountsCreateResponse = await mutateAddAccount({ accountName });
       setAccount(newAccount.account);
       setOotleAddress(newAccount.address);
       await queryClient.invalidateQueries({ queryKey: ["accounts"] });
-      setTimeout(() => {
-        handleClose();
-      }, 3000);
     } catch (error) {
       console.error("Failed to create account:", error);
     }
   };
 
   const onAccountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (error) {
+      reset();
+    }
     setAccountFormState({
       ...accountFormState,
       [e.target.name]: e.target.value,
@@ -82,7 +101,7 @@ function AddAccount({ open, setOpen }: { open: boolean; setOpen: React.Dispatch<
 
   return (
     <Dialog open={open} onClose={handleClose}>
-      <PopupTitle title="Add Account" onClose={handleClose} />
+      <PopupTitle title="Add Account" onClose={isPending ? undefined : handleClose} />
       {!isSuccess ? (
         <DialogContent className="dialog-content">
           <Form

@@ -33,12 +33,14 @@ import {
   rejectReasonToString,
   ResourceAddress,
   ResourceType,
+  StealthTransferResponse,
   substateIdToString,
   SwapPoolInfo,
   TARI_TOKEN,
+  UtxoAddress,
   UtxoInputSelection,
 } from "@tari-project/ootle-ts-bindings";
-import { parseAmountToBaseUnits } from "@utils/helpers";
+import { divisibilityOrDefault, parseAmountToBaseUnits } from "@utils/helpers";
 import { swapPoolGetExchangeRate, swapPoolsList, transactionsWaitResult } from "@utils/json_rpc";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import ConfirmationStep from "../steps/ConfirmationStep";
@@ -77,6 +79,9 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
   const [transferFormState, setTransferFormState] = useState(INITIAL_VALUES);
   const [transferResult, setTransferResult] = useState<TransferResult | undefined>();
   const [formError, setFormError] = useState<FormError | null>(null);
+  // The UTXOs the last fee estimate priced. Submitting at that fee spends them, so a UTXO that arrives before the user
+  // confirms cannot change the transaction the fee was estimated for.
+  const [pricedInputs, setPricedInputs] = useState<{ fee: string; inputs: UtxoAddress[] } | null>(null);
   const { mutateAsync: sendIt } = useAccountsTransfer();
 
   // Pool state
@@ -207,6 +212,10 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
 
   function setFormValue(name: string, value: string) {
     setFormError(null);
+    // The priced inputs survive a fee edit: they are only submitted at the fee they were priced at.
+    if (name !== "fee") {
+      setPricedInputs(null);
+    }
 
     // For amount fields, parse the input to allow decimal values
     let processedValue = value;
@@ -230,6 +239,7 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
 
   function setSelectFormValue(e: SelectChangeEvent<unknown>) {
     setFormError(null);
+    setPricedInputs(null);
     setTransferFormState({
       ...transferFormState,
       [e.target.name]: e.target.value,
@@ -238,6 +248,7 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
 
   function setCheckboxFormValue(e: React.ChangeEvent<HTMLInputElement>) {
     setFormError(null);
+    setPricedInputs(null);
     setTransferFormState({
       ...transferFormState,
       [e.target.name]: e.target.checked,
@@ -246,6 +257,7 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
 
   const handleUseBadgeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFormError(null);
+    setPricedInputs(null);
     setUseBadge(e.target.checked);
     if (!e.target.checked) {
       setTransferFormState({
@@ -256,6 +268,7 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
   };
 
   const handlePoolSelect = (poolAddress: string) => {
+    setPricedInputs(null);
     setTransferFormState((prev) => ({
       ...prev,
       swapPoolAddress: poolAddress,
@@ -279,6 +292,7 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
     }
 
     setIsEstimatingFee(true);
+    setPricedInputs(null);
 
     try {
       const amount = parseAmountToBaseUnits(transferFormState.amount, balanceEntry.divisibility);
@@ -352,6 +366,12 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
           resource_b: rateResp.resource_b,
           balance_b: BigInt(rateResp.balance_b),
         });
+      }
+
+      // A swap submission spends a swap input recalculated from this estimate, which the dry run did not price.
+      const inputs = props.resource_type === "Stealth" ? (resp as StealthTransferResponse).inputs : null;
+      if (inputs && !transferFormState.swapPoolAddress) {
+        setPricedInputs({ fee: estimatedFee.toString(), inputs });
       }
 
       setTransferFormState((prevState) => ({
@@ -456,6 +476,7 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
         ...transfer,
         dry_run: false,
         max_fee: parseInt(transferFormState.fee),
+        inputs: pricedInputs?.fee === transferFormState.fee ? pricedInputs.inputs : null,
       });
 
       // Wait for the transaction to be finalized
@@ -487,6 +508,9 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
         });
       }
     } catch (error) {
+      // The priced inputs may be spent or no longer cover the fee, so a retry estimates the fee again.
+      setPricedInputs(null);
+      setTransferFormState((prevState) => ({ ...prevState, fee: "", swapInputAmount: "" }));
       setTransferResult({
         success: false,
         message: error instanceof Error ? error.message : "Transfer failed",
@@ -507,6 +531,7 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
     props.handleClose?.();
     // Call onSendComplete only after successful transfer when dialog closes
     if (wasSuccessful) {
+      setPricedInputs(null);
       setTransferFormState(INITIAL_VALUES);
       props.onSendComplete?.();
     }
@@ -557,7 +582,7 @@ export function SendMoneyDialog(props: SendMoneyDialogProps) {
             onBack={handleBack}
             onConfirm={handleConfirm}
             token_symbol={props.token_symbol}
-            divisibility={balanceEntry?.divisibility || 6}
+            divisibility={divisibilityOrDefault(balanceEntry?.divisibility, 6)}
             poolRate={poolRate}
           />
         );

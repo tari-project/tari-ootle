@@ -140,11 +140,14 @@ where
                 None
             };
 
-            // Identify
+            // Identify. Its address cache is disabled because it would offer every listen address a peer reports as a
+            // dial candidate, including loopback and private addresses that reach a different host from here. The
+            // networking worker adds the reported addresses that are dialable from this node instead.
             let identify = identify::Behaviour::new(
                 identify::Config::new(config.protocol_version.to_string(), keypair.public())
                     .with_interval(config.identify_interval)
-                    .with_agent_version(config.user_agent),
+                    .with_agent_version(config.user_agent)
+                    .with_cache_size(0),
             );
 
             // Messaging

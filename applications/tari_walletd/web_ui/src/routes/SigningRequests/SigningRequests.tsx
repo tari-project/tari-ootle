@@ -8,6 +8,7 @@ import {
   useRejectSigningRequest,
 } from "@api/hooks/useSigningRequests";
 import { Accordion, AccordionDetails, AccordionSummary } from "@components/Accordion";
+import ComponentRulesChangeWarning from "@components/ComponentRulesChangeWarning";
 import ComponentUpgradeWarning from "@components/ComponentUpgradeWarning";
 import FetchStatusCheck from "@components/FetchStatusCheck";
 import PageHeading from "@components/PageHeading";
@@ -26,6 +27,7 @@ import type {
   SigningRequester,
   SigningRequestInfo,
 } from "@tari-project/ootle-ts-bindings";
+import { transactionBody } from "@tari-project/ootle-ts-bindings";
 import { useEffect, useState } from "react";
 import Inputs from "../Transactions/Inputs";
 import Instructions, { BlobContents } from "../Transactions/Instructions";
@@ -64,13 +66,16 @@ function statusColor(status: SigningRequestEffectiveStatus): "default" | "warnin
   }
 }
 
-/// The current time in seconds, updated every second.
-function useNow(): number {
+/// The current time in seconds, updated every second while enabled.
+function useNow(enabled: boolean): number {
   const [now, setNow] = useState(() => Date.now() / 1000);
   useEffect(() => {
+    if (!enabled) {
+      return;
+    }
     const t = setInterval(() => setNow(Date.now() / 1000), 1000);
     return () => clearInterval(t);
-  }, []);
+  }, [enabled]);
   return now;
 }
 
@@ -102,7 +107,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 /// What the signature authorises, in words, for the instructions this page
 /// knows how to read.
 function Summary({ request }: { request: SigningRequestInfo }) {
-  const v1 = request.transaction.V1;
+  const v1 = transactionBody(request.transaction);
   const instructions = v1?.instructions ?? [];
   const blobs = v1?.blobs ?? [];
   const governance = instructions.map((instruction) => describeGovernanceCall(instruction, blobs));
@@ -139,16 +144,16 @@ function RequestCard({ request }: { request: SigningRequestInfo }) {
   const approve = useApproveSigningRequest();
   const reject = useRejectSigningRequest();
   const [expanded, setExpanded] = useState<string | null>(null);
-  const now = useNow();
   const isActionable = request.status === "Pending";
+  const now = useNow(isActionable);
   // The server refuses a decision once the window closes; the next poll then
   // shows the request as expired.
-  const isExpired = Number(request.expires_at) <= now;
+  const isExpired = isActionable && Number(request.expires_at) <= now;
   const busy = approve.isPending || reject.isPending || isExpired;
   const error = isActionable ? (approve.error ?? reject.error) : null;
   const params = { request_id: request.request_id };
 
-  const v1 = request.transaction.V1;
+  const v1 = transactionBody(request.transaction);
   const instructions = v1?.instructions ?? [];
   const feeInstructions = v1?.fee_instructions ?? [];
   const inputs = v1?.inputs ?? [];
@@ -183,6 +188,7 @@ function RequestCard({ request }: { request: SigningRequestInfo }) {
       </Stack>
 
       <ComponentUpgradeWarning upgrades={request.component_upgrades} />
+      <ComponentRulesChangeWarning changes={request.component_rules_changes} />
       <Summary request={request} />
 
       <Stack direction="row" spacing={2} alignItems="baseline" sx={{ mb: 2 }} flexWrap="wrap">
@@ -220,6 +226,16 @@ function RequestCard({ request }: { request: SigningRequestInfo }) {
             <Chip label="seal also authorizes" size="small" color="warning" variant="outlined" sx={{ ml: 1 }} />
           )}
         </Field>
+        <Field label="Authorizers">
+          {request.authorizers.map((key) => (
+            <div key={key}>
+              <span style={{ fontFamily: "monospace" }}>{key}</span>
+              {key === request.signer_public_key && (
+                <Chip label="this key" size="small" color="warning" variant="outlined" sx={{ ml: 1 }} />
+              )}
+            </div>
+          ))}
+        </Field>
         <Field label="Main signer">
           {v1?.main_signer === "SealSigner" && "the sealer"}
           {(v1?.main_signer === "None" || v1 === undefined) && "none"}
@@ -238,8 +254,8 @@ function RequestCard({ request }: { request: SigningRequestInfo }) {
         <Field label="Max fee">
           {fees.length > 0 ? (
             <>
-              {fees.map((f) => (
-                <div key={f}>{f}</div>
+              {fees.map((f, i) => (
+                <div key={`${i}-${f}`}>{f}</div>
               ))}
               {undescribedFees > 0 && <div>Plus {undescribedFees} other fee instruction(s); review them below.</div>}
             </>
@@ -297,7 +313,10 @@ function RequestCard({ request }: { request: SigningRequestInfo }) {
               color="error"
               disabled={busy}
               startIcon={reject.isPending ? <CircularProgress size={16} color="inherit" /> : undefined}
-              onClick={() => reject.mutate(params)}
+              onClick={() => {
+                approve.reset();
+                reject.mutate(params);
+              }}
             >
               Reject
             </Button>
@@ -305,7 +324,10 @@ function RequestCard({ request }: { request: SigningRequestInfo }) {
               variant="contained"
               disabled={busy}
               startIcon={approve.isPending ? <CircularProgress size={16} color="inherit" /> : undefined}
-              onClick={() => approve.mutate(params)}
+              onClick={() => {
+                reject.reset();
+                approve.mutate(params);
+              }}
             >
               Approve &amp; Sign
             </Button>
@@ -318,7 +340,7 @@ function RequestCard({ request }: { request: SigningRequestInfo }) {
 
 export default function SigningRequests() {
   const { data, isFetching, isError, error } = useListPendingSigningRequests();
-  const { data: all } = useListAllSigningRequests();
+  const { data: all, isError: isAllError, error: allError } = useListAllSigningRequests();
 
   const pending = data?.requests ?? [];
   const rest = (all?.requests ?? []).filter((r) => r.status !== "Pending");
@@ -340,6 +362,11 @@ export default function SigningRequests() {
           {pending.map((r) => (
             <RequestCard key={r.request_id} request={r} />
           ))}
+          {isAllError && (
+            <Alert severity="error" sx={{ mt: 4 }}>
+              {allError?.message || "Failed to load signing request history."}
+            </Alert>
+          )}
           {rest.length > 0 && (
             <>
               <Typography variant="h5" sx={{ mt: 4, mb: 2 }}>

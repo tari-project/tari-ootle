@@ -72,6 +72,7 @@ use crate::{
     runtime::{
         AuthParams,
         AuthorizationScope,
+        ComponentRulesChange,
         DeclaredInputLoad,
         LoadedComponent,
         PayFee,
@@ -82,7 +83,7 @@ use crate::{
         RuntimeModule,
         StateTracker,
         reject_transient_values,
-        scope::{CallScope, FrameWriteMode, PushCallFrame},
+        scope::{CallScope, FrameWriteMode, HookFrame, PushCallFrame},
     },
     state_store::StateReader,
     template::LoadedTemplate,
@@ -551,7 +552,30 @@ where
             Instruction::UpdateComponentTemplate { .. } => {
                 Err(TransactionErrorKind::ComponentTemplateUpdateNotSupported)
             },
+            Instruction::SetComponentAccessRules {
+                component,
+                access_rules,
+            } => Self::set_component_rules(runtime, component, ComponentRulesChange::AccessRules(access_rules)),
+            Instruction::SetComponentOwnerRule { component, owner_rule } => {
+                Self::set_component_rules(runtime, component, ComponentRulesChange::OwnerRule(owner_rule))
+            },
         }
+    }
+
+    fn set_component_rules(
+        runtime: &Runtime,
+        component: ComponentReference,
+        change: ComponentRulesChange,
+    ) -> Result<Option<IndexedValue>, TransactionErrorKind> {
+        // A rule change touches only the header, so the state is neither indexed nor charged for.
+        let address = runtime.interface().resolve_component_address(component)?;
+        let component_lock = runtime.interface().lock_component(address, LockFlag::Write)?;
+        // Checked in the instruction's own scope: no frame is pushed, so the transaction's signer badges and
+        // authorized proofs are what satisfy the component's rules updater.
+        let result = runtime.interface().set_component_rules(&component_lock, change);
+        runtime.interface().unlock_component(component_lock)?;
+        result?;
+        Ok(None)
     }
 
     fn pay_fee_from_bucket(
@@ -625,18 +649,18 @@ where
             });
         }
 
-        // Every admission rule the module bytes alone can answer runs first, so a module refused by
-        // one of them is not billed for a compile nothing performed.
-        let structure = WasmModule::prevalidate_code(binary)?;
+        // The template consensus rules run first, so a module refused by one of them is not billed
+        // for a compile nothing performed.
+        let structure = WasmModule::validate(binary)?;
 
         // The compile is the most expensive thing a single instruction can ask of a validator, so it
         // is paid for before it runs. The size cap above and the function and variable caps in the
-        // prevalidation are what keep this charge affordable.
+        // validation are what keep this charge affordable.
         runtime
             .interface()
             .charge_template_compile(binary.len() as u64, &structure.compile)?;
 
-        let template_def = WasmModule::compile_prevalidated(binary, structure.shape)?;
+        let template_def = WasmModule::load_with_shape(binary, structure.shape)?.into_template_def();
         // The size cap above holds the binary within `MAX_TEMPLATE_BLOB_WIRE_BYTES` — a const assertion keeps the two
         // ordered — so constructing TemplateBlob is infallible.
         let blob = TemplateBlob::new_checked(binary).expect("template binary size verified above");
@@ -864,7 +888,7 @@ where
         method: &str,
         args: Vec<InstructionArg>,
         restrict_frame_to: Option<FrameWriteMode>,
-        arg_scope: Option<IndexedWellKnownTypes>,
+        hook_frame: Option<HookFrame>,
     ) -> Result<IndexedValue, TransactionErrorKind> {
         let component = runtime.interface().load_component(call)?;
         let template_address = component.template_address;
@@ -883,11 +907,19 @@ where
             .interface()
             .track_template_loaded(&template_address, template.code_size())?;
 
-        Self::invoke_component(template, runtime, component, method, args, restrict_frame_to, arg_scope)
+        Self::invoke_component(
+            template,
+            runtime,
+            component,
+            method,
+            args,
+            restrict_frame_to,
+            hook_frame,
+        )
     }
 
-    /// Calls `method` on `component`. The callee frame's argument scope is `arg_scope` when given, and otherwise
-    /// every substate the resolved `args` name.
+    /// Calls `method` on `component`. The callee frame's argument scope is every substate the resolved `args` name,
+    /// unless `hook_frame` pushes a resource auth hook's frame with its own argument scope.
     fn invoke_component(
         template: LoadedTemplate,
         runtime: &Runtime,
@@ -895,7 +927,7 @@ where
         method: &str,
         args: Vec<InstructionArg>,
         restrict_frame_to: Option<FrameWriteMode>,
-        arg_scope: Option<IndexedWellKnownTypes>,
+        hook_frame: Option<HookFrame>,
     ) -> Result<IndexedValue, TransactionErrorKind> {
         let template_def = template.shared_template_def();
         let function_def = template_def
@@ -925,13 +957,19 @@ where
         let resolved_args = runtime
             .interface()
             .resolve_args(Some(InstructionArg::from_type(&component.address)?), &args)?;
-        let arg_scope = match arg_scope {
-            Some(arg_scope) => arg_scope,
-            None => resolved_args
-                .iter()
-                .skip(1)
-                .map(IndexedWellKnownTypes::from_value)
-                .collect::<Result<_, _>>()?,
+        let (arg_scope, acting_component) = match hook_frame {
+            Some(HookFrame {
+                arg_scope,
+                acting_component,
+            }) => (arg_scope, acting_component),
+            None => (
+                resolved_args
+                    .iter()
+                    .skip(1)
+                    .map(IndexedWellKnownTypes::from_value)
+                    .collect::<Result<_, _>>()?,
+                None,
+            ),
         };
 
         runtime.interface().push_call_frame(
@@ -942,6 +980,7 @@ where
                 component_lock,
                 arg_scope: Box::new(arg_scope),
                 entity_id: component.entity_id,
+                acting_component,
             },
             restrict_frame_to,
         )?;

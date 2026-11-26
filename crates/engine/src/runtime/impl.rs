@@ -136,6 +136,7 @@ use tari_template_lib::{
             ResourceAuthAction,
             RestrictedAccessRule,
             RuleRequirement,
+            RulesUpdater,
             UpdateRule,
         },
         bytes::Bytes,
@@ -164,11 +165,12 @@ use super::{
     Runtime,
     RuntimeEvent,
     spend_script_execution::{SpendScriptExecution, StatementSpendView},
-    working_state::{WorkingState, reject_transient_values_in},
+    working_state::{AdmittedStealthTransfer, WorkingState, reject_transient_values_in},
 };
 use crate::{
     intrinsics,
     runtime::{
+        ComponentRulesChange,
         LoadedComponent,
         RuntimeError,
         RuntimeInterface,
@@ -176,7 +178,7 @@ use crate::{
         error::{ArgumentValidationError, LimitError},
         locking::{LockError, LockedSubstate},
         pay_fee::PayFee,
-        scope::{FrameWriteMode, PushCallFrame},
+        scope::{FrameWriteMode, HookFrame, PushCallFrame},
         tracker::{ComputeAllowance, FinalizedState, StateTracker},
     },
     state_store::StateReader,
@@ -257,6 +259,134 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
 
     fn main_signer(&self, needed_for: &'static str) -> Result<RistrettoPublicKeyBytes, RuntimeError> {
         self.main_signer.ok_or(RuntimeError::NoMainSigner { needed_for })
+    }
+
+    fn resolve_owner_rule(
+        &self,
+        owner_rule: OwnerRule,
+        needed_for: &'static str,
+    ) -> Result<SubstateOwnerRule, RuntimeError> {
+        Ok(match owner_rule {
+            OwnerRule::OwnedBySigner => SubstateOwnerRule::ByPublicKey(self.main_signer(needed_for)?),
+            OwnerRule::None => SubstateOwnerRule::None,
+            OwnerRule::ByAccessRule(rule) => SubstateOwnerRule::ByAccessRule(rule),
+            OwnerRule::ByPublicKey(key) => SubstateOwnerRule::ByPublicKey(key),
+        })
+    }
+
+    /// Returns the lock of the component whose frame is executing, which must be `component_address`: a component's
+    /// code changes only its own rules.
+    fn current_component_lock(
+        &self,
+        component_address: ComponentAddress,
+        action: ComponentAction,
+    ) -> Result<LockedSubstate, RuntimeError> {
+        self.tracker.read_with(|state| {
+            let component_lock = state
+                .current_call_scope()?
+                .get_current_component_lock()
+                .cloned()
+                .ok_or(RuntimeError::NotInComponentContext { action: action.into() })?;
+            // The component lock is created by the engine for the executing component, so this only checks that the
+            // engine call names it.
+            if *component_lock.substate_id() != component_address {
+                return Err(RuntimeError::LockError(LockError::SubstateNotLocked {
+                    address: SubstateId::Component(component_address),
+                }));
+            }
+            Ok(component_lock)
+        })
+    }
+
+    /// Validates `change` and applies it to the component behind `component_lock` once the current frame satisfies
+    /// the component's rules updater for `origin`. Method rules must name methods of `template_address`.
+    fn change_component_rules(
+        &self,
+        component_lock: &LockedSubstate,
+        template_address: &TemplateAddress,
+        change: RulesChange,
+        origin: RulesChangeOrigin,
+    ) -> Result<(), RuntimeError> {
+        match &change {
+            RulesChange::AccessRules(access_rules) => {
+                let template_def = self.get_template_def(template_address)?;
+                validate_component_access_rule_methods(access_rules, &template_def)?;
+                if access_rules.contains_scoped_to_component_or_template() {
+                    return Err(RuntimeError::InvalidArgument {
+                        argument: "access_rules",
+                        reason: "component(..)/template(..) cannot be used on a component method access rule"
+                            .to_string(),
+                    });
+                }
+                reject_invalid_rule("access_rules", access_rules.find_invalid_rule())?;
+            },
+            RulesChange::OwnerRule(owner_rule) => {
+                if let SubstateOwnerRule::ByAccessRule(rule) = owner_rule {
+                    // A component owner rule is evaluated with the component's own frame on top, where
+                    // `component(..)`/`template(..)` are constant (true for the component's own address).
+                    if rule.contains_scoped_to_component_or_template() {
+                        return Err(RuntimeError::InvalidArgument {
+                            argument: "owner_rule",
+                            reason: "component(..)/template(..) cannot be used in a component owner rule".to_string(),
+                        });
+                    }
+                    reject_invalid_rule("owner_rule", rule.find_invalid_rule())?;
+                }
+            },
+        }
+
+        let action = change.action();
+        self.tracker.write_with_authorization(|state| {
+            let component = state.get_component(component_lock)?;
+            let component_address =
+                component_lock
+                    .substate_id()
+                    .as_component_address()
+                    .ok_or_else(|| RuntimeError::InvariantError {
+                        function: "change_component_rules",
+                        details: "Locked substate is not a component".to_string(),
+                    })?;
+            match (component.rules_updater(), origin) {
+                (RulesUpdater::Locked, _) => {
+                    return Err(RuntimeError::ComponentRulesLocked {
+                        component: component_address,
+                    });
+                },
+                (RulesUpdater::TemplateManaged, RulesChangeOrigin::Instruction) => {
+                    return Err(RuntimeError::ComponentRulesTemplateManaged {
+                        component: component_address,
+                    });
+                },
+                // Only the current owner rule gates a change; the new rule may name anyone, which is how ownership is
+                // handed over. `SubstateOwnerRule::None` is satisfied by no caller, so setting it is final here.
+                (RulesUpdater::TemplateManaged, RulesChangeOrigin::ComponentCode) | (RulesUpdater::Owner, _) => {
+                    state
+                        .authorization()
+                        .require_ownership(action, component.as_ownership())?;
+                },
+                (RulesUpdater::AccessRule(rule), _) => {
+                    if !state.authorization().check_access_rule(rule)? {
+                        return Err(RuntimeError::AccessDenied {
+                            action_ident: action.into(),
+                        });
+                    }
+                },
+            }
+
+            match change {
+                RulesChange::AccessRules(access_rules) => {
+                    if access_rules != *component.access_rules() {
+                        state.update_component_header(component_lock, |header| header.access_rules = access_rules)?;
+                    }
+                },
+                RulesChange::OwnerRule(owner_rule) => {
+                    if owner_rule != *component.owner_rule() {
+                        state.update_component_header(component_lock, |header| header.owner_rule = owner_rule)?;
+                    }
+                },
+            }
+            Ok(())
+        })
     }
 
     fn invoke_modules_on_initialize(&self) -> Result<(), RuntimeError> {
@@ -567,7 +697,8 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
         .into_iter()
         .collect();
 
-        if let Some(component) = auth_caller.component().copied() {
+        let acting_component = auth_caller.component().copied();
+        if let Some(component) = acting_component {
             self.invoke_modules_on_runtime_call("load_component")?;
             self.charge_component_load(component)?;
             let state = self.tracker.write_with(|state_mut| {
@@ -593,13 +724,18 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
         })?;
 
         // The acting component never chose the hook code, so the hook's frame is confined to its own component
-        // state: it cannot act on any vault or resource it was handed, nor call out to a frame that could.
+        // state: it cannot act on any vault or resource it was handed, nor call out to a frame that could. It may
+        // read the vaults the acting component owns, which `check_component_scope` resolves through the acting
+        // component's loaded state.
         let ret = self.invoke_component_method(
             auth_hook.component_address,
             &auth_hook.method,
             args,
             Some(FrameWriteMode::OwnComponent),
-            Some(hook_arg_scope),
+            Some(HookFrame {
+                arg_scope: hook_arg_scope,
+                acting_component,
+            }),
         );
         if !resource_was_in_scope {
             self.tracker.write_with(|state_mut| {
@@ -696,15 +832,15 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
         Runtime::new(Rc::new(self.clone()))
     }
 
-    /// Calls `method` on `component_address`. `arg_scope`, when given, is the callee frame's argument scope in
-    /// place of the one derived from `args`.
+    /// Calls `method` on `component_address`. `hook_frame`, when given, pushes the callee as a resource auth hook's
+    /// frame, with its argument scope in place of the one derived from `args`.
     fn invoke_component_method(
         &self,
         component_address: ComponentAddress,
         method: &str,
         args: Vec<Bytes>,
         restrict_frame_to: Option<FrameWriteMode>,
-        arg_scope: Option<IndexedWellKnownTypes>,
+        hook_frame: Option<HookFrame>,
     ) -> Result<IndexedValue, RuntimeError> {
         let call_runtime = self.for_nested_call();
 
@@ -715,7 +851,7 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
             method,
             args.into_iter().map(InstructionArg::Literal).collect(),
             restrict_frame_to,
-            arg_scope,
+            hook_frame,
         )
         .map_err(|e| RuntimeError::CrossTemplateCallMethodError {
             component_address,
@@ -965,16 +1101,18 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
     /// - **script path** — the revealed leaf must be included under the output's committed `condition_root` (the
     ///   inclusion proof is verified exactly once, here), then the leaf is evaluated: an `AccessRule` leaf natively, a
     ///   `TemplateFunction` leaf as a read-only WASM predicate.
+    ///
+    /// Taking an [`AdmittedStealthTransfer`] means admission has run first: covenant predicates look claims up by
+    /// partition, and admission has already checked that each claim names a distinct input.
     fn verify_input_authorizations(
         &self,
         resource_address: ResourceAddressRef,
-        statement: &StealthTransferStatement,
+        transfer: &AdmittedStealthTransfer,
     ) -> Result<(), RuntimeError> {
+        let statement = transfer.statement();
         if statement.inputs_statement.inputs.is_empty() {
             return Ok(());
         }
-        // Covenant predicates look claims up by partition, so the claim list is bounded before any predicate runs.
-        stealth::validate_covenant_claims(statement)?;
         let resolved = self
             .tracker
             .read_with(|state| state.resolve_resource_address_ref(resource_address))?;
@@ -1433,6 +1571,20 @@ where
 
     fn load_component(&self, call: ComponentReference) -> Result<LoadedComponent, RuntimeError> {
         self.invoke_modules_on_runtime_call("load_component")?;
+        let address = self.resolve_component_address(call)?;
+        self.charge_component_load(address)?;
+        self.tracker.write_with(|state_mut| {
+            let component = state_mut.load_and_cache_component(address)?;
+            Ok(LoadedComponent {
+                address,
+                template_address: *component.template_address(),
+                entity_id: *component.entity_id(),
+                state_scope: IndexedWellKnownTypes::from_value(component.state())?,
+            })
+        })
+    }
+
+    fn resolve_component_address(&self, call: ComponentReference) -> Result<ComponentAddress, RuntimeError> {
         let address = match call {
             ComponentReference::Address(address) => address,
             ComponentReference::Workspace(id) => self.tracker.write_with(|state_mut| {
@@ -1488,20 +1640,15 @@ where
                 Ok::<_, RuntimeError>(address)
             })?,
         };
-        self.charge_component_load(address)?;
-        self.tracker.write_with(|state_mut| {
-            let component = state_mut.load_and_cache_component(address)?;
-            Ok(LoadedComponent {
-                address,
-                template_address: *component.template_address(),
-                entity_id: *component.entity_id(),
-                state_scope: IndexedWellKnownTypes::from_value(component.state())?,
-            })
-        })
+        Ok(address)
     }
 
     fn lock_component(&self, address: ComponentAddress, lock_flag: LockFlag) -> Result<LockedSubstate, RuntimeError> {
         self.tracker.lock_substate(SubstateId::Component(address), lock_flag)
+    }
+
+    fn unlock_component(&self, lock: LockedSubstate) -> Result<(), RuntimeError> {
+        self.tracker.unlock_substate(lock)
     }
 
     #[allow(clippy::too_many_lines)]
@@ -1528,6 +1675,7 @@ where
                     access_rules,
                     address_allocation,
                     upgrade_rule,
+                    rules_updater,
                 } = args.assert_one_arg()?;
 
                 let template_addr = self.tracker.get_template_address()?;
@@ -1565,15 +1713,23 @@ where
                     }
                     reject_invalid_rule("upgrade_rule", rule.find_invalid_rule())?;
                 }
+                // A template built before the rules updater existed sends none. Its components keep the rules
+                // behaviour that template was written against: changed only by its own code, by the owner.
+                let rules_updater = rules_updater.unwrap_or(RulesUpdater::TemplateManaged);
+                // The rules updater is evaluated both in the instruction's scope, where `component(..)`/`template(..)`
+                // name no frame, and with the component's own frame on top, where they are constant.
+                if let RulesUpdater::AccessRule(rule) = &rules_updater {
+                    if rule.contains_scoped_to_component_or_template() {
+                        return Err(RuntimeError::InvalidArgument {
+                            argument: "rules_updater",
+                            reason: "component(..)/template(..) cannot be used in a component rules updater"
+                                .to_string(),
+                        });
+                    }
+                    reject_invalid_rule("rules_updater", rule.find_invalid_rule())?;
+                }
 
-                let owner_rule = match owner_rule {
-                    OwnerRule::OwnedBySigner => {
-                        SubstateOwnerRule::ByPublicKey(self.main_signer("OwnerRule::OwnedBySigner")?)
-                    },
-                    OwnerRule::None => SubstateOwnerRule::None,
-                    OwnerRule::ByAccessRule(rule) => SubstateOwnerRule::ByAccessRule(rule),
-                    OwnerRule::ByPublicKey(key) => SubstateOwnerRule::ByPublicKey(key),
-                };
+                let owner_rule = self.resolve_owner_rule(owner_rule, "OwnerRule::OwnedBySigner")?;
 
                 let component_address = self.tracker.new_component(
                     encoded_state,
@@ -1581,6 +1737,7 @@ where
                     access_rules,
                     address_allocation,
                     upgrade_rule,
+                    rules_updater,
                 )?;
                 Ok(InvokeResult::encode(&component_address)?)
             },
@@ -1689,48 +1846,14 @@ where
                         })?;
 
                 let access_rules: ComponentAccessRules = args.assert_one_arg()?;
-
+                let component_lock = self.current_component_lock(component_address, ComponentAction::SetAccessRules)?;
                 let template_addr = self.tracker.get_template_address()?;
-                let template_def = self.get_template_def(&template_addr)?;
-                validate_component_access_rule_methods(&access_rules, &template_def)?;
-
-                if access_rules.contains_scoped_to_component_or_template() {
-                    return Err(RuntimeError::InvalidArgument {
-                        argument: "access_rules",
-                        reason: "component(..)/template(..) cannot be used on a component method access rule"
-                            .to_string(),
-                    });
-                }
-                reject_invalid_rule("access_rules", access_rules.find_invalid_rule())?;
-
-                self.tracker.write_with_authorization(|state| {
-                    let component_lock = state
-                        .current_call_scope()?
-                        .get_current_component_lock()
-                        .cloned()
-                        .ok_or(RuntimeError::NotInComponentContext {
-                            action: ComponentAction::SetAccessRules.into(),
-                        })?;
-                    // We only allow mutating of the current component. Note this check doesnt actually provide any
-                    // security itself, it's just checking the engine call is made correctly. The security comes from
-                    // the fact that the engine creates the lock on the currently executing component and that is the
-                    // lock we use to gain access.
-                    if *component_lock.substate_id() != component_address {
-                        return Err(RuntimeError::LockError(LockError::SubstateNotLocked {
-                            address: SubstateId::Component(component_address),
-                        }));
-                    }
-                    let component = state.get_component(&component_lock)?;
-                    state
-                        .authorization()
-                        .require_ownership(ComponentAction::SetAccessRules, component.as_ownership())?;
-
-                    if access_rules != *component.access_rules() {
-                        state.update_component_header(&component_lock, |header| header.access_rules = access_rules)?;
-                    }
-
-                    Ok::<_, RuntimeError>(())
-                })?;
+                self.change_component_rules(
+                    &component_lock,
+                    &template_addr,
+                    RulesChange::AccessRules(access_rules),
+                    RulesChangeOrigin::ComponentCode,
+                )?;
 
                 Ok(InvokeResult::unit())
             },
@@ -1744,49 +1867,14 @@ where
                         })?;
 
                 let owner_rule: SubstateOwnerRule = args.assert_one_arg()?;
-
-                // A component owner rule is only ever evaluated with the component's own frame on top, so
-                // `component(..)`/`template(..)` would be constant (true for the component's own address).
-                if let SubstateOwnerRule::ByAccessRule(rule) = &owner_rule &&
-                    rule.contains_scoped_to_component_or_template()
-                {
-                    return Err(RuntimeError::InvalidArgument {
-                        argument: "owner_rule",
-                        reason: "component(..)/template(..) cannot be used in a component owner rule".to_string(),
-                    });
-                }
-                if let SubstateOwnerRule::ByAccessRule(rule) = &owner_rule {
-                    reject_invalid_rule("owner_rule", rule.find_invalid_rule())?;
-                }
-
-                self.tracker.write_with_authorization(|state| {
-                    let component_lock = state
-                        .current_call_scope()?
-                        .get_current_component_lock()
-                        .cloned()
-                        .ok_or(RuntimeError::NotInComponentContext {
-                            action: ComponentAction::SetOwnerRule.into(),
-                        })?;
-                    // Only the current component may be mutated. The component lock is created by the engine for the
-                    // executing component, so this only checks that the engine call names it.
-                    if *component_lock.substate_id() != component_address {
-                        return Err(RuntimeError::LockError(LockError::SubstateNotLocked {
-                            address: SubstateId::Component(component_address),
-                        }));
-                    }
-                    let component = state.get_component(&component_lock)?;
-                    // Only the current owner rule gates this; the new rule may name anyone, which is how ownership
-                    // is handed over. `SubstateOwnerRule::None` is satisfied by no caller, so setting it is final.
-                    state
-                        .authorization()
-                        .require_ownership(ComponentAction::SetOwnerRule, component.as_ownership())?;
-
-                    if owner_rule != *component.owner_rule() {
-                        state.update_component_header(&component_lock, |header| header.owner_rule = owner_rule)?;
-                    }
-
-                    Ok::<_, RuntimeError>(())
-                })?;
+                let component_lock = self.current_component_lock(component_address, ComponentAction::SetOwnerRule)?;
+                let template_addr = self.tracker.get_template_address()?;
+                self.change_component_rules(
+                    &component_lock,
+                    &template_addr,
+                    RulesChange::OwnerRule(owner_rule),
+                    RulesChangeOrigin::ComponentCode,
+                )?;
 
                 Ok(InvokeResult::unit())
             },
@@ -2501,11 +2589,24 @@ where
                 })?;
 
                 self.tracker.write_with(|state_mut| {
+                    let op = if arg.freeze {
+                        "FreezeStealthUtxo"
+                    } else {
+                        "UnfreezeStealthUtxo"
+                    };
                     for utxo in arg.utxos {
                         let id = SubstateId::Utxo(UtxoAddress::new(resource_address, utxo));
                         let locked = state_mut.write_lock_substate(id.clone())?;
 
                         let utxo_mut = state_mut.get_utxo_mut(&locked)?;
+                        if utxo_mut.is_burnt() {
+                            state_mut.unlock_substate(locked)?;
+                            return Err(RuntimeError::InvalidOpStealthUtxoBurnt {
+                                op,
+                                resource_address,
+                                utxo_id: utxo,
+                            });
+                        }
 
                         // Freeze is idempotent.
                         if arg.freeze {
@@ -2696,9 +2797,7 @@ where
         trace!(target: LOG_TARGET, "Vault invoke: {} {:?}", vault_ref, action,);
 
         // Check vault ownership if referencing an ID
-        if action.requires_write_access() &&
-            let Some(vault_id) = vault_ref.vault_id()
-        {
+        if let Some(vault_id) = vault_ref.vault_id() {
             self.tracker
                 .read_with(|state| state.check_component_scope(&vault_id.into(), action))?;
         }
@@ -2988,7 +3087,7 @@ where
                         // TARI has no view key, so the viewable-balance surcharge never applies to a fee payment.
                         self.tracker
                             .charge_native_execution(stealth::transfer_native_points(admitted.statement(), false))?;
-                        self.verify_input_authorizations(TARI_TOKEN.into(), admitted.statement())?;
+                        self.verify_input_authorizations(TARI_TOKEN.into(), &admitted)?;
                         Some(admitted)
                     },
                     None => None,
@@ -4197,6 +4296,29 @@ where
         })
     }
 
+    fn set_component_rules(
+        &self,
+        component_lock: &LockedSubstate,
+        change: ComponentRulesChange,
+    ) -> Result<(), RuntimeError> {
+        self.invoke_modules_on_runtime_call("set_component_rules")?;
+        let template_address = self
+            .tracker
+            .read_with(|state| Ok::<_, RuntimeError>(*state.get_component(component_lock)?.template_address()))?;
+        let change = match change {
+            ComponentRulesChange::AccessRules(access_rules) => RulesChange::AccessRules(access_rules),
+            ComponentRulesChange::OwnerRule(owner_rule) => {
+                RulesChange::OwnerRule(self.resolve_owner_rule(owner_rule, "SetComponentOwnerRule")?)
+            },
+        };
+        self.change_component_rules(
+            component_lock,
+            &template_address,
+            change,
+            RulesChangeOrigin::Instruction,
+        )
+    }
+
     fn validate_return_value(&self, value: &IndexedValue) -> Result<(), RuntimeError> {
         self.tracker
             .read_with(|state| state.check_all_substates_known(value.well_known_types()))
@@ -4393,7 +4515,7 @@ where
         // their values to be in range; `execute_stealth_transfer` below range-proofs those same `statement` outputs.
         // Both run pre-commit in this one atomic call, so the two MUST stay coupled — decoupling them would reopen a
         // wraparound forgery in the covenant check.
-        self.verify_input_authorizations(resource_address.clone(), admitted.statement())?;
+        self.verify_input_authorizations(resource_address.clone(), &admitted)?;
 
         self.tracker.write_with_authorization(|state_mut| {
             let Some(container) =
@@ -4626,6 +4748,30 @@ where
     }
 }
 
+/// A rule replacement on a component, with any signer-relative owner rule already resolved.
+enum RulesChange {
+    AccessRules(ComponentAccessRules),
+    OwnerRule(SubstateOwnerRule),
+}
+
+impl RulesChange {
+    fn action(&self) -> ComponentAction {
+        match self {
+            Self::AccessRules(_) => ComponentAction::SetAccessRules,
+            Self::OwnerRule(_) => ComponentAction::SetOwnerRule,
+        }
+    }
+}
+
+/// Where a change to a component's rules comes from. Only `RulesUpdater::TemplateManaged` tells the two apart.
+#[derive(Clone, Copy)]
+enum RulesChangeOrigin {
+    /// The component's own code, through `ComponentManager`.
+    ComponentCode,
+    /// A top-level transaction instruction.
+    Instruction,
+}
+
 fn reject_invalid_rule(argument: &'static str, invalid: Option<InvalidAccessRule>) -> Result<(), RuntimeError> {
     match invalid {
         Some(InvalidAccessRule::EmptyAnyOf) => Err(RuntimeError::EmptyAccessRuleComposite {
@@ -4663,10 +4809,21 @@ fn validate_component_access_rule_methods(
     template_def: &TemplateDef,
 ) -> Result<(), RuntimeError> {
     for (name, _) in access_rules.method_access_rules_iter() {
-        if template_def.functions().iter().all(|f| f.name != *name) {
+        if template_def
+            .functions()
+            .iter()
+            .all(|f| !f.has_receiver() || f.name != *name)
+        {
+            let details = match template_def.functions().iter().find(|f| f.name == *name) {
+                Some(f) if f.is_migration() => {
+                    format!("'{name}' is a migration function; method access rules apply to component methods")
+                },
+                Some(_) => format!("'{name}' is a static function; method access rules apply to component methods"),
+                None => format!("No method '{name}' found in template"),
+            };
             return Err(RuntimeError::InvalidMethodAccessRule {
                 template_name: template_def.template_name().to_string(),
-                details: format!("No method '{}' found in template", name),
+                details,
             });
         }
     }
@@ -4705,7 +4862,7 @@ mod tests {
 
         fn get_template(&self, id: &TemplateAddress) -> Result<Option<Self::Template>, Self::Error> {
             Ok(tari_template_builtin::try_get_template_builtin(id)
-                .map(|code| crate::wasm::WasmModule::load_template_from_code(code).unwrap()))
+                .map(|code| crate::wasm::WasmModule::load(code).unwrap()))
         }
     }
 
@@ -5010,6 +5167,78 @@ mod tests {
             runtime.vault_invoke(VaultRef::Ref(vault_id), VaultAction::PayFee, pay_fee_args),
             Err(RuntimeError::InvalidArgument { argument, .. }) if argument.ends_with("PayFeeArg")
         ));
+    }
+
+    #[test]
+    fn set_stealth_utxos_freeze_rejects_burnt_utxo() {
+        use tari_engine_types::{Utxo, resource::Resource};
+        use tari_template_lib::{args::SetFreezeStealthUtxosArg, types::UtxoId};
+
+        let runtime = runtime_with_blobs(Blobs::default());
+        let resource_address = ResourceAddress::new([21u8; 32].into());
+        let burnt_utxo_id = UtxoId::from_array([22u8; UtxoId::LENGTH]);
+        let burnt_address = UtxoAddress::new(resource_address, burnt_utxo_id);
+
+        let resource = Resource::new(
+            ResourceType::Stealth,
+            SubstateOwnerRule::None,
+            ResourceAccessRules::new().freezable(AccessRule::AllowAll, UpdateRule::Locked),
+            Metadata::new(),
+            None,
+            None,
+            0,
+            false,
+        );
+
+        runtime
+            .push_call_frame(
+                PushCallFrame::Static {
+                    template_address: TemplateAddress::default(),
+                    module_name: "Test".to_string(),
+                    arg_scope: IndexedWellKnownTypes::new(),
+                    entity_id: EntityId::default(),
+                },
+                None,
+            )
+            .unwrap();
+        runtime.tracker.write_with(|state| {
+            state.new_substate(resource_address, resource).unwrap();
+            state
+                .new_substate(burnt_address.clone(), Utxo {
+                    output: None,
+                    is_frozen: false,
+                })
+                .unwrap();
+        });
+
+        for (freeze, expected_op) in [(true, "FreezeStealthUtxo"), (false, "UnfreezeStealthUtxo")] {
+            let arg = EngineArgs::from(vec![
+                tari_bor::encode(&SetFreezeStealthUtxosArg {
+                    utxos: vec![burnt_utxo_id],
+                    freeze,
+                })
+                .unwrap()
+                .into(),
+            ]);
+            let err = runtime
+                .resource_invoke(
+                    ResourceRef::Ref(resource_address),
+                    ResourceAction::SetStealthUtxosFreeze,
+                    arg,
+                )
+                .unwrap_err();
+            assert!(
+                matches!(
+                    err,
+                    RuntimeError::InvalidOpStealthUtxoBurnt {
+                        op,
+                        resource_address: actual_res,
+                        utxo_id: actual_id,
+                    } if op == expected_op && actual_res == resource_address && actual_id == burnt_utxo_id
+                ),
+                "freeze={freeze} returned unexpected error: {err:?}"
+            );
+        }
     }
 
     #[test]
@@ -5382,6 +5611,7 @@ mod tests {
                 ComponentAccessRules::new(),
                 None,
                 UpdateRule::Locked,
+                RulesUpdater::Locked,
             )
             .unwrap();
         runtime
@@ -5421,6 +5651,7 @@ mod tests {
                     component_lock,
                     arg_scope: Box::new(arg_scope),
                     entity_id,
+                    acting_component: None,
                 },
                 None,
             )
@@ -5486,6 +5717,360 @@ mod tests {
         runtime.pop_call_frame(&IndexedWellKnownTypes::new()).unwrap();
     }
 
+    const VAULT_READ_ACTIONS: [VaultAction; 6] = [
+        VaultAction::GetBalance,
+        VaultAction::GetLockedBalance,
+        VaultAction::GetResourceAddress,
+        VaultAction::GetNonFungibleIds,
+        VaultAction::GetCommitmentCount,
+        VaultAction::GetNonFungibles,
+    ];
+
+    struct VaultScopeFixture {
+        runtime: RuntimeInterfaceImpl<MemoryStateStore, DummyTemplateProvider>,
+        template_address: TemplateAddress,
+        resource_address: ResourceAddress,
+        vault_id: tari_template_lib::types::VaultId,
+        owner_entity: EntityId,
+        other_entity: EntityId,
+        owner_component: ComponentAddress,
+        owner_component_scope: IndexedWellKnownTypes,
+        other_component: ComponentAddress,
+    }
+
+    fn setup_vault_scope_fixture() -> VaultScopeFixture {
+        use tari_engine_types::{resource::Resource, vault::Vault};
+
+        let runtime = runtime_with_blobs(Blobs::default());
+        let template_address = TemplateAddress::from_array([12u8; 32]);
+        let resource_address = ResourceAddress::new([13u8; 32].into());
+        let vault_id = tari_template_lib::types::VaultId::new([14u8; 32].into());
+        let owner_entity = EntityId::default();
+        let other_entity = EntityId::new([3u8; EntityId::LENGTH]);
+        let other_component = create_test_component(&runtime, template_address, "Other", other_entity);
+
+        runtime
+            .push_call_frame(
+                PushCallFrame::Static {
+                    template_address,
+                    module_name: "Owner".to_string(),
+                    arg_scope: IndexedWellKnownTypes::new(),
+                    entity_id: owner_entity,
+                },
+                None,
+            )
+            .unwrap();
+        runtime.tracker.write_with(|state| {
+            let resource = Resource::new(
+                ResourceType::Fungible,
+                SubstateOwnerRule::None,
+                ResourceAccessRules::new(),
+                Metadata::new(),
+                None,
+                None,
+                6,
+                true,
+            );
+            state.new_substate(resource_address, resource).unwrap();
+            state
+                .new_substate(
+                    vault_id,
+                    Vault::new(ResourceContainer::public_fungible(resource_address, Amount::new(42))),
+                )
+                .unwrap();
+        });
+        let owner_state = tari_bor::to_value(&(vault_id, resource_address)).unwrap();
+        let owner_component_scope = IndexedWellKnownTypes::from_value(&owner_state).unwrap();
+        let owner_component = runtime
+            .tracker
+            .new_component(
+                owner_state,
+                SubstateOwnerRule::None,
+                ComponentAccessRules::new(),
+                None,
+                UpdateRule::Locked,
+                RulesUpdater::Locked,
+            )
+            .unwrap();
+        runtime
+            .pop_call_frame(&IndexedWellKnownTypes::from_value(&tari_bor::to_value(&owner_component).unwrap()).unwrap())
+            .unwrap();
+
+        VaultScopeFixture {
+            runtime,
+            template_address,
+            resource_address,
+            vault_id,
+            owner_entity,
+            other_entity,
+            owner_component,
+            owner_component_scope,
+            other_component,
+        }
+    }
+
+    #[test]
+    fn vault_read_actions_reject_out_of_scope_callers() {
+        let f = setup_vault_scope_fixture();
+
+        // 1. Static frame (including read-only context) without the vault in scope must fail with
+        //    NotInComponentContext.
+        for write_mode in [None, Some(FrameWriteMode::ReadOnly)] {
+            f.runtime
+                .push_call_frame(
+                    PushCallFrame::Static {
+                        template_address: f.template_address,
+                        module_name: "Attacker".to_string(),
+                        arg_scope: IndexedWellKnownTypes::new(),
+                        entity_id: f.other_entity,
+                    },
+                    write_mode,
+                )
+                .unwrap();
+            for action in VAULT_READ_ACTIONS {
+                let err = f
+                    .runtime
+                    .vault_invoke(VaultRef::Ref(f.vault_id), action, EngineArgs::default())
+                    .unwrap_err();
+                assert!(
+                    matches!(
+                        err,
+                        RuntimeError::NotInComponentContext {
+                            action: ActionIdent::Native(NativeAction::Vault(actual))
+                        } if std::mem::discriminant(&actual) == std::mem::discriminant(&action)
+                    ),
+                    "expected NotInComponentContext for {action:?} in mode {write_mode:?}, got {err:?}"
+                );
+            }
+            f.runtime.pop_call_frame(&IndexedWellKnownTypes::new()).unwrap();
+        }
+
+        // 2. Non-owning component frame must fail with SubstateNotOwned.
+        let other_lock = f.runtime.lock_component(f.other_component, LockFlag::Read).unwrap();
+        f.runtime
+            .push_call_frame(
+                PushCallFrame::ForComponent {
+                    template_address: f.template_address,
+                    module_name: "Other".to_string(),
+                    component_scope: IndexedWellKnownTypes::new(),
+                    component_lock: other_lock,
+                    arg_scope: Box::new(IndexedWellKnownTypes::new()),
+                    entity_id: f.other_entity,
+                    acting_component: None,
+                },
+                None,
+            )
+            .unwrap();
+        let expected_id = SubstateId::Vault(f.vault_id);
+        let expected_owner = SubstateId::Component(f.other_component);
+        for action in VAULT_READ_ACTIONS {
+            let err = f
+                .runtime
+                .vault_invoke(VaultRef::Ref(f.vault_id), action, EngineArgs::default())
+                .unwrap_err();
+            assert!(
+                matches!(
+                    err,
+                    RuntimeError::SubstateNotOwned { ref id, ref requested_owner }
+                        if *id == expected_id && **requested_owner == expected_owner
+                ),
+                "expected SubstateNotOwned for {action:?}, got {err:?}"
+            );
+        }
+        f.runtime.pop_call_frame(&IndexedWellKnownTypes::new()).unwrap();
+    }
+
+    #[test]
+    fn vault_read_actions_succeed_for_owning_component() {
+        use tari_template_lib::{models::NonFungible, types::NonFungibleId};
+
+        let f = setup_vault_scope_fixture();
+        let owner_lock = f.runtime.lock_component(f.owner_component, LockFlag::Read).unwrap();
+        f.runtime
+            .push_call_frame(
+                PushCallFrame::ForComponent {
+                    template_address: f.template_address,
+                    module_name: "Owner".to_string(),
+                    component_scope: f.owner_component_scope,
+                    component_lock: owner_lock,
+                    arg_scope: Box::new(IndexedWellKnownTypes::new()),
+                    entity_id: f.owner_entity,
+                    acting_component: None,
+                },
+                None,
+            )
+            .unwrap();
+
+        let balance: Amount = f
+            .runtime
+            .vault_invoke(
+                VaultRef::Ref(f.vault_id),
+                VaultAction::GetBalance,
+                EngineArgs::default(),
+            )
+            .unwrap()
+            .decode()
+            .unwrap();
+        assert_eq!(balance, Amount::new(42));
+        let locked_balance: Amount = f
+            .runtime
+            .vault_invoke(
+                VaultRef::Ref(f.vault_id),
+                VaultAction::GetLockedBalance,
+                EngineArgs::default(),
+            )
+            .unwrap()
+            .decode()
+            .unwrap();
+        assert_eq!(locked_balance, Amount::zero());
+        let actual_resource: ResourceAddress = f
+            .runtime
+            .vault_invoke(
+                VaultRef::Ref(f.vault_id),
+                VaultAction::GetResourceAddress,
+                EngineArgs::default(),
+            )
+            .unwrap()
+            .decode()
+            .unwrap();
+        assert_eq!(actual_resource, f.resource_address);
+        let nft_ids: std::collections::BTreeSet<NonFungibleId> = f
+            .runtime
+            .vault_invoke(
+                VaultRef::Ref(f.vault_id),
+                VaultAction::GetNonFungibleIds,
+                EngineArgs::default(),
+            )
+            .unwrap()
+            .decode()
+            .unwrap();
+        assert!(nft_ids.is_empty());
+        let commitment_count: u64 = f
+            .runtime
+            .vault_invoke(
+                VaultRef::Ref(f.vault_id),
+                VaultAction::GetCommitmentCount,
+                EngineArgs::default(),
+            )
+            .unwrap()
+            .decode()
+            .unwrap();
+        assert_eq!(commitment_count, 0);
+        let nfts: Vec<NonFungible> = f
+            .runtime
+            .vault_invoke(
+                VaultRef::Ref(f.vault_id),
+                VaultAction::GetNonFungibles,
+                EngineArgs::default(),
+            )
+            .unwrap()
+            .decode()
+            .unwrap();
+        assert!(nfts.is_empty());
+        f.runtime.pop_call_frame(&IndexedWellKnownTypes::new()).unwrap();
+    }
+
+    /// Pushes a resource auth hook frame on `hook_component`, triggered by `acting_component`.
+    fn push_hook_frame(f: &VaultScopeFixture, hook_component: ComponentAddress, acting_component: ComponentAddress) {
+        let hook_lock = f.runtime.lock_component(hook_component, LockFlag::Read).unwrap();
+        f.runtime
+            .push_call_frame(
+                PushCallFrame::ForComponent {
+                    template_address: f.template_address,
+                    module_name: "Hook".to_string(),
+                    component_scope: IndexedWellKnownTypes::new(),
+                    component_lock: hook_lock,
+                    arg_scope: Box::new(IndexedWellKnownTypes::new()),
+                    entity_id: f.other_entity,
+                    acting_component: Some(acting_component),
+                },
+                Some(FrameWriteMode::OwnComponent),
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn hook_frame_reads_vaults_of_the_acting_component() {
+        let f = setup_vault_scope_fixture();
+        push_hook_frame(&f, f.other_component, f.owner_component);
+
+        for action in VAULT_READ_ACTIONS {
+            f.runtime
+                .vault_invoke(VaultRef::Ref(f.vault_id), action, EngineArgs::default())
+                .unwrap_or_else(|err| panic!("hook read {action:?} of the acting component's vault failed: {err:?}"));
+        }
+        let balance: Amount = f
+            .runtime
+            .vault_invoke(
+                VaultRef::Ref(f.vault_id),
+                VaultAction::GetBalance,
+                EngineArgs::default(),
+            )
+            .unwrap()
+            .decode()
+            .unwrap();
+        assert_eq!(balance, Amount::new(42));
+        f.runtime.pop_call_frame(&IndexedWellKnownTypes::new()).unwrap();
+    }
+
+    #[test]
+    fn hook_frame_rejects_reads_of_vaults_the_acting_component_does_not_own() {
+        let f = setup_vault_scope_fixture();
+        let third_component = create_test_component(
+            &f.runtime,
+            f.template_address,
+            "Third",
+            EntityId::new([4u8; EntityId::LENGTH]),
+        );
+        push_hook_frame(&f, f.other_component, third_component);
+
+        let expected_id = SubstateId::Vault(f.vault_id);
+        let expected_owner = SubstateId::Component(f.other_component);
+        for action in VAULT_READ_ACTIONS {
+            let err = f
+                .runtime
+                .vault_invoke(VaultRef::Ref(f.vault_id), action, EngineArgs::default())
+                .unwrap_err();
+            assert!(
+                matches!(
+                    err,
+                    RuntimeError::SubstateNotOwned { ref id, ref requested_owner }
+                        if *id == expected_id && **requested_owner == expected_owner
+                ),
+                "expected SubstateNotOwned for {action:?}, got {err:?}"
+            );
+        }
+        f.runtime.pop_call_frame(&IndexedWellKnownTypes::new()).unwrap();
+    }
+
+    #[test]
+    fn hook_frame_rejects_writes_to_vaults_of_the_acting_component() {
+        let f = setup_vault_scope_fixture();
+        push_hook_frame(&f, f.other_component, f.owner_component);
+
+        let expected_id = SubstateId::Vault(f.vault_id);
+        let expected_owner = SubstateId::Component(f.other_component);
+        for action in [
+            VaultAction::Withdraw,
+            VaultAction::Deposit,
+            VaultAction::CreateProofByResource,
+        ] {
+            let err = f
+                .runtime
+                .vault_invoke(VaultRef::Ref(f.vault_id), action, EngineArgs::default())
+                .unwrap_err();
+            assert!(
+                matches!(
+                    err,
+                    RuntimeError::SubstateNotOwned { ref id, ref requested_owner }
+                        if *id == expected_id && **requested_owner == expected_owner
+                ),
+                "expected SubstateNotOwned for {action:?}, got {err:?}"
+            );
+        }
+        f.runtime.pop_call_frame(&IndexedWellKnownTypes::new()).unwrap();
+    }
+
     #[test]
     fn component_get_state_enforces_call_scope_and_charges_component_load() {
         use tari_engine_types::limits::component_load_points;
@@ -5525,6 +6110,7 @@ mod tests {
                 ComponentAccessRules::new(),
                 None,
                 UpdateRule::Locked,
+                RulesUpdater::Locked,
             )
             .unwrap();
         runtime
@@ -5544,6 +6130,7 @@ mod tests {
                     component_lock: caller_lock,
                     arg_scope: Box::new(IndexedWellKnownTypes::new()),
                     entity_id,
+                    acting_component: None,
                 },
                 None,
             )
@@ -5576,6 +6163,7 @@ mod tests {
                     component_lock: caller_lock,
                     arg_scope: Box::new(arg_scope),
                     entity_id,
+                    acting_component: None,
                 },
                 None,
             )
@@ -5621,6 +6209,7 @@ mod tests {
                     component_lock: caller_lock,
                     arg_scope: Box::new(IndexedWellKnownTypes::new()),
                     entity_id,
+                    acting_component: None,
                 },
                 None,
             )
@@ -5692,6 +6281,7 @@ mod tests {
                     component_lock: caller_lock,
                     arg_scope: Box::new(arg_scope),
                     entity_id,
+                    acting_component: None,
                 },
                 None,
             )
@@ -5733,6 +6323,7 @@ mod tests {
                 access_rules,
                 None,
                 UpdateRule::AccessRule(AccessRule::AllowAll),
+                RulesUpdater::Locked,
             )
             .unwrap();
         runtime
@@ -5819,5 +6410,59 @@ mod tests {
             })
             .unwrap();
         runtime.pop_call_frame(&IndexedWellKnownTypes::new()).unwrap();
+    }
+
+    #[test]
+    fn validate_component_access_rule_methods_rejects_static_and_migration_functions() {
+        use tari_template_abi::{FunctionDef, FunctionKind, Receiver, TemplateDefV2, Type};
+
+        let template_def = TemplateDef::V2(TemplateDefV2 {
+            template_name: "TestTemplate".to_string(),
+            abi_version: tari_template_abi::version::LATEST_TEMPLATE_VERSION,
+            functions: vec![
+                FunctionDef {
+                    name: "new".to_string(),
+                    kind: FunctionKind::Function,
+                    arguments: vec![],
+                    output: Type::Unit,
+                },
+                FunctionDef {
+                    name: "withdraw".to_string(),
+                    kind: FunctionKind::Method(Receiver::RefMut),
+                    arguments: vec![],
+                    output: Type::Unit,
+                },
+                FunctionDef {
+                    name: "migrate_v2".to_string(),
+                    kind: FunctionKind::Migration { from: Type::Unit },
+                    arguments: vec![],
+                    output: Type::Unit,
+                },
+            ],
+        });
+
+        let valid = ComponentAccessRules::new().add_method_rule("withdraw", AccessRule::AllowAll);
+        assert!(validate_component_access_rule_methods(&valid, &template_def).is_ok());
+
+        let static_fn = ComponentAccessRules::new().add_method_rule("new", AccessRule::AllowAll);
+        let err = validate_component_access_rule_methods(&static_fn, &template_def).unwrap_err();
+        assert!(
+            matches!(err, RuntimeError::InvalidMethodAccessRule { ref details, .. } if details.contains("'new' is a static function")),
+            "unexpected error for static function: {err:?}"
+        );
+
+        let migration_fn = ComponentAccessRules::new().add_method_rule("migrate_v2", AccessRule::AllowAll);
+        let err = validate_component_access_rule_methods(&migration_fn, &template_def).unwrap_err();
+        assert!(
+            matches!(err, RuntimeError::InvalidMethodAccessRule { ref details, .. } if details.contains("'migrate_v2' is a migration function")),
+            "unexpected error for migration function: {err:?}"
+        );
+
+        let missing = ComponentAccessRules::new().add_method_rule("deposit", AccessRule::AllowAll);
+        let err = validate_component_access_rule_methods(&missing, &template_def).unwrap_err();
+        assert!(
+            matches!(err, RuntimeError::InvalidMethodAccessRule { ref details, .. } if details.contains("No method 'deposit' found")),
+            "unexpected error for missing method: {err:?}"
+        );
     }
 }

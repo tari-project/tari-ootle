@@ -1,6 +1,7 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+import { bech32m } from "bech32";
 import { describe, expect, it } from "vitest";
 import { DecodedOotleAddress, decodeOotleAddress, encodeOotleAddress, validateOotleAddress } from "../src";
 
@@ -109,5 +110,54 @@ describe("OotleAddress de/encoding", () => {
     // Temporarily change network to an unsupported one
     (sample as any).network = "unsupportednet";
     expect(() => encodeOotleAddress(sample)).toThrow();
+  });
+
+  it("encodes, decodes, and validates a 64-byte destinationTag on mainnet", () => {
+    const sample = makeDecodedAddress();
+    sample.network = "mainnet";
+    sample.destinationTag = "é".repeat(32); // 64 UTF-8 bytes
+
+    const address = encodeOotleAddress(sample);
+    const parsed = decodeOotleAddress(address);
+
+    expect(address.startsWith("otl_1")).toBe(true);
+    expect(parsed.destinationTag).toEqual(sample.destinationTag);
+    expect(validateOotleAddress(address)).toBe(true);
+  });
+
+  it("rejects encoding a destinationTag longer than 64 bytes on mainnet and testnets", () => {
+    const mainnetAscii = makeDecodedAddress();
+    mainnetAscii.network = "mainnet";
+    mainnetAscii.destinationTag = "x".repeat(65);
+    expect(() => encodeOotleAddress(mainnetAscii)).toThrow(/64 bytes/);
+
+    const mainnetUtf8 = makeDecodedAddress();
+    mainnetUtf8.network = "mainnet";
+    mainnetUtf8.destinationTag = "é".repeat(33); // 33 chars, 66 UTF-8 bytes
+    expect(() => encodeOotleAddress(mainnetUtf8)).toThrow(/64 bytes/);
+
+    const mainnetBytes = makeDecodedAddress();
+    mainnetBytes.network = "mainnet";
+    mainnetBytes.destinationTag = new Uint8Array(65);
+    expect(() => encodeOotleAddress(mainnetBytes)).toThrow(/64 bytes/);
+
+    const esmeraldaAscii = makeDecodedAddress();
+    esmeraldaAscii.network = "esmeralda";
+    esmeraldaAscii.destinationTag = "x".repeat(65);
+    expect(() => encodeOotleAddress(esmeraldaAscii)).toThrow(/64 bytes/);
+  });
+
+  it("rejects decoding and validating a mainnet address whose destinationTag exceeds 64 bytes", () => {
+    // Mainnet uses the 4-char "otl_" HRP, so a 65- or 66-byte destination tag still fits within
+    // the 220-char bech32m length cap derived from 8-char testnet HRPs.
+    for (const tagLen of [65, 66]) {
+      const payload = new Uint8Array(64 + tagLen);
+      payload.fill(0x42);
+      const oversizedAddress = bech32m.encode("otl_", bech32m.toWords(payload), 256);
+
+      expect(oversizedAddress.length).toBeLessThanOrEqual(220);
+      expect(() => decodeOotleAddress(oversizedAddress)).toThrow(/maximum is 128/);
+      expect(validateOotleAddress(oversizedAddress)).toBe(false);
+    }
   });
 });

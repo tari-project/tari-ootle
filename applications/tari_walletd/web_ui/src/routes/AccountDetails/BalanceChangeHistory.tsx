@@ -38,7 +38,7 @@ import type {
 import { shortenString } from "@tari-project/ootle-ts-bindings";
 import { Currency } from "@utils/currency";
 import { formatCurrency, formatTimestamp, validateHash } from "@utils/helpers";
-import { type FormEvent, useId, useState } from "react";
+import { type FormEvent, useEffect, useId, useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
 import { useAccountsGetBalanceChanges } from "../../services/api/hooks/useAccounts";
 
@@ -134,7 +134,7 @@ function Source({ change }: { change: BalanceChange }) {
   }
 }
 
-export function BalanceChangeHistory({ accountAddress, resourceAddress }: BalanceChangeHistoryProps) {
+function BalanceChangeHistoryInner({ accountAddress, resourceAddress }: BalanceChangeHistoryProps) {
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
   const [sourceDraft, setSourceDraft] = useState<BalanceChangeSourceType | "">("");
@@ -145,7 +145,7 @@ export function BalanceChangeHistory({ accountAddress, resourceAddress }: Balanc
   const showBalance = useAccountStore((state) => state.showBalance);
   const trimmedTransaction = transactionDraft.trim();
   const transactionIsInvalid = trimmedTransaction !== "" && !validateHash(trimmedTransaction);
-  const { data, isLoading, isError, error, isRefetching } = useAccountsGetBalanceChanges(
+  const { data, isLoading, isError, error, isRefetching, isPlaceholderData } = useAccountsGetBalanceChanges(
     accountAddress,
     page * rowsPerPage,
     rowsPerPage,
@@ -153,6 +153,18 @@ export function BalanceChangeHistory({ accountAddress, resourceAddress }: Balanc
     sourceType,
     transactionId,
   );
+
+  const total = Number(data?.total ?? 0);
+  const maxPage = Math.max(0, Math.ceil(total / rowsPerPage) - 1);
+  const clampedPage = Math.min(page, maxPage);
+
+  useEffect(() => {
+    if (data !== undefined && !isPlaceholderData && page > maxPage) {
+      setPage(maxPage);
+    }
+  }, [data, isPlaceholderData, page, maxPage]);
+
+  const hasActiveFilters = sourceType !== undefined || transactionId !== undefined;
 
   const applyFilters = (event: FormEvent) => {
     event.preventDefault();
@@ -171,11 +183,7 @@ export function BalanceChangeHistory({ accountAddress, resourceAddress }: Balanc
   };
 
   return (
-    <FetchStatusCheck
-      isLoading={isLoading && !isRefetching}
-      isError={isError}
-      errorMessage={error?.message || "Error fetching balance changes"}
-    >
+    <>
       <Stack
         component="form"
         onSubmit={applyFilters}
@@ -214,66 +222,78 @@ export function BalanceChangeHistory({ accountAddress, resourceAddress }: Balanc
           Clear
         </Button>
       </Stack>
-      <TableContainer>
-        <Table
-          aria-label={resourceAddress ? "Resource balance changes" : "Account balance changes"}
-          sx={{ minWidth: 760 }}
-        >
-          <TableHead>
-            <TableRow>
-              <TableCell>Timestamp</TableCell>
-              {!resourceAddress && <TableCell>Resource</TableCell>}
-              <TableCell>Change</TableCell>
-              <TableCell>New Balance</TableCell>
-              <TableCell>Source</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {data?.changes.map((change) => (
-              <TableRow key={change.id}>
-                <DataTableCell>
-                  <ChangeTimestamp timestamp={change.created_at} />
-                </DataTableCell>
-                {!resourceAddress && (
-                  <DataTableCell>
-                    <CopyAddress address={change.resource_address} display={change.token_symbol || undefined} />
-                  </DataTableCell>
-                )}
-                <DataTableCell>
-                  <ChangeValues change={change} showBalance={showBalance} />
-                </DataTableCell>
-                <DataTableCell>
-                  <NewBalance change={change} showBalance={showBalance} />
-                </DataTableCell>
-                <DataTableCell>
-                  <Source change={change} />
-                </DataTableCell>
-              </TableRow>
-            ))}
-            {data?.changes.length === 0 && (
+      <FetchStatusCheck
+        isLoading={isLoading && !isRefetching}
+        isError={isError}
+        errorMessage={error?.message || "Error fetching balance changes"}
+      >
+        <TableContainer>
+          <Table
+            aria-label={resourceAddress ? "Resource balance changes" : "Account balance changes"}
+            sx={{ minWidth: 760 }}
+          >
+            <TableHead>
               <TableRow>
-                <TableCell colSpan={resourceAddress ? 4 : 5} align="center">
-                  No balance changes recorded yet.
-                </TableCell>
+                <TableCell>Timestamp</TableCell>
+                {!resourceAddress && <TableCell>Resource</TableCell>}
+                <TableCell>Change</TableCell>
+                <TableCell>New Balance</TableCell>
+                <TableCell>Source</TableCell>
               </TableRow>
-            )}
-          </TableBody>
-        </Table>
-        <TablePagination
-          rowsPerPageOptions={[5, 10, 25]}
-          component="div"
-          count={Number(data?.total ?? 0)}
-          rowsPerPage={rowsPerPage}
-          page={page}
-          onPageChange={(_event, nextPage) => setPage(nextPage)}
-          onRowsPerPageChange={(event) => {
-            setRowsPerPage(Number.parseInt(event.target.value, 10));
-            setPage(0);
-          }}
-        />
-      </TableContainer>
-    </FetchStatusCheck>
+            </TableHead>
+            <TableBody>
+              {data?.changes.map((change) => (
+                <TableRow key={change.id}>
+                  <DataTableCell>
+                    <ChangeTimestamp timestamp={change.created_at} />
+                  </DataTableCell>
+                  {!resourceAddress && (
+                    <DataTableCell>
+                      <CopyAddress address={change.resource_address} display={change.token_symbol || undefined} />
+                    </DataTableCell>
+                  )}
+                  <DataTableCell>
+                    <ChangeValues change={change} showBalance={showBalance} />
+                  </DataTableCell>
+                  <DataTableCell>
+                    <NewBalance change={change} showBalance={showBalance} />
+                  </DataTableCell>
+                  <DataTableCell>
+                    <Source change={change} />
+                  </DataTableCell>
+                </TableRow>
+              ))}
+              {data?.changes.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={resourceAddress ? 4 : 5} align="center">
+                    {hasActiveFilters
+                      ? "No balance changes match the current filters."
+                      : "No balance changes recorded yet."}
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+          <TablePagination
+            rowsPerPageOptions={[5, 10, 25]}
+            component="div"
+            count={total}
+            rowsPerPage={rowsPerPage}
+            page={clampedPage}
+            onPageChange={(_event, nextPage) => setPage(nextPage)}
+            onRowsPerPageChange={(event) => {
+              setRowsPerPage(Number.parseInt(event.target.value, 10));
+              setPage(0);
+            }}
+          />
+        </TableContainer>
+      </FetchStatusCheck>
+    </>
   );
+}
+
+export function BalanceChangeHistory(props: BalanceChangeHistoryProps) {
+  return <BalanceChangeHistoryInner key={`${props.accountAddress}:${props.resourceAddress ?? ""}`} {...props} />;
 }
 
 interface BalanceChangeHistoryDialogProps extends BalanceChangeHistoryProps {

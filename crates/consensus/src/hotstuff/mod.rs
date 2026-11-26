@@ -41,7 +41,7 @@ mod vote_collector;
 mod worker;
 
 pub use common::*;
-pub use config::HotstuffConfig;
+pub use config::{DEFAULT_CATCH_UP_PAGE_BYTES, HotstuffConfig};
 pub use current_view::*;
 pub use epoch_end_drain::EpochEndDrain;
 pub use error::*;

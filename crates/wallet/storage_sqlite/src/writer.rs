@@ -177,6 +177,62 @@ impl<'a> WriteTransaction<'a> {
         Ok(())
     }
 
+    /// Confirms the unconfirmed stealth outputs in `ids` minted under `lock_id`, including those later locked for
+    /// spend within the same lock (e.g. a fee-intent change output whose main-intent spend did not commit).
+    fn stealth_outputs_confirm_by_lock_id(
+        &mut self,
+        lock_id: WalletLockId,
+        ids: &[i32],
+    ) -> Result<(), WalletStorageError> {
+        use crate::schema::stealth_outputs;
+
+        if ids.is_empty() {
+            return Ok(());
+        }
+        diesel::update(stealth_outputs::table)
+            .filter(stealth_outputs::lock_id.eq(lock_id))
+            .filter(stealth_outputs::is_on_chain.eq(false))
+            .filter(stealth_outputs::status.eq_any([
+                OutputStatus::LockedUnconfirmed.as_key_str(),
+                OutputStatus::LockedForSpend.as_key_str(),
+            ]))
+            .filter(stealth_outputs::id.eq_any(ids))
+            .set((
+                stealth_outputs::status.eq(OutputStatus::Unspent.as_key_str()),
+                stealth_outputs::lock_id.eq::<Option<i32>>(None),
+                stealth_outputs::locked_at.eq::<Option<PrimitiveDateTime>>(None),
+                stealth_outputs::is_on_chain.eq(true),
+            ))
+            .execute(self.connection())
+            .map_err(|e| WalletStorageError::general("stealth_outputs_confirm_by_lock_id", e))?;
+        Ok(())
+    }
+
+    /// Marks the stealth outputs in `ids` locked for spend by `lock_id` as spent.
+    fn stealth_outputs_spend_by_lock_id(
+        &mut self,
+        lock_id: WalletLockId,
+        ids: &[i32],
+    ) -> Result<(), WalletStorageError> {
+        use crate::schema::stealth_outputs;
+
+        if ids.is_empty() {
+            return Ok(());
+        }
+        diesel::update(stealth_outputs::table)
+            .filter(stealth_outputs::lock_id.eq(lock_id))
+            .filter(stealth_outputs::status.eq(OutputStatus::LockedForSpend.as_key_str()))
+            .filter(stealth_outputs::id.eq_any(ids))
+            .set((
+                stealth_outputs::status.eq(OutputStatus::Spent.as_key_str()),
+                stealth_outputs::lock_id.eq::<Option<i32>>(None),
+                stealth_outputs::locked_at.eq::<Option<PrimitiveDateTime>>(None),
+            ))
+            .execute(self.connection())
+            .map_err(|e| WalletStorageError::general("stealth_outputs_spend_by_lock_id", e))?;
+        Ok(())
+    }
+
     /// Finalizes the stealth outputs held by `lock_id` against the transaction's diff and returns the
     /// `(account_id, resource_address)` pairs whose unspent balance the finalize changed.
     fn stealth_outputs_finalize_by_lock_id(
@@ -203,35 +259,37 @@ impl<'a> WriteTransaction<'a> {
             .up_iter()
             .filter_map(|(id, _)| id.as_utxo_address())
             .collect::<HashSet<_>>();
+        let burnt_id_index = diff
+            .up_iter()
+            .filter(|(_, s)| s.substate_value().as_utxo().is_some_and(|u| u.is_burnt()))
+            .filter_map(|(id, _)| id.as_utxo_address())
+            .collect::<HashSet<_>>();
         let down_id_index = diff
             .down_iter()
             .filter_map(|(id, version)| Some((id.as_utxo_address()?, *version)))
             .collect::<HashMap<_, _>>();
         let mut to_confirm = vec![];
         let mut to_spend = vec![];
+        let mut to_burn = vec![];
         let mut spent_versions = vec![];
         let mut affected_balances = HashSet::new();
 
         for res in locked_outputs {
             let (id, owner_account_id, resx, commitment) =
                 res.map_err(|e| WalletStorageError::general(OPERATION, e))?;
-            let resource_address: ResourceAddress = resx.parse().map_err(|_| WalletStorageError::DecodingError {
-                operation: "try_to_substate_id",
-                item: "output",
-                details: format!("Corrupt db: invalid resource address '{resx}' for id {id}"),
-            })?;
-            let commitment: PedersenCommitmentBytes =
-                deserialize_hex_try_from(&commitment).map_err(|_| WalletStorageError::DecodingError {
-                    operation: "try_into_output",
-                    item: "output commitment",
-                    details: "Corrupt db: invalid hex representation".to_string(),
-                })?;
-
-            let addr = UtxoAddress::new(resource_address, commitment.into());
+            let addr = stealth_output_row_address(id, &resx, &commitment)?;
+            let resource_address = *addr.resource_address();
             let downed_version = down_id_index.get(&addr).copied();
             let is_upped = up_id_index.contains(&addr);
+            let is_burnt = burnt_id_index.contains(&addr);
 
-            if is_upped {
+            if is_burnt {
+                if let Some(version) = downed_version {
+                    spent_versions.push((addr.clone(), version));
+                }
+                to_burn.push(addr);
+                affected_balances.insert((owner_account_id, resource_address));
+            } else if is_upped {
                 to_confirm.push(id);
                 affected_balances.insert((owner_account_id, resource_address));
             } else if let Some(version) = downed_version {
@@ -243,38 +301,15 @@ impl<'a> WriteTransaction<'a> {
             }
         }
 
-        if !to_confirm.is_empty() {
-            // Unlock locked unconfirmed stealth_outputs
-            diesel::update(stealth_outputs::table)
-                .filter(stealth_outputs::lock_id.eq(lock_id))
-                .filter(stealth_outputs::status.eq(OutputStatus::LockedUnconfirmed.as_key_str()))
-                .filter(stealth_outputs::id.eq_any(to_confirm))
-                .set((
-                    stealth_outputs::status.eq(OutputStatus::Unspent.as_key_str()),
-                    stealth_outputs::lock_id.eq::<Option<i32>>(None),
-                    stealth_outputs::locked_at.eq::<Option<PrimitiveDateTime>>(None),
-                    stealth_outputs::is_on_chain.eq(true),
-                ))
-                .execute(self.connection())
-                .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+        self.stealth_outputs_confirm_by_lock_id(lock_id, &to_confirm)?;
+        self.stealth_outputs_spend_by_lock_id(lock_id, &to_spend)?;
+
+        for address in &to_burn {
+            self.stealth_outputs_mark_as_burnt(address)?;
         }
 
-        if !to_spend.is_empty() {
-            // Mark locked outputs as spent
-            diesel::update(stealth_outputs::table)
-                .filter(stealth_outputs::lock_id.eq(lock_id))
-                .filter(stealth_outputs::status.eq(OutputStatus::LockedForSpend.as_key_str()))
-                .filter(stealth_outputs::id.eq_any(to_spend))
-                .set((
-                    stealth_outputs::status.eq(OutputStatus::Spent.as_key_str()),
-                    stealth_outputs::lock_id.eq::<Option<i32>>(None),
-                    stealth_outputs::locked_at.eq::<Option<PrimitiveDateTime>>(None),
-                ))
-                .execute(self.connection())
-                .map_err(|e| WalletStorageError::general(OPERATION, e))?;
-            for (address, version) in spent_versions {
-                self.stealth_outputs_record_spent_version(&address, version)?;
-            }
+        for (address, version) in spent_versions {
+            self.stealth_outputs_record_spent_version(&address, version)?;
         }
 
         // Any outputs that were not confirmed or spent are released
@@ -686,64 +721,6 @@ impl WalletStoreWriter for WriteTransaction<'_> {
             .on_conflict_do_nothing()
             .execute(self.connection())
             .map_err(|e| WalletStorageError::general("key_manager_insert", e))?;
-
-        Ok(())
-    }
-
-    fn key_manager_set_active_index(&mut self, branch: &str, index: u64) -> Result<(), WalletStorageError> {
-        use crate::schema::key_manager_states;
-        let index = i64::try_from(index)
-            .map_err(|_| WalletStorageError::general("key_manager_set_active_index", "index too large"))?;
-
-        // Ensure it exists
-        self.key_manager_insert_or_ignore(branch, index as u64)?;
-
-        let active_id = key_manager_states::table
-            .select(key_manager_states::id)
-            .filter(key_manager_states::branch_seed.eq(branch))
-            .filter(key_manager_states::index.eq(index))
-            .limit(1)
-            .first::<i32>(self.connection())
-            .optional()
-            .map_err(|e| WalletStorageError::general("key_manager_set_active_index", e))?
-            .ok_or_else(|| WalletStorageError::NotFound {
-                operation: "key_manager_set_active_index",
-                entity: "key_manager_states".to_string(),
-                key: format!("branch = {}, index = {}", branch, index),
-            })?;
-
-        diesel::update(key_manager_states::table)
-            .set((
-                key_manager_states::is_active.eq(false),
-                key_manager_states::updated_at.eq(diesel::dsl::now),
-            ))
-            .filter(key_manager_states::branch_seed.eq(branch))
-            .filter(key_manager_states::is_active.eq(true))
-            .execute(self.connection())
-            .map_err(|e| WalletStorageError::general("key_manager_set_active_index", e))?;
-
-        diesel::update(key_manager_states::table)
-            .set((
-                key_manager_states::is_active.eq(true),
-                key_manager_states::updated_at.eq(diesel::dsl::now),
-            ))
-            .filter(key_manager_states::id.eq(active_id))
-            .execute(self.connection())
-            .map_err(|e| WalletStorageError::general("key_manager_set_active_index", e))?;
-
-        Ok(())
-    }
-
-    fn key_manager_reset_index(&mut self, branch: &str, index: u64) -> Result<(), WalletStorageError> {
-        const OPERATION: &str = "key_manager_reset_index";
-        use crate::schema::key_manager_states;
-        let index = i64::try_from(index).map_err(|_| WalletStorageError::general(OPERATION, "index too large"))?;
-
-        diesel::delete(key_manager_states::table)
-            .filter(key_manager_states::branch_seed.eq(branch))
-            .filter(key_manager_states::index.gt(index))
-            .execute(self.connection())
-            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
 
         Ok(())
     }
@@ -1893,6 +1870,48 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         Ok(())
     }
 
+    fn confidential_outputs_set_status_by_commitments(
+        &mut self,
+        vault_id: &VaultId,
+        commitments: &[PedersenCommitmentBytes],
+        from_status: OutputStatus,
+        to_status: OutputStatus,
+    ) -> Result<usize, WalletStorageError> {
+        const OPERATION: &str = "confidential_outputs_set_status_by_commitments";
+        use crate::schema::{confidential_outputs, vaults};
+
+        if commitments.is_empty() {
+            return Ok(0);
+        }
+
+        let vault_db_id = vaults::table
+            .select(vaults::id)
+            .filter(vaults::address.eq(vault_id.to_string()))
+            .first::<i32>(self.connection())
+            .optional()
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?
+            .ok_or_else(|| WalletStorageError::NotFound {
+                operation: OPERATION,
+                entity: "vault".to_string(),
+                key: vault_id.to_string(),
+            })?;
+
+        // Chunk to stay well below SQLite's SQLITE_MAX_VARIABLE_NUMBER limit.
+        let mut updated = 0usize;
+        for chunk in commitments.chunks(500) {
+            let commitment_hexes = chunk.iter().map(|c| c.to_hex()).collect::<Vec<_>>();
+            updated += diesel::update(confidential_outputs::table)
+                .filter(confidential_outputs::vault_id.eq(vault_db_id))
+                .filter(confidential_outputs::status.eq(from_status.as_key_str()))
+                .filter(confidential_outputs::commitment.eq_any(&commitment_hexes))
+                .set(confidential_outputs::status.eq(to_status.as_key_str()))
+                .execute(self.connection())
+                .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+        }
+
+        Ok(updated)
+    }
+
     fn confidential_outputs_release_by_lock_id(&mut self, lock_id: WalletLockId) -> Result<(), WalletStorageError> {
         use crate::schema::confidential_outputs;
 
@@ -2523,6 +2542,7 @@ impl WalletStoreWriter for WriteTransaction<'_> {
                 requester: &serialize_json(request.requester)?,
                 status: SigningRequestStatus::Pending.as_key_str(),
                 expires_at: PrimitiveDateTime::new(expires_at.date(), expires_at.time()),
+                authorizers: &serialize_json(request.authorizers)?,
             })
             .execute(self.connection())
             .map_err(|e| WalletStorageError::general(OPERATION, e))?;
@@ -3567,6 +3587,7 @@ pub(crate) fn signing_request_from_row(
         id: row.id,
         unsigned_transaction: deserialize_json(&row.unsigned_transaction)?,
         seal_public_key: deserialize_hex_try_from(&row.seal_public_key)?,
+        authorizers: deserialize_json(&row.authorizers)?,
         key_id: deserialize_json(&row.key_id)?,
         signer_public_key: deserialize_hex_try_from(&row.signer_public_key)?,
         message_hash: deserialize_hex_try_from(&row.message_hash)?,
@@ -3579,6 +3600,22 @@ pub(crate) fn signing_request_from_row(
         created_at: row.created_at,
         updated_at: row.updated_at,
     })
+}
+
+/// Decodes the `UtxoAddress` of the stealth output row `id` from its stored resource address and commitment.
+fn stealth_output_row_address(id: i32, resx: &str, commitment: &str) -> Result<UtxoAddress, WalletStorageError> {
+    let resource_address: ResourceAddress = resx.parse().map_err(|_| WalletStorageError::DecodingError {
+        operation: "try_to_substate_id",
+        item: "output",
+        details: format!("Corrupt db: invalid resource address '{resx}' for id {id}"),
+    })?;
+    let commitment: PedersenCommitmentBytes =
+        deserialize_hex_try_from(commitment).map_err(|_| WalletStorageError::DecodingError {
+            operation: "try_into_output",
+            item: "output commitment",
+            details: "Corrupt db: invalid hex representation".to_string(),
+        })?;
+    Ok(UtxoAddress::new(resource_address, commitment.into()))
 }
 
 fn api_key_from_row(row: models::ApiKey) -> ApiKey {

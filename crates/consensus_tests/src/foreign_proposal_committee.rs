@@ -20,6 +20,7 @@ use tari_consensus::{
     is_authenticated_commit_proof_stored,
     messages::{HotstuffMessage, ProposalMessage},
     resolve_foreign_committee,
+    validate_foreign_shard_group,
 };
 use tari_consensus_types::{BlockId, Decision};
 use tari_engine_types::substate::{Substate, SubstateValue};
@@ -35,6 +36,7 @@ use tari_ootle_common_types::{
 use tari_ootle_storage::{
     StateStore,
     consensus_models::{
+        Block,
         BlockHeaderMetadata,
         BlockPledge,
         Command,
@@ -161,7 +163,8 @@ async fn it_verifies_against_the_named_shard_groups_committee_not_the_proposers(
     // A member of shard group A proposes a block whose header names shard group B
     let proposal = proposal("a1", to_header_shard_group(group_b));
 
-    let committee = resolve_foreign_committee(&epoch_manager, &proposal)
+    let shard_group = validate_foreign_shard_group(&proposal).unwrap();
+    let committee = resolve_foreign_committee(&epoch_manager, &proposal, shard_group)
         .await
         .unwrap()
         .expect("shard group B has a committee");
@@ -182,7 +185,10 @@ async fn it_finds_no_committee_for_a_shard_group_that_is_not_assigned() {
     };
     let proposal = proposal("b1", sub_range);
 
-    let committee = resolve_foreign_committee(&epoch_manager, &proposal).await.unwrap();
+    let shard_group = validate_foreign_shard_group(&proposal).unwrap();
+    let committee = resolve_foreign_committee(&epoch_manager, &proposal, shard_group)
+        .await
+        .unwrap();
     assert!(committee.is_none());
 }
 
@@ -268,7 +274,7 @@ async fn withheld_embedding_proposal(
                 }
                 // The replica only learns of the foreign proposal through the local proposal the test delivers
                 match msg {
-                    HotstuffMessage::ForeignProposal(_) | HotstuffMessage::CatchUpSyncResponse(_) => false,
+                    HotstuffMessage::ForeignProposal(_) | HotstuffMessage::CatchUpPage(_) => false,
                     HotstuffMessage::Proposal(proposal) if !proposal.foreign_proposals.is_empty() => {
                         captured
                             .lock()
@@ -556,6 +562,173 @@ async fn an_embedded_foreign_proposal_withholding_a_command_does_not_take_its_sl
     );
 }
 
+/// The same proposal with every command it carries by hash carried in full instead, taken from `block`, the block the
+/// proposal commits to. The command merkle root is unchanged.
+fn with_every_command_in_full(proposal: &ForeignProposal, block: &Block) -> ForeignProposal {
+    let protocol_version = proposal.protocol_version().unwrap();
+    let commands = proposal
+        .commands()
+        .iter()
+        .map(|entry| match entry {
+            CommandOrHash::Pruned(pruned) => block
+                .commands()
+                .iter()
+                .find(|command| command.hash(protocol_version) == pruned.hash)
+                .map(|command| CommandOrHash::Command(command.clone()))
+                .expect("the block holds every command its proposal prunes"),
+            CommandOrHash::Command(_) => entry.clone(),
+        })
+        .collect();
+    with_commands(proposal, commands)
+}
+
+fn prunes_a_command(proposal: &ForeignProposal) -> bool {
+    proposal
+        .commands()
+        .iter()
+        .any(|entry| matches!(entry, CommandOrHash::Pruned(_)))
+}
+
+/// Starts committee 0 (`1`) with the inputs and committee 1 (`2`, `3`) with the outputs of a stream of transactions,
+/// and returns the first local proposal in committee 1 that embeds a foreign proposal carrying a command by its hash,
+/// withheld from replica `3` along with every other route to that foreign proposal.
+///
+/// A LocalPrepare is carried in full only for input shard groups, so committee 1 receives a transaction's LocalPrepare
+/// by its hash once it shares a block with the LocalAccept of a transaction sent earlier.
+async fn withheld_embedding_proposal_pruning_a_command() -> (Test, TestAddress, TestAddress, ProposalMessage) {
+    let replica = TestAddress::new("3");
+    let captured = Arc::new(Mutex::new(None::<(TestAddress, ProposalMessage)>));
+    let mut test = Test::builder()
+        .add_committee(0, vec!["1"])
+        .add_committee(1, vec!["2", "3"])
+        .with_message_filter(Box::new({
+            let replica = replica.clone();
+            let captured = captured.clone();
+            move |from, to, msg| {
+                if *to != replica {
+                    return true;
+                }
+                match msg {
+                    HotstuffMessage::ForeignProposal(_) | HotstuffMessage::CatchUpPage(_) => false,
+                    HotstuffMessage::Proposal(proposal) if proposal.foreign_proposals.iter().any(prunes_a_command) => {
+                        captured
+                            .lock()
+                            .unwrap()
+                            .get_or_insert_with(|| (from.clone(), (**proposal).clone()));
+                        false
+                    },
+                    _ => true,
+                }
+            }
+        }))
+        .start()
+        .await;
+
+    let mut transactions = Vec::new();
+    for _ in 0..40 {
+        let inputs = test.create_substates_on_vns(TestVnDestination::Committee(0), 1);
+        let outputs = test.build_outputs_for_committee(1, 1);
+        let tx = build_transaction_from(
+            Transaction::builder_localnet(Epoch(1))
+                .with_inputs(inputs.iter().cloned().map(|i| i.into()))
+                .build_and_seal(&PrivateKey::default()),
+        );
+        test.create_execution_at_destination_for_transaction(
+            TestVnDestination::All,
+            &tx,
+            Decision::Commit,
+            5,
+            inputs
+                .into_iter()
+                .map(|input| (input.substate_id().clone(), SubstateLockType::Write))
+                .collect(),
+            outputs,
+        );
+        transactions.push(tx);
+    }
+    let mut transactions = transactions.into_iter();
+    if let Some(tx) = transactions.next() {
+        test.send_transaction_to_destination(TestVnDestination::All, tx).await;
+    }
+    test.start_epoch(Epoch(1)).await;
+
+    let (leader, proposal) = timeout(Duration::from_secs(60), async {
+        loop {
+            if let Some(captured) = captured.lock().unwrap().take() {
+                return captured;
+            }
+            // One transaction per block committed in committee 0 keeps a transaction's LocalPrepare in the block
+            // that carries the LocalAccept of the one before it, whatever the block time.
+            let (address, ..) = test.on_block_committed().await;
+            if address == TestAddress::new("1") &&
+                let Some(tx) = transactions.next()
+            {
+                test.send_transaction_to_destination(TestVnDestination::All, tx).await;
+            }
+        }
+    })
+    .await
+    .expect("committee 1 never proposed a block carrying a foreign proposal that prunes a command");
+
+    (test, replica, leader, proposal)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_embedded_foreign_proposal_is_stored_as_generated_for_the_local_shard_group() {
+    setup_logger();
+    let (mut test, replica, leader, proposal) = withheld_embedding_proposal_pruning_a_command().await;
+
+    let genuine = proposal
+        .foreign_proposals
+        .iter()
+        .find(|fp| prunes_a_command(fp))
+        .expect("the captured proposal embeds a foreign proposal that prunes a command")
+        .clone();
+    let block_id = genuine.calculate_block_id();
+    let foreign_store = test.get_validator(&TestAddress::new("1")).state_store().clone();
+    let unpruned = ProposalMessage {
+        block: proposal.block.clone(),
+        foreign_proposals: proposal
+            .foreign_proposals
+            .iter()
+            .map(|fp| {
+                let block = foreign_store
+                    .with_read_tx(|tx| Block::get(tx, &fp.calculate_block_id()))
+                    .unwrap();
+                with_every_command_in_full(fp, &block)
+            })
+            .collect(),
+    };
+    test.get_validator(&replica)
+        .tx_inbound_message
+        .send((leader, HotstuffMessage::new_proposal(unpruned)))
+        .await
+        .unwrap();
+
+    let stored = timeout(Duration::from_secs(15), async {
+        loop {
+            if let Some(record) = test
+                .get_validator(&replica)
+                .state_store()
+                .with_read_tx(|tx| ForeignProposalRecord::get_any(tx, [&block_id]))
+                .unwrap()
+                .pop()
+            {
+                return record;
+            }
+            sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .expect("the replica did not store the embedded foreign proposal");
+    test.stop();
+    assert_eq!(
+        stored.proposal().commit_proof(),
+        genuine.commit_proof(),
+        "the replica stored the commands its shard group does not need in full"
+    );
+}
+
 /// Sends `destination` four transactions, each spending an input on committee 0 and one on committee 1.
 ///
 /// A message must still carry evidence for the replica once one command is withheld, so committee 1 needs two commands
@@ -825,21 +998,16 @@ async fn a_foreign_proposal_is_not_stored_with_pledge_values_its_evidence_does_n
     );
 }
 
-#[tokio::test]
-async fn it_rejects_a_shard_group_with_invalid_bounds() {
-    let Setup { epoch_manager, .. } = setup().await;
-
+#[test]
+fn it_rejects_a_shard_group_with_invalid_bounds() {
     let proposal = proposal("b1", tari_sidechain::ShardGroup {
         start: 10,
         end_inclusive: 5,
     });
 
-    let err = resolve_foreign_committee(&epoch_manager, &proposal).await.unwrap_err();
+    let err = validate_foreign_shard_group(&proposal).unwrap_err();
     assert!(
-        matches!(
-            err,
-            HotStuffError::ProposalValidationError(ProposalValidationError::InvalidShardGroup { .. })
-        ),
+        matches!(err, ProposalValidationError::InvalidShardGroup { .. }),
         "unexpected error: {err}"
     );
 }
@@ -938,7 +1106,7 @@ async fn a_proposal_message_carrying_an_unreferenced_foreign_proposal_does_not_s
                         captured_foreign.lock().unwrap().push((*fp.proposal).clone());
                         false
                     },
-                    HotstuffMessage::CatchUpSyncResponse(_) => false,
+                    HotstuffMessage::CatchUpPage(_) => false,
                     HotstuffMessage::Proposal(proposal) if !proposal.foreign_proposals.is_empty() => {
                         captured_proposal
                             .lock()

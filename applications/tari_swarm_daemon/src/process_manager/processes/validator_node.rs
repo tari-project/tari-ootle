@@ -85,6 +85,12 @@ impl ValidatorNodeProcess {
         .await
     }
 
+    /// Whether the epoch manager lists this node in the current epoch's validator set.
+    pub async fn is_registered(&self) -> anyhow::Result<bool> {
+        let stats = self.connect_client()?.get_epoch_manager_stats().await?;
+        Ok(stats.is_valid)
+    }
+
     pub async fn prepare_registration_transaction(&self) -> anyhow::Result<PathBuf> {
         let mut client = self.connect_client()?;
         let resp = client

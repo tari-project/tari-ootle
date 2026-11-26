@@ -93,6 +93,7 @@ pub fn create_execution_result_for_transaction(
                                     .unwrap()
                                     .entity_id(),
                                 upgrade_rule: Default::default(),
+                                rules_updater: None,
                             },
                             body: ComponentBody { state },
                         }),

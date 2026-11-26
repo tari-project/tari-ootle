@@ -33,6 +33,7 @@ criterion = { version = "0.8.1", features = ["html_reports"] }
 # Reference sr25519 signer for interop tests
 schnorrkel = { version = "0.11.5", default-features = false, features = ["alloc", "getrandom"] }
 serde_json = { workspace = true }
+tari_ootle_transaction = { path = ".", features = ["test-v1-signing"] }
 
 [[bench]]
 name = "signature_verification"
@@ -41,3 +42,5 @@ harness = false
 [features]
 serde = ["dep:serde", "dep:ootle_serde", "tari_bor/serde", "tari_template_lib_types/serde", "indexmap/serde"]
 ts = ["ts-rs", "serde", "tari_engine_types/ts", "tari_ootle_common_types/ts", "tari_template_lib_types/ts", "tari_bor/ts"]
+# Builds V1 transactions, which the network only verifies. For tests of V1 verification.
+test-v1-signing = []

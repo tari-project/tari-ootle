@@ -187,12 +187,13 @@ async fn main() {
         .build_unsigned();
 
     // Seal with the account key so the seal signer — and hence the authorization message — is fixed and known before
-    // we produce the two authorizations. Both signer keys are supplied externally, so no stealth signers are derived.
+    // we produce the two authorizations. Both signer keys are supplied externally, so no stealth signers are derived,
+    // and both sign over the set of the two.
     let authorizer = provider
         .wallet()
         .stealth_authorizer(SignatureRequirements::account_key_seal());
     let claim_msg = authorizer
-        .authorization_message(&claim_tx)
+        .authorization_message(&claim_tx, &[pk_me.to_byte_type(), pk_cp.to_byte_type()])
         .await
         .expect("account-key seal yields an authorization message");
 

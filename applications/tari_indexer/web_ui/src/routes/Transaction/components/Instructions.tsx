@@ -28,15 +28,25 @@ import { useState } from "react";
 import { AccordionIconButton, CodeBlock, DataTableCell } from "../../../Components/StyledComponents";
 import { renderJson } from "../../../utils/helpers";
 
-function InstructionRow({ data, index }: { data: Instruction; index: number }) {
+function getInstructionTitle(instruction: Instruction): string {
+  if (typeof instruction === "string") {
+    return instruction;
+  }
+  if (typeof instruction === "object" && instruction !== null) {
+    return Object.keys(instruction)[0] ?? "Unknown";
+  }
+  return "Unknown";
+}
+
+function InstructionRow({ data }: { data: Instruction }) {
   const [open, setOpen] = useState(false);
-  const title = typeof data === "object" && data !== null ? Object.keys(data)[0] : "Unknown";
+  const title = getInstructionTitle(data);
   return (
     <>
       <TableRow>
         <DataTableCell sx={{ borderBottom: "none" }}>{title}</DataTableCell>
         <DataTableCell width={90} sx={{ borderBottom: "none", textAlign: "center" }}>
-          <AccordionIconButton open={open} size="small" onClick={() => setOpen(!open)}>
+          <AccordionIconButton open={open} aria-label="expand row" size="small" onClick={() => setOpen(!open)}>
             {open ? <KeyboardArrowUpIcon /> : <KeyboardArrowDownIcon />}
           </AccordionIconButton>
         </DataTableCell>
@@ -67,7 +77,7 @@ export default function Instructions({ data }: { data: Instruction[] }) {
       <Table>
         <TableBody>
           {data.map((item, index) => (
-            <InstructionRow key={index} data={item} index={index} />
+            <InstructionRow key={index} data={item} />
           ))}
         </TableBody>
       </Table>

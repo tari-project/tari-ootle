@@ -41,10 +41,11 @@ function getSubstateType(substateId: string): string {
   if (substateId.startsWith("vault_")) return "Vault";
   if (substateId.startsWith("resource_")) return "Resource";
   if (substateId.startsWith("nft_")) return "NFT";
-  if (substateId.startsWith("commitment_")) return "Commitment";
   if (substateId.startsWith("txreceipt_")) return "Transaction Receipt";
   if (substateId.startsWith("template_")) return "Template";
   if (substateId.startsWith("utxo_")) return "Utxo";
+  if (substateId.startsWith("coutput_")) return "Confidential Output";
+  if (substateId.startsWith("tombstone_")) return "Tombstone";
   if (substateId.startsWith("vnfp_")) return "VnFeePool";
   return "Unknown";
 }
@@ -59,7 +60,8 @@ function getTypeColor(type: string): "primary" | "secondary" | "success" | "warn
       return "secondary";
     case "NFT":
       return "info";
-    case "Commitment":
+    case "Confidential Output":
+    case "Tombstone":
       return "warning";
     case "Transaction Receipt":
       return "error";

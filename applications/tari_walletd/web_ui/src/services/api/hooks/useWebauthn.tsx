@@ -10,7 +10,9 @@ import {
   webauthnRenamePasskey,
 } from "@utils/json_rpc";
 
-export const WEBAUTHN_PASSKEYS_QUERY_KEY = ["webauthn_passkeys"];
+export const WEBAUTHN_PASSKEYS_QUERY_KEY = ["webauthn_passkeys"] as const;
+
+const refetchPasskeys = () => queryClient.invalidateQueries({ queryKey: WEBAUTHN_PASSKEYS_QUERY_KEY });
 
 export const useWebauthnAlreadyRegistered = () => {
   return useQuery({
@@ -35,17 +37,13 @@ export const useWebauthnListPasskeys = () => {
 export const useWebauthnRenamePasskey = () => {
   return useMutation({
     mutationFn: ({ id, label }: { id: number; label: string }) => webauthnRenamePasskey({ id, label }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: WEBAUTHN_PASSKEYS_QUERY_KEY });
-    },
+    onSettled: refetchPasskeys,
   });
 };
 
 export const useWebauthnRemovePasskey = () => {
   return useMutation({
     mutationFn: (id: number) => webauthnRemovePasskey({ id }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: WEBAUTHN_PASSKEYS_QUERY_KEY });
-    },
+    onSettled: refetchPasskeys,
   });
 };

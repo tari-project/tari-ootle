@@ -11,7 +11,7 @@ use tari_crypto::ristretto::RistrettoSecretKey;
 use tari_engine_types::{
     Epoch,
     commit_result::{AbortReason, ExecuteResult, FinalizeResult, RejectReason, TransactionResult},
-    crypto::commit_amount,
+    crypto::commit_range_provable_amount,
     fees::{FeeBreakdown, FeeReceipt, FeeSource},
     substate::{SubstateDiff, SubstateId},
 };
@@ -158,7 +158,7 @@ async fn an_abort_releases_the_locked_outputs_whatever_its_execution_accepted() 
     // The execution before the abort decision accepted a diff that spends both outputs the transaction locks.
     let mut spends = SubstateDiff::new();
     for amount in [25u64, 49] {
-        let commitment = commit_amount(&Default::default(), amount.into())
+        let commitment = commit_range_provable_amount(&Default::default(), amount.into())
             .unwrap()
             .to_byte_type();
         spends.down(
@@ -202,7 +202,7 @@ async fn a_committed_transaction_finalizes_all_of_its_locks() {
 
     let mut spends = SubstateDiff::new();
     for amount in [25u64, 49] {
-        let commitment = commit_amount(&Default::default(), amount.into())
+        let commitment = commit_range_provable_amount(&Default::default(), amount.into())
             .unwrap()
             .to_byte_type();
         spends.down(
@@ -434,7 +434,7 @@ async fn a_committed_transaction_spends_the_outputs_of_every_lock_linked_to_it()
 
     let mut spends = SubstateDiff::new();
     for amount in [25u64, 49] {
-        let commitment = commit_amount(&Default::default(), amount.into())
+        let commitment = commit_range_provable_amount(&Default::default(), amount.into())
             .unwrap()
             .to_byte_type();
         spends.down(

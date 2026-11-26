@@ -3,7 +3,11 @@
 
 use std::{fmt, fmt::Display, io, str::FromStr};
 
-use bech32::{Bech32m, Hrp};
+use bech32::{
+    Bech32m,
+    Hrp,
+    primitives::decode::{PaddingError, UncheckedHrpstring},
+};
 use ootle_byte_type::{ConvertFromByteType, FromByteType, ToByteType};
 use ootle_network::{Network, NetworkParseError};
 use tari_crypto::ristretto::RistrettoPublicKey;
@@ -88,7 +92,7 @@ impl OotleAddress {
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
-        let mut buf = Vec::with_capacity(Self::MIN_BYTE_LENGTH);
+        let mut buf = Vec::with_capacity(self.byte_length());
         self.encode_to_writer(&mut buf).unwrap();
         buf
     }
@@ -198,7 +202,15 @@ impl OotleAddress {
 
     pub fn decode_bech32(s: &str) -> Result<Self, OotleAddressError> {
         const KL: usize = RistrettoPublicKeyBytes::length();
-        let (hrp, data) = bech32::decode(s)?;
+        // An address has a single encoding (up to letter case): only the Bech32m checksum is accepted, and the
+        // trailing partial group of the 5-bit to 8-bit conversion must be at most 4 bits and all zero (BIP-173).
+        let checked = UncheckedHrpstring::new(s)
+            .map_err(bech32::DecodeError::Parse)?
+            .validate_and_remove_checksum::<Bech32m>()
+            .map_err(bech32::DecodeError::Checksum)?;
+        checked.validate_segwit_padding()?;
+        let hrp = checked.hrp();
+        let data: Vec<u8> = checked.byte_iter().collect();
         let network = network_from_hrp(&hrp).ok_or(OotleAddressError::UnrecognisedHrp { hrp })?;
         if data.len() < KL * 2 {
             return Err(OotleAddressError::AddressLengthTooShort {
@@ -236,8 +248,10 @@ impl OotleAddress {
     }
 
     pub fn to_bech32_string(&self) -> String {
-        let tag_len = self.destination_tag_len();
-        let mut s = String::with_capacity(119 + tag_len);
+        let hrp = hrp_from_network(self.network);
+        let data_chars = (self.encoded_bech32_payload_len() * 8).div_ceil(5);
+        // hrp + '1' separator (1) + data_chars + checksum (6)
+        let mut s = String::with_capacity(hrp.len() + 1 + data_chars + 6);
         self.encode_bech32_to_fmt(&mut s).unwrap();
         s
     }
@@ -270,6 +284,8 @@ impl FromStr for OotleAddress {
 pub enum OotleAddressError {
     #[error("Bech32 decode error: {0}")]
     Bech32DecodeError(#[from] bech32::DecodeError),
+    #[error("Non-canonical Bech32m padding: {0}")]
+    Bech32PaddingError(#[from] PaddingError),
     #[error("Bech32 encode error: {0}")]
     Bech32EncodeError(#[from] bech32::EncodeError),
     #[error("Unrecognised HRP: {hrp}")]
@@ -437,10 +453,125 @@ mod tests {
         assert_eq!(addr.destination_tag(), None);
     }
 
+    /// Decodes with `bech32::decode`, which validates neither the checksum variant nor the padding. It is only
+    /// used here to show that a rejected string carries exactly the canonical payload.
+    fn lax_decode(s: &str) -> (Hrp, Vec<u8>) {
+        bech32::decode(s).unwrap()
+    }
+
+    fn encode_fes(hrp: &Hrp, fes: Vec<bech32::Fe32>) -> String {
+        use bech32::Fe32IterExt;
+        fes.into_iter().with_checksum::<Bech32m>(hrp).chars().collect()
+    }
+
+    fn payload_fes(payload: &[u8]) -> Vec<bech32::Fe32> {
+        use bech32::ByteIterExt;
+        payload.iter().copied().bytes_to_fes().collect()
+    }
+
+    #[test]
+    fn it_round_trips_through_the_test_encoder() {
+        let addr = sample(2);
+        let (hrp, payload) = lax_decode(&addr.to_bech32_string());
+        assert_eq!(encode_fes(&hrp, payload_fes(&payload)), addr.to_bech32_string());
+    }
+
+    #[test]
+    fn it_rejects_a_legacy_bech32_checksum() {
+        let addr = sample(2);
+        let (hrp, payload) = lax_decode(&addr.to_bech32_string());
+        let legacy = bech32::encode::<bech32::Bech32>(hrp, &payload).unwrap();
+        assert_eq!(lax_decode(&legacy).1, payload);
+
+        let err = OotleAddress::decode_bech32(&legacy).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                OotleAddressError::Bech32DecodeError(bech32::DecodeError::Checksum(_))
+            ),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn it_rejects_non_zero_padding_bits() {
+        let addr = sample(2);
+        let (hrp, payload) = lax_decode(&addr.to_bech32_string());
+        let mut fes = payload_fes(&payload);
+        // 64 bytes (512 bits) occupy 103 five-bit groups, so the last group carries 3 padding bits.
+        assert_eq!(fes.len(), 103);
+        let last = fes.last_mut().unwrap();
+        *last = bech32::Fe32::try_from(last.to_u8() | 1).unwrap();
+        let non_canonical = encode_fes(&hrp, fes);
+        assert_ne!(non_canonical, addr.to_bech32_string());
+        assert_eq!(lax_decode(&non_canonical).1, payload);
+
+        let err = OotleAddress::decode_bech32(&non_canonical).unwrap_err();
+        assert!(
+            matches!(err, OotleAddressError::Bech32PaddingError(PaddingError::NonZero)),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn it_rejects_a_trailing_character_of_pure_padding() {
+        let addr = sample(2).with_destination_tag(DestinationTag::new_checked(vec![7]).unwrap());
+        let (hrp, payload) = lax_decode(&addr.to_bech32_string());
+        let mut fes = payload_fes(&payload);
+        // 65 bytes (520 bits) fill 104 groups exactly. A 105th group adds 5 bits that do not complete a byte,
+        // more than the 4 bits of padding BIP-173 allows.
+        assert_eq!(fes.len() * 5, payload.len() * 8);
+        fes.push(bech32::Fe32::Q);
+        let non_canonical = encode_fes(&hrp, fes);
+        assert_eq!(non_canonical.len(), addr.to_bech32_string().len() + 1);
+        assert_eq!(lax_decode(&non_canonical).1, payload);
+
+        let err = OotleAddress::decode_bech32(&non_canonical).unwrap_err();
+        assert!(
+            matches!(err, OotleAddressError::Bech32PaddingError(PaddingError::TooMuch)),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn it_rejects_legacy_bech32_checksum() {
+        let addr = sample(2);
+        let hrp = hrp_from_network(addr.network());
+        let mut payload = Vec::with_capacity(64);
+        payload.extend_from_slice(addr.account_public_key().as_bytes());
+        payload.extend_from_slice(addr.view_only_key().as_bytes());
+        let legacy_bech32 = bech32::encode::<bech32::Bech32>(hrp, &payload).unwrap();
+
+        let err = OotleAddress::decode_bech32(&legacy_bech32).unwrap_err();
+        assert!(matches!(err, OotleAddressError::Bech32DecodeError(_)));
+    }
+
+    #[test]
+    fn it_decodes_the_canonical_encoding_for_every_tag_length() {
+        // The padding length depends on the payload length mod 5, so this covers every padding case.
+        let untagged = sample(3);
+        let tagged = (1..=DestinationTag::MAX_LEN).map(|len| {
+            untagged
+                .clone()
+                .with_destination_tag(DestinationTag::new_checked(vec![0xa5; len]).unwrap())
+        });
+        for addr in std::iter::once(untagged.clone()).chain(tagged) {
+            let encoded = addr.to_bech32_string();
+            assert_eq!(OotleAddress::decode_bech32(&encoded).unwrap(), addr, "{encoded}");
+            assert_eq!(
+                OotleAddress::decode_bech32(&encoded.to_uppercase()).unwrap(),
+                addr,
+                "{encoded}"
+            );
+        }
+    }
+
     #[test]
     fn it_encodes_and_decodes_from_bytes() {
         let addr = sample(3);
         let bytes = addr.to_bytes();
+        assert_eq!(bytes.len(), addr.byte_length());
+        assert_eq!(bytes.capacity(), addr.byte_length());
         let decoded = OotleAddress::from_bytes(&bytes).unwrap();
         assert_eq!(addr.network(), decoded.network());
         assert_eq!(addr.view_only_key(), decoded.view_only_key());
@@ -469,11 +600,18 @@ mod tests {
             let destination_tag = DestinationTag::new_checked(vec![1; DestinationTag::MAX_LEN]).unwrap();
             let addr = sample(10).with_destination_tag(destination_tag.clone());
             let bytes = addr.to_bytes();
+            assert_eq!(bytes.len(), addr.byte_length());
+            assert_eq!(bytes.capacity(), addr.byte_length());
             let decoded = OotleAddress::from_bytes(&bytes).unwrap();
             assert_eq!(addr.network(), decoded.network());
             assert_eq!(addr.view_only_key(), decoded.view_only_key());
             assert_eq!(addr.account_public_key(), decoded.account_public_key());
             assert_eq!(addr.destination_tag(), Some(&destination_tag));
+
+            let bech32_str = addr.to_bech32_string();
+            assert_eq!(bech32_str.len(), bech32_str.capacity());
+            let decoded_bech32 = OotleAddress::decode_bech32(&bech32_str).unwrap();
+            assert_eq!(decoded_bech32, addr);
         }
 
         #[test]

@@ -9,7 +9,7 @@ use std::sync::{
 };
 
 use tari_common_types::types::PrivateKey;
-use tari_consensus::messages::HotstuffMessage;
+use tari_consensus::messages::{HotstuffMessage, ProposalMessage};
 use tari_consensus_types::Decision;
 use tari_engine_types::commit_result::AbortReason;
 use tari_ootle_common_types::{Epoch, InputDeclaration, NodeHeight, SubstateLockType, VersionedSubstateId};
@@ -26,10 +26,20 @@ const TEST_MAX_BLOCK_FOREIGN_PROPOSAL_BYTES: usize = 160 * 1024;
 const TEST_MAX_BLOCK_VALIDATION_FOREIGN_PROPOSAL_BYTES: usize = 192 * 1024;
 const LARGE_COMPONENT_STATE_BYTES: usize = 100 * 1024;
 
+fn proposal_size(msg: &ProposalMessage) -> usize {
+    tari_bor::encoded_len(&msg.block) + msg.foreign_proposals.iter().map(tari_bor::encoded_len).sum::<usize>()
+}
+
 fn message_size(msg: &HotstuffMessage) -> usize {
     match msg {
-        HotstuffMessage::Proposal(msg) | HotstuffMessage::CatchUpSyncResponse(msg) => {
-            tari_bor::encoded_len(&msg.block) + msg.foreign_proposals.iter().map(tari_bor::encoded_len).sum::<usize>()
+        HotstuffMessage::Proposal(msg) | HotstuffMessage::CatchUpSyncResponse(msg) => proposal_size(msg),
+        HotstuffMessage::CatchUpPage(page) => {
+            page.blocks
+                .iter()
+                .chain(page.leaf.iter())
+                .map(proposal_size)
+                .sum::<usize>() +
+                page.transactions.iter().map(|tx| tx.len()).sum::<usize>()
         },
         HotstuffMessage::ForeignProposal(msg) => tari_bor::encoded_len(&*msg.proposal),
         _ => 0,

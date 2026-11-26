@@ -50,6 +50,7 @@ mod callee {
             Component::new(Callee)
                 .with_access_rules(access_rules)
                 .with_owner_rule(OwnerRule::ByAccessRule(rule!(caller_component(gate))))
+                .with_rules_updater(RulesUpdater::Owner)
                 .create()
         }
 

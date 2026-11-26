@@ -17,7 +17,10 @@
 
 use std::time::Instant;
 
-use tari_engine::{fees::FeeTable, wasm::WasmModule};
+use tari_engine::{
+    fees::FeeTable,
+    wasm::{WasmModule, validate_module_structure},
+};
 use tari_engine_types::{fees::FeeSource, limits};
 use tari_ootle_transaction::{Epoch, Transaction, args};
 use tari_template_test_tooling::TemplateTest;
@@ -79,8 +82,7 @@ fn module_with_data_segment(len: usize) -> Vec<u8> {
 fn instantiate_ms(segment_len: usize) -> (f64, usize) {
     let code = module_with_data_segment(segment_len);
     let code_size = code.len();
-    let tari_engine::template::LoadedTemplate::Wasm(loaded) =
-        WasmModule::load_template_from_code(&code).expect("module was rejected");
+    let tari_engine::template::LoadedTemplate::Wasm(loaded) = WasmModule::load(&code).expect("module was rejected");
 
     let mut best = f64::MAX;
     for _ in 0..TRIALS {
@@ -193,15 +195,13 @@ fn module_with_empty_data_segments(count: usize) -> Vec<u8> {
 
 /// The charge `code` attracts, read back from the shape its own loader derives.
 fn charged_points(code: &[u8]) -> u64 {
-    let tari_engine::template::LoadedTemplate::Wasm(loaded) =
-        WasmModule::load_template_from_code(code).expect("module was rejected");
+    let tari_engine::template::LoadedTemplate::Wasm(loaded) = WasmModule::load(code).expect("module was rejected");
     limits::instantiation_points(&loaded.shape())
 }
 
 /// Milliseconds one instantiation of `code` takes, minimum over `TRIALS`.
 fn instantiate_code_ms(code: &[u8]) -> f64 {
-    let tari_engine::template::LoadedTemplate::Wasm(loaded) =
-        WasmModule::load_template_from_code(code).expect("module was rejected");
+    let tari_engine::template::LoadedTemplate::Wasm(loaded) = WasmModule::load(code).expect("module was rejected");
     let mut best = f64::MAX;
     for _ in 0..TRIALS {
         let start = Instant::now();
@@ -301,7 +301,7 @@ fn compile_ms(code: &[u8]) -> f64 {
     let mut best = f64::MAX;
     for _ in 0..COMPILE_TRIALS {
         let start = Instant::now();
-        let loaded = WasmModule::load_template_from_code(code);
+        let loaded = WasmModule::load(code);
         best = best.min(start.elapsed().as_nanos() as f64 / 1e6);
         drop(loaded);
     }
@@ -316,11 +316,10 @@ fn real_template_ms(path: &str) -> (f64, usize, u64, u64, f64) {
     let mut compile_ms = f64::MAX;
     for _ in 0..COMPILE_TRIALS {
         let start = Instant::now();
-        WasmModule::load_template_from_code(&code).expect("module was rejected");
+        WasmModule::load(&code).expect("module was rejected");
         compile_ms = compile_ms.min(start.elapsed().as_nanos() as f64 / 1e6);
     }
-    let tari_engine::template::LoadedTemplate::Wasm(loaded) =
-        WasmModule::load_template_from_code(&code).expect("module was rejected");
+    let tari_engine::template::LoadedTemplate::Wasm(loaded) = WasmModule::load(&code).expect("module was rejected");
     let mut best = f64::MAX;
     for _ in 0..TRIALS {
         let start = Instant::now();
@@ -423,7 +422,7 @@ fn strip_custom_sections(code: &[u8]) -> Vec<u8> {
 fn print_builtin_compile_counts(rate: f64) {
     for template in tari_template_builtin::all_builtin_templates() {
         let code = &strip_custom_sections(template.binary);
-        let structure = WasmModule::prevalidate_code(code).expect("built-in template is admitted");
+        let structure = WasmModule::validate(code).expect("built-in template is admitted");
         let counts = structure.compile;
         let charged_ms = limits::template_compile_points(code.len() as u64, &counts) as f64 / rate;
         let ms = compile_ms(code);
@@ -472,7 +471,7 @@ fn print_metering_check_costs(rate: f64) {
                 .min(max_checks as u64 / checks_per_repeat - 1)
                 .min(if name == "loops" { loop_limit } else { u64::MAX });
             let code = module_of_functions(functions as usize, &body.repeat(repeats as usize));
-            let Ok(structure) = WasmModule::prevalidate_code(&code) else {
+            let Ok(structure) = validate_module_structure(&code) else {
                 println!("{functions} functions of {repeats} {name}: refused");
                 continue;
             };
@@ -522,7 +521,7 @@ fn print_metering_check_costs(rate: f64) {
     ];
     for (name, body) in worst_cases {
         let code = module_of_functions(1, &body);
-        let structure = WasmModule::prevalidate_code(&code).expect("within the function limits");
+        let structure = validate_module_structure(&code).expect("within the function limits");
         let charged_ms = limits::template_compile_points(code.len() as u64, &structure.compile) as f64 / rate;
         let ms = compile_ms(&code);
         println!(
@@ -625,7 +624,7 @@ fn main() {
             let Some(path) = path.to_str() else { continue };
             let (ms, size, data, elements, compile_ms) = real_template_ms(path);
             let tari_engine::template::LoadedTemplate::Wasm(l) =
-                WasmModule::load_template_from_code(&std::fs::read(path).unwrap()).unwrap();
+                WasmModule::load(&std::fs::read(path).unwrap()).unwrap();
             let artifact = l.wasm_module().serialize().unwrap().len();
             println!(
                 "  artifact {artifact} bytes = {:.1}x the {size}-byte source",

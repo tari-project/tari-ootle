@@ -5,7 +5,7 @@ use std::{
     collections::HashMap,
     fmt::Debug,
     sync::Arc,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use axum_extra::extract::cookie::{Cookie, SameSite};
@@ -64,7 +64,7 @@ impl RefreshTokenStore {
         self
     }
 
-    pub async fn new_token(&self, permissions: Permissions, exp: u64) -> RefreshToken {
+    pub async fn new_token(&self, permissions: Permissions) -> RefreshToken {
         let mut write = self.tokens.write().await;
         clear_expired_tokens(&mut write);
         // A full store evicts the session closest to expiry: the memory bound costs that session its refresh,
@@ -77,6 +77,10 @@ impl RefreshTokenStore {
             };
             write.remove(&oldest_key);
         }
+        let exp = (SystemTime::now() + self.expiry)
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
         let data = RefreshTokenData {
             claims: Claims {
                 permissions,
@@ -154,24 +158,26 @@ mod tests {
 
     #[tokio::test]
     async fn refresh_token_store_caps_capacity_and_filters_expired_entries() {
+        let now_secs = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
         let store = RefreshTokenStore::new(Duration::from_secs(60)).with_max_tokens(2);
-        let first = store.new_token(Permissions::default(), 1).await;
+        let first = store.new_token(Permissions::default()).await;
         tokio::time::sleep(Duration::from_millis(2)).await;
-        let second = store.new_token(Permissions::default(), 2).await;
+        let second = store.new_token(Permissions::default()).await;
         tokio::time::sleep(Duration::from_millis(2)).await;
-        let third = store.new_token(Permissions::default(), 3).await;
+        let third = store.new_token(Permissions::default()).await;
 
         let first_str = uuid::Uuid::from_bytes_ref(&first.0).to_string();
         let second_str = uuid::Uuid::from_bytes_ref(&second.0).to_string();
         let third_str = uuid::Uuid::from_bytes_ref(&third.0).to_string();
 
         assert!(store.validate_token_str(&first_str).await.is_none());
-        assert!(store.validate_token_str(&second_str).await.is_some());
+        let second_claims = store.validate_token_str(&second_str).await.expect("second token valid");
+        assert!(second_claims.exp >= now_secs + 55);
         assert!(store.validate_token_str(&third_str).await.is_some());
         assert_eq!(store.to_vec().await.len(), 2);
 
         let short_store = RefreshTokenStore::new(Duration::from_millis(1));
-        short_store.new_token(Permissions::default(), 1).await;
+        short_store.new_token(Permissions::default()).await;
         tokio::time::sleep(Duration::from_millis(5)).await;
         assert!(short_store.to_vec().await.is_empty());
     }

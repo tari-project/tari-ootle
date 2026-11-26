@@ -50,7 +50,7 @@ pub async fn optimize_wasm_template(template_binary: &[u8]) -> Result<Vec<u8>, E
             .disable_feature(Feature::Simd)
             .disable_feature(Feature::RelaxedSimd)
             // The engine rejects a published template carrying any custom section other than
-            // `tari_tdef` (`WasmModule::validate_code`). Strip the toolchain-emitted `name`,
+            // `tari_tdef` (`WasmModule::validate`). Strip the toolchain-emitted `name`,
             // `producers` and `target_features` sections so the optimized binary is accepted.
             .add_pass(Pass::StripDebug)
             .add_pass(Pass::StripProducers)

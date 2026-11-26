@@ -80,13 +80,16 @@ static TMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 /// Computed in a `const` context, so the digest is a compile-time constant and the source text it
 /// reads never reaches the binary.
 ///
-/// The wasmer version is the one input not derived here, because a crate cannot read its
-/// dependencies' resolved versions and a published crate cannot reach the lockfile. It is hashed as
-/// [`WASMER_VERSION`] instead, which a test holds to the workspace lockfile.
+/// The dependency versions are the inputs not derived here, because a crate cannot read its
+/// dependencies' resolved versions and a published crate cannot reach the lockfile. They are hashed
+/// as [`WASMER_VERSION`] and [`WASMER_MIDDLEWARES_VERSION`] instead, which tests hold to the
+/// workspace lockfile.
 const ENGINE_FINGERPRINT_BITS: u64 = {
     let h = const_hash::init(b"tari.ootle.wasm_cache.engine_fingerprint.v2");
     // The compiler that generated every artifact's native code.
     let h = const_hash::part(h, WASMER_VERSION.as_bytes());
+    // The metering middleware that inserts the points checks into every artifact.
+    let h = const_hash::part(h, WASMER_MIDDLEWARES_VERSION.as_bytes());
     // The compiler flags, feature set and tunables every artifact is built under.
     let h = const_hash::part(h, include_bytes!("../engine.rs"));
     // The derivation of the shape counts a hit serves verbatim out of the header.
@@ -96,15 +99,15 @@ const ENGINE_FINGERPRINT_BITS: u64 = {
     let h = const_hash::part(h, include_bytes!("../bulk_metering.rs"));
     // The operators and segments refused at compile, and the globals exported for restoring.
     let h = const_hash::part(h, include_bytes!("../instance_reset.rs"));
+    let h = const_hash::part(h, include_bytes!("../branch_table_limit.rs"));
     // The memory and table bounds, which reach codegen through the style each one is adjusted to.
     let h = const_hash::part(h, include_bytes!("../limiting_tunable.rs"));
     // Which count a hit reads out of each header slot. Swapping two of these is a fee change.
     let h = const_hash::values(h, &header_layout());
-    // Every limit, not just the ones the artifact bakes in: `validate_module_structure` enforces
-    // `max_tables`, `max_globals` and the module and function limits on what the compile emits at
-    // compile time only, and a hit goes straight to `finalize_loaded_module` without it.
-    // Destructured rather than read field by field, so that a limit added later does not compile
-    // until it is named here.
+    // Every limit, including the publish admission limits that no load enforces. A limit change then
+    // recompiles every template once, which is the price of a digest that cannot miss a limit that
+    // does reach the artifact. Destructured rather than read field by field, so that a limit added
+    // later does not compile until it is named here.
     let limits::WasmLimits {
         max_function_arguments,
         max_function_name_length,
@@ -122,6 +125,7 @@ const ENGINE_FINGERPRINT_BITS: u64 = {
         max_tables,
         max_table_elements,
         max_element_segments,
+        max_br_table_targets,
     } = limits::WASM_LIMITS;
     const_hash::finish(const_hash::values(h, &[
         limits::MAX_WASM_POINTS_PER_CALL as u128,
@@ -141,6 +145,7 @@ const ENGINE_FINGERPRINT_BITS: u64 = {
         max_tables as u128,
         max_table_elements as u128,
         max_element_segments as u128,
+        max_br_table_targets as u128,
         // The compile work `validate_module_structure` refuses a module for is these counts at these
         // prices, against the size cap.
         limits::ENGINE_LIMITS.max_template_binary_size_bytes as u128,
@@ -156,6 +161,11 @@ const ENGINE_FINGERPRINT_BITS: u64 = {
 /// so a release that changes only the generated code still loads every artifact the previous one
 /// wrote. Two nodes that differ only in cache history then run different code for the same template.
 const WASMER_VERSION: &str = "7.5.0";
+
+/// The resolved `tari-wasmer-middlewares` version. Its `Metering` middleware decides where the
+/// points checks go and what each one deducts, which the artifact carries as generated code, and
+/// the workspace accepts any patch release of it.
+const WASMER_MIDDLEWARES_VERSION: &str = "7.5.0";
 
 /// The fingerprint as the lowercase hex it appears in a filename as.
 ///
@@ -762,9 +772,9 @@ impl WasmModuleCache {
 
         let mut code_size = 0usize;
         let mut shape = ModuleShape::default();
-        for (slot, field) in mmap[..HEADER_FIELD_BYTES].chunks_exact(8).zip(HEADER_FIELDS) {
-            let value = u64::from_le_bytes(slot.try_into().expect("chunks_exact(8) yields 8 bytes"));
-            field.write_into(value, &mut code_size, &mut shape);
+        let (slots, _) = mmap[..HEADER_FIELD_BYTES].as_chunks::<8>();
+        for (slot, field) in slots.iter().zip(HEADER_FIELDS) {
+            field.write_into(u64::from_le_bytes(*slot), &mut code_size, &mut shape);
         }
 
         // Wrap the mmap as a Bytes that owns it, then slice past the
@@ -781,7 +791,7 @@ impl WasmModuleCache {
         // matching one, which is what [`restrict_dir_to_owner`] is for: `deserialize_unchecked`
         // reads a body past its 32-byte prefix with `rkyv::access_unchecked` and hands one that
         // fails the prefix check to an ELF loader, so bytes that reach it are already trusted.
-        match unsafe { WasmModule::load_template_from_serialized(body, code_size, shape) } {
+        match unsafe { WasmModule::load_serialized(body, code_size, shape) } {
             Ok(loaded) => {
                 debug!(target: LOG_TARGET, "Cache hit for template {}", addr);
                 // A hit also adopts a file this instance never wrote, so a cache inherited from an
@@ -907,8 +917,9 @@ impl WasmModuleCache {
 
         let shape = wasm.shape();
         let mut header = [0u8; HEADER_BYTES];
-        for (slot, field) in header.chunks_exact_mut(8).zip(HEADER_FIELDS) {
-            slot.copy_from_slice(&field.read_from(wasm.code_size(), &shape).to_le_bytes());
+        let (slots, _) = header.as_chunks_mut::<8>();
+        for (slot, field) in slots.iter_mut().zip(HEADER_FIELDS) {
+            *slot = field.read_from(wasm.code_size(), &shape).to_le_bytes();
         }
         let tag = integrity_tag(addr, &header[..TAG_OFFSET], &serialized);
         header[TAG_OFFSET..].copy_from_slice(&tag.to_le_bytes());
@@ -993,9 +1004,9 @@ fn write_durable(path: &Path, bytes: &[u8]) -> io::Result<Option<u64>> {
 /// On `get_template(addr)`:
 /// 1. If the cache file `{addr}_{ENGINE_FINGERPRINT}.bin` exists, deserialize and return — no compile, no
 ///    inner-provider call.
-/// 2. Otherwise delegate to `inner` for the raw `PublishedTemplate`, compile via
-///    [`WasmModule::load_template_from_code`], offer the compiled module to the cache, return. The artifact is written
-///    by the cache's writer thread, so the caller pays the compile but not the flush.
+/// 2. Otherwise delegate to `inner` for the raw `PublishedTemplate`, compile via [`WasmModule::load`], offer the
+///    compiled module to the cache, return. The artifact is written by the cache's writer thread, so the caller pays
+///    the compile but not the flush.
 ///
 /// Intended placement is between an outer in-memory cache (e.g. moka) and the
 /// raw state-store provider, so a process-lifetime hot path skips disk
@@ -1055,7 +1066,7 @@ where TStore: TemplateProvider<Template = PublishedTemplate> + Clone + 'static
             else {
                 return Ok(None);
             };
-            return Ok(Some(WasmModule::load_template_from_code(published.binary.as_slice())?));
+            return Ok(Some(WasmModule::load(published.binary.as_slice())?));
         }
 
         if let Some(loaded) = self.cache.try_load(address) {
@@ -1070,7 +1081,7 @@ where TStore: TemplateProvider<Template = PublishedTemplate> + Clone + 'static
             return Ok(None);
         };
 
-        let loaded = WasmModule::load_template_from_code(published.binary.as_slice())?;
+        let loaded = WasmModule::load(published.binary.as_slice())?;
         self.cache.store(address, &loaded);
         Ok(Some(loaded))
     }
@@ -1145,20 +1156,41 @@ mod tests {
         }
     }
 
-    #[test]
-    fn wasmer_version_matches_the_lockfile() {
+    /// The version of `package` the workspace lockfile resolves.
+    fn resolved_version(package: &str) -> String {
         let lockfile = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../Cargo.lock"))
             .expect("workspace Cargo.lock");
-        let resolved = lockfile
+        let name = format!(r#"name = "{package}""#);
+        let mut entries = lockfile
             .split("[[package]]")
-            .find(|entry| entry.lines().any(|line| line == r#"name = "wasmer""#))
-            .and_then(|entry| entry.lines().find_map(|line| line.strip_prefix(r#"version = ""#)))
+            .filter(|entry| entry.lines().any(|line| line == name));
+        let entry = entries.next().unwrap_or_else(|| panic!("{package} in Cargo.lock"));
+        assert!(entries.next().is_none(), "Cargo.lock resolves more than one {package}");
+        entry
+            .lines()
+            .find_map(|line| line.strip_prefix(r#"version = ""#))
             .and_then(|version| version.strip_suffix('"'))
-            .expect("wasmer in Cargo.lock");
+            .unwrap_or_else(|| panic!("{package} has a version in Cargo.lock"))
+            .to_string()
+    }
+
+    #[test]
+    fn wasmer_version_matches_the_lockfile() {
         assert_eq!(
-            WASMER_VERSION, resolved,
+            WASMER_VERSION,
+            resolved_version("wasmer"),
             "WASMER_VERSION must name the wasmer the workspace resolves, so that artifacts compiled by another \
              release are not served"
+        );
+    }
+
+    #[test]
+    fn wasmer_middlewares_version_matches_the_lockfile() {
+        assert_eq!(
+            WASMER_MIDDLEWARES_VERSION,
+            resolved_version("tari-wasmer-middlewares"),
+            "WASMER_MIDDLEWARES_VERSION must name the tari-wasmer-middlewares the workspace resolves, so that \
+             artifacts metered by another release are not served"
         );
     }
 
@@ -1188,7 +1220,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let cache = WasmModuleCache::open(dir.path(), TEST_CAP_BYTES).unwrap();
         let addr = addr_of_byte(0x01);
-        let loaded = WasmModule::load_template_from_code(account_binary()).unwrap();
+        let loaded = WasmModule::load(account_binary()).unwrap();
         cache.store(&addr, &loaded);
         cache.flush();
         let size = fs::metadata(cache.path_for(&addr)).unwrap().len();

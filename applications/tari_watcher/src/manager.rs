@@ -135,11 +135,7 @@ impl ProcessManager {
         Ok(())
     }
 
-    async fn start_child_process(
-        &self,
-        tx_log: mpsc::Sender<ProcessStatus>,
-        tx_alert: mpsc::Sender<ProcessStatus>,
-    ) {
+    async fn start_child_process(&self, tx_log: mpsc::Sender<ProcessStatus>, tx_alert: mpsc::Sender<ProcessStatus>) {
         let vn_binary_path = self.config.validator_node_executable_path.clone();
         let vn_base_dir = self.config.base_dir.join(self.config.vn_base_dir.clone());
 

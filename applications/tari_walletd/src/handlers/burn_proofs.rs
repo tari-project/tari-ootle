@@ -89,7 +89,9 @@ async fn list_burn_proofs(dir: &Path, filter_by_public_key: Option<&str>) -> Vec
         // Apply account public key filter if provided
         if let Some(filter_pk) = filter_by_public_key {
             // A file named `{pubkey}-{commitment}.json` must name the filter key; a parsed proof must be for it too.
-            if let Some(file_pk) = extract_public_key_prefix(name) && !file_pk.eq_ignore_ascii_case(filter_pk) {
+            if let Some(file_pk) = extract_public_key_prefix(name) &&
+                !file_pk.eq_ignore_ascii_case(filter_pk)
+            {
                 continue;
             }
         }

@@ -186,9 +186,15 @@ mod tests {
         let (_mask, view_pk, _view_sk, commitment, proof_json) = build_proof(42);
         let other_sk = RistrettoSecretKey::random(&mut rand::rng());
 
-        let err =
-            decrypt_elgamal_viewable_balance(&proof_json, &commitment, view_pk.as_bytes(), other_sk.as_bytes(), 0, 100)
-                .unwrap_err();
+        let err = decrypt_elgamal_viewable_balance(
+            &proof_json,
+            &commitment,
+            view_pk.as_bytes(),
+            other_sk.as_bytes(),
+            0,
+            100,
+        )
+        .unwrap_err();
         assert!(matches!(err, OotleWasmError::InvalidSecretKey(_)));
     }
 }

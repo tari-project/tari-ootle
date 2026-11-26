@@ -60,8 +60,8 @@ impl ValueRangeRequest {
     /// 0 when it named none.
     fn coverage(&self, searched: &RangeInclusive<u64>) -> ValueScanCoverage {
         let below = *searched.start() > *self.scan_range.start();
-        let above = *self.scan_range.start() > *searched.end() ||
-            self.requested_max.is_some_and(|max| max > *searched.end());
+        let above =
+            *self.scan_range.start() > *searched.end() || self.requested_max.is_some_and(|max| max > *searched.end());
         ValueScanCoverage {
             min: *searched.start(),
             max: *searched.end(),

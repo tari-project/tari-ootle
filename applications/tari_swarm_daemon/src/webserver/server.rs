@@ -7,6 +7,7 @@ use anyhow::Context;
 use axum::{
     Extension,
     Router,
+    body::Body,
     handler::HandlerWithoutStateExt,
     http::{HeaderValue, Response, StatusCode, Uri, header},
     response::IntoResponse,
@@ -84,7 +85,7 @@ async fn handler(
             return Response::builder()
                 .status(StatusCode::UNAUTHORIZED)
                 .header("WWW-Authenticate", "Basic realm=\"tari-swarm\"")
-                .body("Not authorized".to_string())
+                .body(Body::from("Not authorized"))
                 .unwrap();
         }
     }
@@ -94,22 +95,23 @@ async fn handler(
     let path = path.strip_prefix('/').unwrap_or(path);
 
     // If the path is a file, return it. Otherwise, use index.html (SPA)
-    if let Some(body) = WEB_DIR
+    if let Some((file, mime_path)) = WEB_DIR
         .get_file(path)
-        .or_else(|| WEB_DIR.get_file("index.html"))
-        .and_then(|file| file.contents_utf8())
+        .map(|f| (f, path))
+        .or_else(|| WEB_DIR.get_file("index.html").map(|f| (f, "index.html")))
     {
-        let mime_type = mime_guess::from_path(path).first_or_else(|| mime_guess::Mime::from_str("text/html").unwrap());
+        let mime_type =
+            mime_guess::from_path(mime_path).first_or_else(|| mime_guess::Mime::from_str("text/html").unwrap());
         return Response::builder()
             .header(header::CONTENT_TYPE, HeaderValue::from_str(mime_type.as_ref()).unwrap())
             .status(StatusCode::OK)
-            .body(body.to_owned())
+            .body(Body::from(file.contents()))
             .unwrap();
     }
     warn!(target: LOG_TARGET, "Not found {:?}", path);
     Response::builder()
         .status(StatusCode::NOT_FOUND)
-        .body(String::new())
+        .body(Body::empty())
         .unwrap()
 }
 

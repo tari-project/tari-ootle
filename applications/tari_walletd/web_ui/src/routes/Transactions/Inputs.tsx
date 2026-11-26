@@ -24,47 +24,7 @@ import CopyAddress from "@components/CopyAddress";
 import { DataTableCell } from "@components/StyledComponents";
 import { Box, Chip, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Typography } from "@mui/material";
 import { InputDeclaration, substateIdToString } from "@tari-project/ootle-ts-bindings";
-
-function getSubstateType(substateId: string): string {
-  if (substateId.startsWith("component_")) return "Component";
-  if (substateId.startsWith("vault_")) return "Vault";
-  if (substateId.startsWith("resource_")) return "Resource";
-  if (substateId.startsWith("nft_")) return "NFT";
-  if (substateId.startsWith("commitment_")) return "Commitment";
-  if (substateId.startsWith("txreceipt_")) return "Transaction Receipt";
-  if (substateId.startsWith("template_")) return "Template";
-  if (substateId.startsWith("utxo_")) return "Utxo";
-  if (substateId.startsWith("vnfp_")) return "VnFeePool";
-  if (substateId.startsWith("coutput_")) return "Confidential Output";
-  return "Unknown";
-}
-
-function getTypeColor(type: string): "primary" | "secondary" | "success" | "warning" | "info" | "error" {
-  switch (type) {
-    case "Component":
-      return "primary";
-    case "Vault":
-      return "success";
-    case "Resource":
-      return "secondary";
-    case "NFT":
-      return "info";
-    case "Commitment":
-      return "warning";
-    case "Confidential Output":
-      return "warning";
-    case "Transaction Receipt":
-      return "error";
-    case "Template":
-      return "info";
-    case "Utxo":
-      return "success";
-    case "VnFeePool":
-      return "secondary";
-    default:
-      return "primary";
-  }
-}
+import { getSubstateType, getSubstateTypeColor } from "./inputsHelpers";
 
 export default function Inputs({ data }: { data: InputDeclaration[] }) {
   if (!data || data.length === 0) {
@@ -99,7 +59,7 @@ export default function Inputs({ data }: { data: InputDeclaration[] }) {
                   <CopyAddress address={substateId} />
                 </DataTableCell>
                 <DataTableCell>
-                  <Chip label={type} size="small" color={getTypeColor(type)} variant="outlined" />
+                  <Chip label={type} size="small" color={getSubstateTypeColor(type)} variant="outlined" />
                 </DataTableCell>
                 <DataTableCell>
                   <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>

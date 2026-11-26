@@ -70,7 +70,8 @@ export default function FeeReceipt({ data }: { data: FeeReceiptType }) {
       : null;
 
   const feeItems: { label: string; value: string; help?: string }[] = [
-    { label: "Total Fees Paid", value: formatCurrency(data.total_fee_payment, CURRENCY.DECIMALS, CURRENCY.SYMBOL) },
+    { label: "Total Fee Payment", value: formatCurrency(data.total_fee_payment, CURRENCY.DECIMALS, CURRENCY.SYMBOL) },
+    { label: "Total Fees Paid", value: formatCurrency(data.total_fees_paid, CURRENCY.DECIMALS, CURRENCY.SYMBOL) },
     { label: "Total Fees Charged", value: formatCurrency(totalFeesCharged, CURRENCY.DECIMALS, CURRENCY.SYMBOL) },
     {
       label: "Exhaust Burn",

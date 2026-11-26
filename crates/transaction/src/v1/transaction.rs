@@ -17,6 +17,7 @@ use tari_ootle_common_types::{Epoch, InputDeclaration, InputDeclarationRef};
 use tari_template_lib_types::{
     ComponentAddress,
     Hash32,
+    OwnerRule,
     constants::TARI_TOKEN,
     crypto::RistrettoPublicKeyBytes,
     stealth::StealthTransferStatement,
@@ -447,12 +448,18 @@ fn calc_instruction_weight(instruction: &Instruction) -> u64 {
     const CLAIM_FIXED_COST: u64 = 1100;
     match instruction {
         Instruction::CreateAccount {
+            owner_rule,
             access_rules,
             bucket_workspace_id: workspace_id,
             ..
-        } => (access_rules.as_ref().map(|a| a.num_access_rules() as u64).unwrap_or(0) +
-            workspace_id.as_ref().map(|_| 1).unwrap_or(0))
-        .max(INVOCATION_FLOOR),
+        } => {
+            let owner_rule_nodes = match owner_rule {
+                Some(OwnerRule::ByAccessRule(rule)) => rule.num_nodes() as u64,
+                _ => 0,
+            };
+            let access_rule_nodes = access_rules.as_ref().map(|a| a.num_nodes() as u64).unwrap_or(0);
+            (owner_rule_nodes + access_rule_nodes + workspace_id.as_ref().map(|_| 1).unwrap_or(0)).max(INVOCATION_FLOOR)
+        },
         Instruction::CallFunction { args, .. } => calc_args_weight(args).max(INVOCATION_FLOOR),
         Instruction::CallMethod { args, .. } => calc_args_weight(args).max(INVOCATION_FLOOR),
         Instruction::PutLastInstructionOutputOnWorkspace { .. } => 0, // Call already costs
@@ -473,8 +480,11 @@ fn calc_instruction_weight(instruction: &Instruction) -> u64 {
         Instruction::UpdateComponentTemplate { migrate, .. } => {
             (1 + migrate.as_ref().map(|m| calc_args_weight(&m.args)).unwrap_or(0)).max(INVOCATION_FLOOR)
         },
-        Instruction::SetComponentAccessRules { access_rules, .. } => 1 + access_rules.num_access_rules() as u64,
-        Instruction::SetComponentOwnerRule { .. } => 1,
+        Instruction::SetComponentAccessRules { access_rules, .. } => 1 + access_rules.num_nodes() as u64,
+        Instruction::SetComponentOwnerRule { owner_rule, .. } => match owner_rule {
+            OwnerRule::ByAccessRule(rule) => 1 + rule.num_nodes() as u64,
+            _ => 1,
+        },
     }
 }
 
@@ -1031,7 +1041,12 @@ mod transaction_id_tests {
 
 #[cfg(test)]
 mod weight_tests {
-    use tari_template_lib_types::{FunctionName, ObjectKey, TemplateAddress};
+    use tari_template_lib_types::{
+        FunctionName,
+        ObjectKey,
+        TemplateAddress,
+        access_rules::{AccessRule, ComponentAccessRules, RestrictedAccessRule},
+    };
 
     use super::*;
     use crate::MigrateFunction;
@@ -1087,6 +1102,67 @@ mod weight_tests {
         assert_eq!(calc_instruction_weight(&no_arg_call()), INVOCATION_FLOOR);
         assert_eq!(calc_instruction_weight(&bare_create_account()), INVOCATION_FLOOR);
         assert_eq!(calc_instruction_weight(&bare_template_update()), INVOCATION_FLOOR);
+    }
+
+    /// An access rule of exactly `num_nodes` nodes: one `AnyOf` holding `num_nodes - 1` empty `AnyOf`s.
+    fn access_rule_with_nodes(num_nodes: usize) -> AccessRule {
+        let rule = AccessRule::Restricted(RestrictedAccessRule::AnyOf(
+            (1..num_nodes)
+                .map(|_| RestrictedAccessRule::AnyOf(Box::new([])))
+                .collect(),
+        ));
+        assert_eq!(rule.num_nodes(), num_nodes);
+        rule
+    }
+
+    #[test]
+    fn create_account_weight_counts_owner_and_access_rule_nodes() {
+        let num_nodes = (INVOCATION_FLOOR as usize) + 10;
+        let rule = access_rule_with_nodes(num_nodes);
+
+        let with_owner_rule = Instruction::CreateAccount {
+            owner_public_key: RistrettoPublicKeyBytes::zero(),
+            owner_rule: Some(OwnerRule::ByAccessRule(rule.clone())),
+            access_rules: None,
+            bucket_workspace_id: None,
+        };
+        assert_eq!(calc_instruction_weight(&with_owner_rule), num_nodes as u64);
+
+        let default_only_rules = ComponentAccessRules::new().default(rule);
+        assert_eq!(default_only_rules.num_access_rules(), 0);
+        let with_default_access_rule = Instruction::CreateAccount {
+            owner_public_key: RistrettoPublicKeyBytes::zero(),
+            owner_rule: None,
+            access_rules: Some(default_only_rules),
+            bucket_workspace_id: None,
+        };
+        assert_eq!(calc_instruction_weight(&with_default_access_rule), num_nodes as u64);
+    }
+
+    #[test]
+    fn set_component_rules_weight_counts_rule_nodes() {
+        let num_nodes = 100;
+        let rule = access_rule_with_nodes(num_nodes);
+
+        let default_only_rules = ComponentAccessRules::new().default(rule.clone());
+        assert_eq!(default_only_rules.num_access_rules(), 0);
+        let set_access_rules = Instruction::SetComponentAccessRules {
+            component: ComponentAddress::new(ObjectKey::default()).into(),
+            access_rules: default_only_rules,
+        };
+        assert_eq!(calc_instruction_weight(&set_access_rules), 1 + num_nodes as u64);
+
+        let set_owner_rule = Instruction::SetComponentOwnerRule {
+            component: ComponentAddress::new(ObjectKey::default()).into(),
+            owner_rule: OwnerRule::ByAccessRule(rule),
+        };
+        assert_eq!(calc_instruction_weight(&set_owner_rule), 1 + num_nodes as u64);
+
+        let set_owner_none = Instruction::SetComponentOwnerRule {
+            component: ComponentAddress::new(ObjectKey::default()).into(),
+            owner_rule: OwnerRule::None,
+        };
+        assert_eq!(calc_instruction_weight(&set_owner_none), 1);
     }
 
     #[test]

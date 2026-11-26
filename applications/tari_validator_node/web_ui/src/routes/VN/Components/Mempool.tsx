@@ -25,18 +25,45 @@ import { useEffect, useState } from "react";
 import { getMempoolStats } from "../../../utils/json_rpc";
 import Error from "./Error";
 
+function formatError(reason: unknown): string {
+  if (typeof reason === "string") {
+    return reason;
+  }
+  if (reason && typeof reason === "object" && "message" in reason && typeof reason.message === "string") {
+    return reason.message;
+  }
+  if (reason && typeof reason === "object") {
+    try {
+      return JSON.stringify(reason);
+    } catch {
+      return String(reason);
+    }
+  }
+  return String(reason);
+}
+
 function Mempool() {
   const [state, setState] = useState<number>();
-  const [error, setError] = useState<String>();
+  const [error, setError] = useState<string>();
   useEffect(() => {
+    let cancelled = false;
     getMempoolStats()
       .then((response) => {
+        if (cancelled) {
+          return;
+        }
         setState(response.size);
         setError(undefined);
       })
       .catch((reason) => {
-        setError(reason);
+        if (cancelled) {
+          return;
+        }
+        setError(formatError(reason));
       });
+    return () => {
+      cancelled = true;
+    };
   }, []);
   if (error) {
     return <Error component="Mempool" message={error} />;

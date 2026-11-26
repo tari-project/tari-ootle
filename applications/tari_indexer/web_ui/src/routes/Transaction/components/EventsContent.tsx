@@ -48,22 +48,27 @@ function formatPayloadValue(value: unknown): string {
   return typeof value === "object" ? JSON.stringify(value) : String(value);
 }
 
-function EventRow({ event, index }: { event: Event; index: number }) {
+function EventRow({ event }: { event: Event }) {
   const [open, setOpen] = useState(false);
   const theme = useTheme();
   const { substate_id, template_address, topic, payload } = event;
+  const substateIdText = substate_id ? substateIdToString(substate_id) : null;
+  const payloadEntries =
+    payload && typeof payload === "object"
+      ? Object.entries(payload).map(([key, value]) => [key, convertCborValue(value)] as const)
+      : [];
 
   return (
     <>
       <TableRow>
         <DataTableCell sx={{ borderBottom: "none" }}>{topic}</DataTableCell>
         <DataTableCell sx={{ borderBottom: "none" }}>
-          {substate_id ? (
+          {substateIdText ? (
             <Stack direction="row" alignItems="center">
               <Typography variant="body2" sx={{ fontFamily: "monospace" }}>
-                {substateIdToString(substate_id)}
+                {substateIdText}
               </Typography>
-              <CopyToClipboard copy={substateIdToString(substate_id)} />
+              <CopyToClipboard copy={substateIdText} />
             </Stack>
           ) : (
             "--"
@@ -95,12 +100,14 @@ function EventRow({ event, index }: { event: Event; index: number }) {
                 Payload
               </Typography>
               <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
-                {payload && typeof payload === "object" ? (
-                  Object.entries(convertCborValue(payload)).map(([key, value], i) => (
-                    <Chip key={i} label={`${key}: ${formatPayloadValue(value)}`} size="small" variant="outlined" />
+                {payloadEntries.length > 0 ? (
+                  payloadEntries.map(([key, value]) => (
+                    <Chip key={key} label={`${key}: ${formatPayloadValue(value)}`} size="small" variant="outlined" />
                   ))
                 ) : (
-                  <Typography variant="body2">{JSON.stringify(payload)}</Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Empty payload
+                  </Typography>
                 )}
               </Box>
             </Box>
@@ -125,7 +132,7 @@ export default function EventsContent({ data }: { data: Event[] }) {
         </TableHead>
         <TableBody>
           {data.map((event, index) => (
-            <EventRow key={index} event={event} index={index} />
+            <EventRow key={index} event={event} />
           ))}
         </TableBody>
       </Table>

@@ -14,6 +14,7 @@ use tari_engine_types::{
     UtxoOutput,
     crypto::{ElgamalVerifiableBalance, ValueLookup, get_commitment_factory},
     resource_container::ResourceError,
+    substate::SubstateId,
 };
 use tari_ootle_common_types::{crypto::create_key_pair_from_seed, substate_type::SubstateType};
 use tari_ootle_transaction::{Epoch, Transaction, args};
@@ -435,6 +436,67 @@ fn transfer_revealed_between_accounts() {
     let vaults = store.get_vaults_for_account(bob).unwrap();
     let vault = vaults.get(&faucet_resx).unwrap();
     assert_eq!(vault.balance(), 25);
+}
+
+/// Revealed amounts are public and carry no range proof, so a stealth transfer carries them at full `Amount` width:
+/// a revealed input above `u64::MAX` funds range-proved UTXOs, and spending those UTXOs reveals their sum, also above
+/// `u64::MAX`, into an account vault.
+#[test]
+fn revealed_amounts_above_u64_max_round_trip_through_utxos() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let (account, _proof, _sk) = test.create_empty_account();
+
+    let utxo_values = [u64::MAX, u64::MAX, 5];
+    let retained_revealed = Amount::from(u64::MAX) + Amount::from(100u64);
+    let mint = stealth::generate_mint_statement(utxo_values, retained_revealed, None);
+    let minted_supply = mint.statement.inputs_statement.revealed_amount;
+    let utxo_total = utxo_values.iter().map(|v| Amount::from(*v)).sum::<Amount>();
+    assert_eq!(minted_supply, utxo_total + retained_revealed);
+    assert!(utxo_total > u64::MAX);
+
+    let (faucet, faucet_resx) = setup(&mut test, &mint, None);
+
+    let store = test.read_only_state_store();
+    assert_eq!(
+        store.get_resource(&faucet_resx).unwrap().total_supply(),
+        Some(minted_supply)
+    );
+    let faucet_vaults = store.get_vaults_for_component(faucet).unwrap();
+    assert_eq!(faucet_vaults.len(), 1);
+    let supply_vault = faucet_vaults.values().next().unwrap();
+    assert_eq!(supply_vault.balance(), retained_revealed);
+    drop(store);
+
+    let inputs = utxo_values
+        .iter()
+        .zip(&mint.output_masks)
+        .map(|(value, mask)| MaskAndValue {
+            mask: mask.clone(),
+            value: *value,
+        })
+        .collect::<Vec<_>>();
+    let spend_back = stealth::generate_transfer_data(inputs, Amount::zero(), Vec::<u64>::new(), utxo_total);
+    let result = test.execute_expect_success(
+        Transaction::builder_localnet(Epoch(1))
+            .stealth_transfer(faucet_resx, spend_back.statement)
+            .put_last_instruction_output_on_workspace("bucket")
+            .call_method(account, "deposit", args![Workspace("bucket")])
+            .finish()
+            .authorize(&test.to_public_key_bytes(), &mint.output_masks)
+            .seal(test.secret_key()),
+        vec![],
+    );
+
+    let diff = result.finalize.any_accept().unwrap();
+    assert_eq!(
+        diff.up_iter()
+            .filter(|(_, substate)| substate.substate_value().as_utxo().is_some())
+            .count(),
+        0
+    );
+    let store = test.read_only_state_store();
+    let vaults = store.get_vaults_for_account(account).unwrap();
+    assert_eq!(vaults.get(&faucet_resx).unwrap().balance(), utxo_total);
 }
 
 /// A stealth transfer consumes its revealed-funds bucket whole, so funds a proof has locked in that bucket would
@@ -1496,6 +1558,59 @@ fn a_frozen_utxo_cannot_be_burnt() {
         .get_utxo(UtxoAddress::new(faucet_resx, utxo_id))
         .unwrap();
     assert!(!utxo.is_burnt());
+}
+
+#[test]
+fn a_burnt_utxo_cannot_be_frozen_or_unfrozen() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATE_PATHS);
+    let mint = stealth::generate_mint_statement([100u64], 0u64, None);
+    let (_faucet, faucet_resx) = setup_with_auth_hook(&mut test, &mint, true);
+    let utxo_id = utxo_id_of(&mint.output_masks[0], 100);
+    let utxo_addr = UtxoAddress::new(faucet_resx, utxo_id);
+    let proof = value_proof::generate_value_proof_mask_knowledge(100u64.into(), &mint.output_masks[0]);
+
+    let template_addr = test.get_template_address(TEMPLATE_NAME);
+    test.execute_expect_success(
+        test.transaction()
+            .call_function(template_addr, "burn_utxo_of", args![faucet_resx, utxo_id, proof])
+            .finish()
+            .authorize(&test.to_public_key_bytes(), [&mint.output_masks[0]])
+            .seal(test.secret_key()),
+        vec![],
+    );
+
+    let burnt_substate = test
+        .read_only_state_store()
+        .get_substate(&SubstateId::Utxo(utxo_addr.clone()))
+        .unwrap();
+    let burnt_version = burnt_substate.version();
+    assert!(burnt_substate.substate_value().as_utxo().unwrap().is_burnt());
+    assert!(!burnt_substate.substate_value().as_utxo().unwrap().is_frozen());
+
+    for (fn_name, expected_op) in [
+        ("freeze_utxos_of", "FreezeStealthUtxo"),
+        ("unfreeze_utxos_of", "UnfreezeStealthUtxo"),
+    ] {
+        let reason = test.execute_expect_failure(
+            test.transaction()
+                .call_function(template_addr, fn_name, args![faucet_resx, vec![utxo_id]])
+                .build_and_seal(test.secret_key()),
+            vec![],
+        );
+        assert_reject_reason(reason, RuntimeError::InvalidOpStealthUtxoBurnt {
+            op: expected_op,
+            resource_address: faucet_resx,
+            utxo_id,
+        });
+
+        let after = test
+            .read_only_state_store()
+            .get_substate(&SubstateId::Utxo(utxo_addr.clone()))
+            .unwrap();
+        assert_eq!(after.version(), burnt_version);
+        assert!(after.substate_value().as_utxo().unwrap().is_burnt());
+        assert!(!after.substate_value().as_utxo().unwrap().is_frozen());
+    }
 }
 
 /// A burn proves knowledge of the UTXO's opening whether or not the resource tracks its total supply, so only

@@ -26,25 +26,14 @@ import Tooltip from "@mui/material/Tooltip";
 import { useTheme } from "@mui/material/styles";
 import useAuthStore from "@store/authStore";
 import { indexerGetNetworkInfo, settingsGet } from "@utils/json_rpc";
-import { useEffect, useRef, useState } from "react";
-
-/// How often the configured indexer is re-probed.
-const POLL_INTERVAL_MS = 15_000;
-
-/// Consecutive failures tolerated before the pill goes red. One failed probe leaves the pill
-/// unknown so a single dropped request does not read as an outage.
-const FAILURES_BEFORE_DISCONNECTED = 2;
-
-/// "connecting" is a request in flight with no verdict yet; "unknown" is no verdict and nothing in
-/// flight, which is also where a probe that failed once lands.
-type Liveness = "connected" | "connecting" | "unknown" | "disconnected";
-
-interface Status {
-  liveness: Liveness;
-  epoch: bigint | number | null;
-  indexerUrl: string | null;
-  detail: string | null;
-}
+import { useEffect, useState } from "react";
+import {
+  formatLivenessTooltip,
+  INITIAL_LIVENESS_STATUS,
+  startIndexerLivenessPoller,
+  type IndexerLivenessStatus,
+  type Liveness,
+} from "./indexerLivenessPoller";
 
 const LABELS: Record<Liveness, string> = {
   connected: "Connected",
@@ -66,64 +55,20 @@ const LABELS: Record<Liveness, string> = {
 function IndexerLivenessPill() {
   const theme = useTheme();
   const loggedIn = useAuthStore((state) => state.loggedIn);
-  const [status, setStatus] = useState<Status>({
-    liveness: "unknown",
-    epoch: null,
-    indexerUrl: null,
-    detail: null,
-  });
-  // Counted across polls rather than held in state, so a re-probe does not re-render the pill
-  // before it has a verdict.
-  const consecutiveFailures = useRef(0);
+  const [status, setStatus] = useState<IndexerLivenessStatus>(INITIAL_LIVENESS_STATUS);
 
   useEffect(() => {
     if (!loggedIn) {
       // A logged out session carries no probe history into the next one.
-      consecutiveFailures.current = 0;
-      setStatus({ liveness: "unknown", epoch: null, indexerUrl: null, detail: null });
+      setStatus(INITIAL_LIVENESS_STATUS);
       return;
     }
 
-    let cancelled = false;
-
-    const probe = async () => {
-      try {
-        const settings = await settingsGet();
-        if (cancelled) return;
-        const indexerUrl = settings.indexer_url;
-        if (!indexerUrl) {
-          throw new Error("No indexer URL is configured");
-        }
-        // Announced only when there is no verdict to keep showing, so a poll from an established
-        // state does not flicker through "Connecting…" every interval.
-        setStatus((prev) => (prev.liveness === "unknown" ? { ...prev, liveness: "connecting", indexerUrl } : prev));
-        const info = await indexerGetNetworkInfo(indexerUrl);
-        if (cancelled) return;
-        consecutiveFailures.current = 0;
-        setStatus({
-          liveness: "connected",
-          epoch: info.epoch,
-          indexerUrl,
-          detail: null,
-        });
-      } catch (e) {
-        if (cancelled) return;
-        consecutiveFailures.current += 1;
-        const detail = e instanceof Error ? e.message : "Cannot reach the indexer";
-        setStatus((prev) => ({
-          ...prev,
-          liveness: consecutiveFailures.current >= FAILURES_BEFORE_DISCONNECTED ? "disconnected" : "unknown",
-          detail,
-        }));
-      }
-    };
-
-    void probe();
-    const timer = setInterval(() => void probe(), POLL_INTERVAL_MS);
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-    };
+    return startIndexerLivenessPoller({
+      settingsGet,
+      indexerGetNetworkInfo,
+      onStatus: setStatus,
+    });
   }, [loggedIn]);
 
   if (!loggedIn) {
@@ -137,13 +82,7 @@ function IndexerLivenessPill() {
     disconnected: theme.palette.error.main,
   }[status.liveness];
 
-  const tooltip = [
-    status.indexerUrl ? `Indexer: ${status.indexerUrl}` : "No indexer configured",
-    status.liveness === "connected" && status.epoch != null ? `Epoch: ${status.epoch.toString()}` : null,
-    status.detail,
-  ]
-    .filter(Boolean)
-    .join(" · ");
+  const tooltip = formatLivenessTooltip(status);
 
   return (
     <Tooltip title={tooltip} arrow>

@@ -379,7 +379,10 @@ fn lock_outputs_by_amount_rejects_zero_amount() {
         .lock_outputs_by_amount(lock.id(), &Test::test_vault_address(), Amount::zero())
         .unwrap_err();
     assert!(
-        matches!(err, ConfidentialOutputsApiError::InvalidParameter { param: "amount", .. }),
+        matches!(err, ConfidentialOutputsApiError::InvalidParameter {
+            param: "amount",
+            ..
+        }),
         "expected InvalidParameter for zero amount, got: {err}"
     );
 }

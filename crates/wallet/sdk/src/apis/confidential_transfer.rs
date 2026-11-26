@@ -602,12 +602,15 @@ impl ConfidentialTransferParams {
                 reason: format!("Invalid destination address: {e}"),
             })?;
 
-        self.amount
-            .checked_add(Amount::from(self.max_fee))
-            .ok_or_else(|| ConfidentialTransferApiError::AmountOverflow {
+        self.amount.checked_add(Amount::from(self.max_fee)).ok_or_else(|| {
+            ConfidentialTransferApiError::AmountOverflow {
                 param: "amount",
-                details: format!("Transfer amount plus a fee of {} exceeds the maximum amount", self.max_fee),
-            })?;
+                details: format!(
+                    "Transfer amount plus a fee of {} exceeds the maximum amount",
+                    self.max_fee
+                ),
+            }
+        })?;
 
         Ok(())
     }
@@ -740,18 +743,18 @@ mod tests {
         let mut params = base_params();
         params.amount = Amount::zero();
         let err = params.validate(Network::LocalNet).unwrap_err();
-        assert!(matches!(
-            err,
-            ConfidentialTransferApiError::InvalidParameter { param: "amount", .. }
-        ));
+        assert!(matches!(err, ConfidentialTransferApiError::InvalidParameter {
+            param: "amount",
+            ..
+        }));
 
         let mut fee_params = base_params();
         fee_params.max_fee = 0;
         let err = fee_params.validate(Network::LocalNet).unwrap_err();
-        assert!(matches!(
-            err,
-            ConfidentialTransferApiError::InvalidParameter { param: "max_fee", .. }
-        ));
+        assert!(matches!(err, ConfidentialTransferApiError::InvalidParameter {
+            param: "max_fee",
+            ..
+        }));
 
         fee_params.is_dry_run = true;
         assert!(fee_params.validate(Network::LocalNet).is_ok());
@@ -762,21 +765,18 @@ mod tests {
         let mut params = base_params();
         params.destination_address = valid_destination(Network::MainNet);
         let err = params.validate(Network::LocalNet).unwrap_err();
-        assert!(matches!(
-            err,
-            ConfidentialTransferApiError::InvalidParameter {
-                param: "destination_address",
-                ..
-            }
-        ));
+        assert!(matches!(err, ConfidentialTransferApiError::InvalidParameter {
+            param: "destination_address",
+            ..
+        }));
 
         let mut overflow_params = base_params();
         overflow_params.amount = Amount::MAX;
         overflow_params.max_fee = 1;
         let err = overflow_params.validate(Network::LocalNet).unwrap_err();
-        assert!(matches!(
-            err,
-            ConfidentialTransferApiError::AmountOverflow { param: "amount", .. }
-        ));
+        assert!(matches!(err, ConfidentialTransferApiError::AmountOverflow {
+            param: "amount",
+            ..
+        }));
     }
 }

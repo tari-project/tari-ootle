@@ -744,8 +744,7 @@ async fn commit_diff_preserves_downed_resource_metadata_vault_parent_and_fee_poo
     assert_eq!(updated_vault.referenced_substates, vec![custom_resource]);
 
     let stored_fee_pool = test.sdk().substate_api().get_substate(&fee_pool).unwrap();
-    assert_eq!(
-        stored_fee_pool.referenced_substates,
-        vec![SubstateId::Resource(TARI_TOKEN)]
-    );
+    assert_eq!(stored_fee_pool.referenced_substates, vec![SubstateId::Resource(
+        TARI_TOKEN
+    )]);
 }

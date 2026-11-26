@@ -27,6 +27,7 @@ use tari_consensus::{
     consensus_constants::ConsensusConstants,
     messages::{MAX_CATCH_UP_PAGE_BLOCKS, MAX_REQUESTED_TRANSACTIONS},
 };
+use tari_ootle_common_types::shard::Shard;
 
 use crate::proto;
 
@@ -53,6 +54,9 @@ const CATCH_UP_PAGE_BYTES_PER_EXTRA_ITEM: usize = 8;
 
 /// Maximum `commands` entries permitted in a single `Block` on the wire.
 const MAX_BLOCK_COMMANDS: usize = ConsensusConstants::MAINNET.max_commands_in_block;
+
+/// Maximum `foreign_proposals` entries permitted in a single `ProposalMessage` on the wire.
+const MAX_FOREIGN_PROPOSALS: usize = Shard::max().as_u32() as usize;
 
 /// Deepest message nesting the walk follows. Schema walks only reach this on recursive types; exceeding it is treated
 /// as over budget.
@@ -490,12 +494,23 @@ impl DecodeBudget for proto::consensus::NewViewMessage {
 impl DecodeBudget for proto::consensus::ProposalMessage {
     fn count_messages(buf: &[u8], budget: &mut Budget) -> Result<(), DecodeBudgetExceeded> {
         let mut block = 0usize;
+        let mut foreign_proposals = 0usize;
         walk_len_fields(buf, budget, |tag, contents, budget| match tag {
             1 => {
                 visit_singular(&mut block, "ProposalMessage.block")?;
                 budget.charge_message::<proto::consensus::Block>(contents)
             },
-            2 => budget.charge_message::<proto::consensus::ForeignProposal>(contents),
+            2 => {
+                foreign_proposals = foreign_proposals.saturating_add(1);
+                if foreign_proposals > MAX_FOREIGN_PROPOSALS {
+                    return Err(Budget::field_exceeded(
+                        "ProposalMessage.foreign_proposals",
+                        foreign_proposals,
+                        MAX_FOREIGN_PROPOSALS,
+                    ));
+                }
+                budget.charge_message::<proto::consensus::ForeignProposal>(contents)
+            },
             _ => Ok(()),
         })
     }
@@ -715,8 +730,19 @@ impl DecodeBudget for proto::consensus::QcSignatures {
 
 impl DecodeBudget for proto::consensus::SchnorrQcSignatures {
     fn count_messages(buf: &[u8], budget: &mut Budget) -> Result<(), DecodeBudgetExceeded> {
+        let mut signatures = 0usize;
         walk_len_fields(buf, budget, |tag, contents, budget| match tag {
-            2 => budget.charge_message::<proto::common::Signature>(contents),
+            2 => {
+                signatures = signatures.saturating_add(1);
+                if signatures > tari_sidechain::MAX_QC_SIGNATURES {
+                    return Err(Budget::field_exceeded(
+                        "SchnorrQcSignatures.signatures",
+                        signatures,
+                        tari_sidechain::MAX_QC_SIGNATURES,
+                    ));
+                }
+                budget.charge_message::<proto::common::Signature>(contents)
+            },
             _ => Ok(()),
         })
     }
@@ -750,8 +776,19 @@ impl DecodeBudget for proto::consensus::TcSignatures {
 
 impl DecodeBudget for proto::consensus::SchnorrTcSignatures {
     fn count_messages(buf: &[u8], budget: &mut Budget) -> Result<(), DecodeBudgetExceeded> {
+        let mut timeouts = 0usize;
         walk_len_fields(buf, budget, |tag, contents, budget| match tag {
-            2 => budget.charge_message::<proto::consensus::SignedTimeout>(contents),
+            2 => {
+                timeouts = timeouts.saturating_add(1);
+                if timeouts > tari_sidechain::MAX_QC_SIGNATURES {
+                    return Err(Budget::field_exceeded(
+                        "SchnorrTcSignatures.timeouts",
+                        timeouts,
+                        tari_sidechain::MAX_QC_SIGNATURES,
+                    ));
+                }
+                budget.charge_message::<proto::consensus::SignedTimeout>(contents)
+            },
             _ => Ok(()),
         })
     }
@@ -1122,7 +1159,7 @@ fn witness_proposal(proposal: proto::consensus::ProposalMessage) {
 mod tests {
     use prost::Message;
     use tari_consensus::hotstuff::DEFAULT_CATCH_UP_PAGE_BYTES;
-    use tari_ootle_common_types::{ShardGroup, shard::Shard};
+    use tari_ootle_common_types::ShardGroup;
     use tari_swarm::messaging::MAX_MESSAGE_SIZE;
 
     use super::*;
@@ -1611,6 +1648,73 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(err.field, Some("ProposalMessage.block"));
+
+        // Padded QC signatures, TC timeouts, and foreign proposals inside a CatchUpPage block are capped at their
+        // consensus limits rather than growing to the page's per-byte item allowance.
+        let padded_sig_entry = len_field(2, &padded_entry_body);
+        let overfull_qc_in_page = len_field(
+            11,
+            &len_field(
+                3,
+                &len_field(
+                    1,
+                    &len_field(
+                        2,
+                        &len_field(
+                            9,
+                            &len_field(
+                                1,
+                                &padded_sig_entry.repeat(tari_sidechain::MAX_QC_SIGNATURES + 1),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        );
+        let err = check_decode_budget::<proto::consensus::HotStuffMessage>(
+            &overfull_qc_in_page,
+            HOTSTUFF_MAX_DECODE_ITEMS,
+        )
+        .unwrap_err();
+        assert_eq!(err.field, Some("SchnorrQcSignatures.signatures"));
+
+        let overfull_tc_in_page = len_field(
+            11,
+            &len_field(
+                3,
+                &len_field(
+                    1,
+                    &len_field(
+                        4,
+                        &len_field(
+                            3,
+                            &len_field(
+                                1,
+                                &padded_sig_entry.repeat(tari_sidechain::MAX_QC_SIGNATURES + 1),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        );
+        let err = check_decode_budget::<proto::consensus::HotStuffMessage>(
+            &overfull_tc_in_page,
+            HOTSTUFF_MAX_DECODE_ITEMS,
+        )
+        .unwrap_err();
+        assert_eq!(err.field, Some("SchnorrTcSignatures.timeouts"));
+
+        let padded_fp_entry = len_field(2, &padded_entry_body);
+        let overfull_fp_in_page = len_field(
+            11,
+            &len_field(3, &padded_fp_entry.repeat(MAX_FOREIGN_PROPOSALS + 1)),
+        );
+        let err = check_decode_budget::<proto::consensus::HotStuffMessage>(
+            &overfull_fp_in_page,
+            HOTSTUFF_MAX_DECODE_ITEMS,
+        )
+        .unwrap_err();
+        assert_eq!(err.field, Some("ProposalMessage.foreign_proposals"));
 
         // NewView (tag 1) -> QuorumCertificate (tag 1) -> QcSignatures (tag 9) -> Schnorr (tag 1) -> Signature (tag 2)
         let qc_sig_flood = len_field(

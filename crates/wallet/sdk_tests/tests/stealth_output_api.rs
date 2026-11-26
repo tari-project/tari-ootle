@@ -1386,3 +1386,81 @@ async fn merged_fallback_with_prefer_revealed_locks_only_recipient_amount_for_tr
         .unwrap();
     assert_eq!(vault.locked_revealed_balance, Amount::from(300u64));
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn fee_statement_with_prefer_revealed_includes_revealed_input_in_change_calculation() {
+    let test = Test::new();
+    let sdk = test.sdk();
+    let account = sdk
+        .accounts_api()
+        .get_account_by_address(&Test::test_account_address())
+        .unwrap();
+    test.store()
+        .with_write_tx(|tx| {
+            tx.vaults_update(
+                Test::test_vault_address(),
+                SubstateVersion::ZERO,
+                500u64.into(),
+                0u64.into(),
+            )
+        })
+        .unwrap();
+    add_owned_stealth_output(&test, &account, STEALTH_TARI_RESOURCE_ADDRESS, 800);
+
+    let transfer_resource = resource_address_from_seed(7);
+    sdk.resources_api()
+        .upsert_resource(
+            &transfer_resource,
+            &Resource::new(
+                ResourceType::Stealth,
+                SubstateOwnerRule::None,
+                ResourceAccessRules::new(),
+                Metadata::new(),
+                None,
+                None,
+                6,
+                false,
+            ),
+        )
+        .unwrap();
+    add_owned_stealth_output(&test, &account, transfer_resource, 500);
+
+    let (lock, output) = sdk
+        .stealth_transfer_api()
+        .transfer(account.clone(), StealthTransferParams {
+            fee_params: TransferFeeParams::new(UtxoInputSelection::PreferRevealed),
+            input_selection: UtxoInputSelection::ConfidentialOnly,
+            inputs: None,
+            outputs: vec![TransferOutput {
+                address: account.address().clone(),
+                revealed_amount: Amount::zero(),
+                blinded_amount: 500,
+                memo: None,
+                pay_to: PayTo::StealthPublicKey,
+            }],
+            badge_usage: BadgeUsage::None,
+            resource_address: transfer_resource,
+            max_fee: 1000,
+            max_epoch: Epoch(10),
+            is_dry_run: false,
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(output.fee_inputs.revealed, Amount::from(500u64));
+    assert_eq!(output.fee_inputs.inputs.len(), 1);
+    let fee_stealth_stmt = output
+        .transaction
+        .fee_instructions()
+        .iter()
+        .find_map(|instruction| match instruction {
+            Instruction::StealthTransfer { statement, .. } => Some(statement),
+            _ => None,
+        })
+        .expect("fee instructions must include StealthTransfer");
+    assert_eq!(fee_stealth_stmt.revealed_input_amount(), Amount::from(500u64));
+    assert_eq!(fee_stealth_stmt.inputs_statement.inputs.len(), 1);
+    assert_eq!(fee_stealth_stmt.outputs_statement.outputs.len(), 1);
+    assert_eq!(fee_stealth_stmt.revealed_output_amount(), Amount::from(1000u64));
+    lock.release();
+}

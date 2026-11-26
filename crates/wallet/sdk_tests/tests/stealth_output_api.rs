@@ -1466,6 +1466,7 @@ async fn fee_statement_with_prefer_revealed_includes_revealed_input_in_change_ca
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[allow(clippy::too_many_lines)]
 async fn stealth_transfer_with_badge_authorizes_proof_around_stealth_transfer() {
     let test = Test::new();
     let sdk = test.sdk();

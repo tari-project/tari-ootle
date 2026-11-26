@@ -366,19 +366,59 @@ fn read_varint(buf: &[u8], pos: &mut usize) -> Option<u64> {
 
 // -------------------------------- Schema implementations -------------------------------- //
 
+/// Tracks that a singular message field or `oneof` variant appears at most once in its parent message so that
+/// `prost`'s merge-on-repeat semantics cannot concatenate repeated children across multiple occurrences of a singular
+/// parent field.
+fn visit_singular(seen: &mut usize, field: &'static str) -> Result<(), DecodeBudgetExceeded> {
+    *seen = seen.saturating_add(1);
+    if *seen > 1 {
+        return Err(Budget::field_exceeded(field, *seen, 1));
+    }
+    Ok(())
+}
+
 impl DecodeBudget for proto::consensus::HotStuffMessage {
     fn count_messages(buf: &[u8], budget: &mut Budget) -> Result<(), DecodeBudgetExceeded> {
+        let mut message = 0usize;
         walk_len_fields(buf, budget, |tag, contents, budget| match tag {
-            1 => budget.charge_message::<proto::consensus::NewViewMessage>(contents),
-            2 | 10 => budget.charge_message::<proto::consensus::ProposalMessage>(contents),
-            3 => budget.charge_message::<proto::consensus::ForeignProposalMessage>(contents),
-            4 => budget.charge_message::<proto::consensus::ForeignProposalNotification>(contents),
-            5 => budget.charge_message::<proto::consensus::ForeignProposalRequest>(contents),
-            6 => budget.charge_message::<proto::consensus::VoteMessage>(contents),
-            7 => budget.charge_message::<proto::consensus::MissingTransactionsRequest>(contents),
-            8 => budget.charge_message::<proto::consensus::MissingTransactionsResponse>(contents),
-            9 => budget.charge_message::<proto::consensus::SyncRequest>(contents),
+            1 => {
+                visit_singular(&mut message, "HotStuffMessage.message")?;
+                budget.charge_message::<proto::consensus::NewViewMessage>(contents)
+            },
+            2 | 10 => {
+                visit_singular(&mut message, "HotStuffMessage.message")?;
+                budget.charge_message::<proto::consensus::ProposalMessage>(contents)
+            },
+            3 => {
+                visit_singular(&mut message, "HotStuffMessage.message")?;
+                budget.charge_message::<proto::consensus::ForeignProposalMessage>(contents)
+            },
+            4 => {
+                visit_singular(&mut message, "HotStuffMessage.message")?;
+                budget.charge_message::<proto::consensus::ForeignProposalNotification>(contents)
+            },
+            5 => {
+                visit_singular(&mut message, "HotStuffMessage.message")?;
+                budget.charge_message::<proto::consensus::ForeignProposalRequest>(contents)
+            },
+            6 => {
+                visit_singular(&mut message, "HotStuffMessage.message")?;
+                budget.charge_message::<proto::consensus::VoteMessage>(contents)
+            },
+            7 => {
+                visit_singular(&mut message, "HotStuffMessage.message")?;
+                budget.charge_message::<proto::consensus::MissingTransactionsRequest>(contents)
+            },
+            8 => {
+                visit_singular(&mut message, "HotStuffMessage.message")?;
+                budget.charge_message::<proto::consensus::MissingTransactionsResponse>(contents)
+            },
+            9 => {
+                visit_singular(&mut message, "HotStuffMessage.message")?;
+                budget.charge_message::<proto::consensus::SyncRequest>(contents)
+            },
             11 => {
+                visit_singular(&mut message, "HotStuffMessage.message")?;
                 budget.add_allowance(contents.len() / CATCH_UP_PAGE_BYTES_PER_EXTRA_ITEM);
                 budget.charge_message::<proto::consensus::CatchUpPage>(contents)
             },
@@ -390,6 +430,7 @@ impl DecodeBudget for proto::consensus::HotStuffMessage {
 impl DecodeBudget for proto::consensus::CatchUpPage {
     fn count_messages(buf: &[u8], budget: &mut Budget) -> Result<(), DecodeBudgetExceeded> {
         let mut blocks = 0usize;
+        let mut leaf = 0usize;
         let mut transactions = 0usize;
         walk_len_fields(buf, budget, |tag, contents, budget| match tag {
             3 => {
@@ -403,7 +444,10 @@ impl DecodeBudget for proto::consensus::CatchUpPage {
                 }
                 budget.charge_message::<proto::consensus::ProposalMessage>(contents)
             },
-            4 => budget.charge_message::<proto::consensus::ProposalMessage>(contents),
+            4 => {
+                visit_singular(&mut leaf, "CatchUpPage.leaf")?;
+                budget.charge_message::<proto::consensus::ProposalMessage>(contents)
+            },
             5 => {
                 transactions = transactions.saturating_add(1);
                 if transactions > MAX_REQUESTED_TRANSACTIONS {
@@ -422,10 +466,22 @@ impl DecodeBudget for proto::consensus::CatchUpPage {
 
 impl DecodeBudget for proto::consensus::NewViewMessage {
     fn count_messages(buf: &[u8], budget: &mut Budget) -> Result<(), DecodeBudgetExceeded> {
+        let mut high_qc = 0usize;
+        let mut last_vote = 0usize;
+        let mut timeout = 0usize;
         walk_len_fields(buf, budget, |tag, contents, budget| match tag {
-            1 => budget.charge_message::<proto::consensus::QuorumCertificate>(contents),
-            2 => budget.charge_message::<proto::consensus::VoteMessage>(contents),
-            3 => budget.charge_message::<proto::consensus::TimeoutVote>(contents),
+            1 => {
+                visit_singular(&mut high_qc, "NewViewMessage.high_qc")?;
+                budget.charge_message::<proto::consensus::QuorumCertificate>(contents)
+            },
+            2 => {
+                visit_singular(&mut last_vote, "NewViewMessage.last_vote")?;
+                budget.charge_message::<proto::consensus::VoteMessage>(contents)
+            },
+            3 => {
+                visit_singular(&mut timeout, "NewViewMessage.timeout")?;
+                budget.charge_message::<proto::consensus::TimeoutVote>(contents)
+            },
             _ => Ok(()),
         })
     }
@@ -433,8 +489,12 @@ impl DecodeBudget for proto::consensus::NewViewMessage {
 
 impl DecodeBudget for proto::consensus::ProposalMessage {
     fn count_messages(buf: &[u8], budget: &mut Budget) -> Result<(), DecodeBudgetExceeded> {
+        let mut block = 0usize;
         walk_len_fields(buf, budget, |tag, contents, budget| match tag {
-            1 => budget.charge_message::<proto::consensus::Block>(contents),
+            1 => {
+                visit_singular(&mut block, "ProposalMessage.block")?;
+                budget.charge_message::<proto::consensus::Block>(contents)
+            },
             2 => budget.charge_message::<proto::consensus::ForeignProposal>(contents),
             _ => Ok(()),
         })
@@ -443,8 +503,12 @@ impl DecodeBudget for proto::consensus::ProposalMessage {
 
 impl DecodeBudget for proto::consensus::TimeoutVote {
     fn count_messages(buf: &[u8], budget: &mut Budget) -> Result<(), DecodeBudgetExceeded> {
+        let mut signature = 0usize;
         walk_len_fields(buf, budget, |tag, contents, budget| match tag {
-            3 => budget.charge_message::<proto::common::SignatureAndPublicKey>(contents),
+            3 => {
+                visit_singular(&mut signature, "TimeoutVote.signature")?;
+                budget.charge_message::<proto::common::SignatureAndPublicKey>(contents)
+            },
             _ => Ok(()),
         })
     }
@@ -452,8 +516,12 @@ impl DecodeBudget for proto::consensus::TimeoutVote {
 
 impl DecodeBudget for proto::consensus::ForeignProposalMessage {
     fn count_messages(buf: &[u8], budget: &mut Budget) -> Result<(), DecodeBudgetExceeded> {
+        let mut proposal = 0usize;
         walk_len_fields(buf, budget, |tag, contents, budget| match tag {
-            1 => budget.charge_message::<proto::consensus::ForeignProposal>(contents),
+            1 => {
+                visit_singular(&mut proposal, "ForeignProposalMessage.proposal")?;
+                budget.charge_message::<proto::consensus::ForeignProposal>(contents)
+            },
             _ => Ok(()),
         })
     }
@@ -470,8 +538,12 @@ impl DecodeBudget for proto::consensus::ForeignProposalNotification {
 
 impl DecodeBudget for proto::consensus::ForeignProposalRequest {
     fn count_messages(buf: &[u8], budget: &mut Budget) -> Result<(), DecodeBudgetExceeded> {
+        let mut request = 0usize;
         walk_len_fields(buf, budget, |tag, contents, budget| match tag {
-            1 => budget.charge_message::<proto::consensus::ForeignProposalRequestByBlockId>(contents),
+            1 => {
+                visit_singular(&mut request, "ForeignProposalRequest.request")?;
+                budget.charge_message::<proto::consensus::ForeignProposalRequestByBlockId>(contents)
+            },
             _ => Ok(()),
         })
     }
@@ -479,8 +551,12 @@ impl DecodeBudget for proto::consensus::ForeignProposalRequest {
 
 impl DecodeBudget for proto::consensus::VoteMessage {
     fn count_messages(buf: &[u8], budget: &mut Budget) -> Result<(), DecodeBudgetExceeded> {
+        let mut signature = 0usize;
         walk_len_fields(buf, budget, |tag, contents, budget| match tag {
-            5 => budget.charge_message::<proto::common::SignatureAndPublicKey>(contents),
+            5 => {
+                visit_singular(&mut signature, "VoteMessage.signature")?;
+                budget.charge_message::<proto::common::SignatureAndPublicKey>(contents)
+            },
             _ => Ok(()),
         })
     }
@@ -488,10 +564,22 @@ impl DecodeBudget for proto::consensus::VoteMessage {
 
 impl DecodeBudget for proto::consensus::BlockHeader {
     fn count_messages(buf: &[u8], budget: &mut Budget) -> Result<(), DecodeBudgetExceeded> {
+        let mut signature = 0usize;
+        let mut extra_data = 0usize;
+        let mut accumulated_data = 0usize;
         walk_len_fields(buf, budget, |tag, contents, budget| match tag {
-            10 => budget.charge_message::<proto::common::Signature>(contents),
-            13 => budget.charge_message::<proto::consensus::ExtraData>(contents),
-            14 => budget.charge_message::<proto::consensus::ShardGroupAccumulatedData>(contents),
+            10 => {
+                visit_singular(&mut signature, "BlockHeader.signature")?;
+                budget.charge_message::<proto::common::Signature>(contents)
+            },
+            13 => {
+                visit_singular(&mut extra_data, "BlockHeader.extra_data")?;
+                budget.charge_message::<proto::consensus::ExtraData>(contents)
+            },
+            14 => {
+                visit_singular(&mut accumulated_data, "BlockHeader.accumulated_data")?;
+                budget.charge_message::<proto::consensus::ShardGroupAccumulatedData>(contents)
+            },
             _ => Ok(()),
         })
     }
@@ -499,10 +587,19 @@ impl DecodeBudget for proto::consensus::BlockHeader {
 
 impl DecodeBudget for proto::consensus::Block {
     fn count_messages(buf: &[u8], budget: &mut Budget) -> Result<(), DecodeBudgetExceeded> {
+        let mut header = 0usize;
+        let mut justify = 0usize;
         let mut commands = 0usize;
+        let mut timeout_certificate = 0usize;
         walk_len_fields(buf, budget, |tag, contents, budget| match tag {
-            1 => budget.charge_message::<proto::consensus::BlockHeader>(contents),
-            2 => budget.charge_message::<proto::consensus::QuorumCertificate>(contents),
+            1 => {
+                visit_singular(&mut header, "Block.header")?;
+                budget.charge_message::<proto::consensus::BlockHeader>(contents)
+            },
+            2 => {
+                visit_singular(&mut justify, "Block.justify")?;
+                budget.charge_message::<proto::consensus::QuorumCertificate>(contents)
+            },
             3 => {
                 commands = commands.saturating_add(1);
                 if commands > MAX_BLOCK_COMMANDS {
@@ -510,7 +607,10 @@ impl DecodeBudget for proto::consensus::Block {
                 }
                 budget.charge_message::<proto::consensus::Command>(contents)
             },
-            4 => budget.charge_message::<proto::consensus::TimeoutCertificate>(contents),
+            4 => {
+                visit_singular(&mut timeout_certificate, "Block.timeout_certificate")?;
+                budget.charge_message::<proto::consensus::TimeoutCertificate>(contents)
+            },
             _ => Ok(()),
         })
     }
@@ -518,11 +618,24 @@ impl DecodeBudget for proto::consensus::Block {
 
 impl DecodeBudget for proto::consensus::Command {
     fn count_messages(buf: &[u8], budget: &mut Budget) -> Result<(), DecodeBudgetExceeded> {
+        let mut command = 0usize;
         walk_len_fields(buf, budget, |tag, contents, budget| match tag {
-            1 => budget.charge_message::<proto::consensus::LocalOnlyAtom>(contents),
-            2..=5 => budget.charge_message::<proto::consensus::MultiShardAtom>(contents),
-            6 => budget.charge_message::<proto::consensus::ForeignProposalAtom>(contents),
-            7 => budget.charge_message::<proto::consensus::EndEpochAtom>(contents),
+            1 => {
+                visit_singular(&mut command, "Command.command")?;
+                budget.charge_message::<proto::consensus::LocalOnlyAtom>(contents)
+            },
+            2..=5 => {
+                visit_singular(&mut command, "Command.command")?;
+                budget.charge_message::<proto::consensus::MultiShardAtom>(contents)
+            },
+            6 => {
+                visit_singular(&mut command, "Command.command")?;
+                budget.charge_message::<proto::consensus::ForeignProposalAtom>(contents)
+            },
+            7 => {
+                visit_singular(&mut command, "Command.command")?;
+                budget.charge_message::<proto::consensus::EndEpochAtom>(contents)
+            },
             _ => Ok(()),
         })
     }
@@ -530,11 +643,27 @@ impl DecodeBudget for proto::consensus::Command {
 
 impl DecodeBudget for proto::consensus::MultiShardAtom {
     fn count_messages(buf: &[u8], budget: &mut Budget) -> Result<(), DecodeBudgetExceeded> {
+        let mut decision = 0usize;
+        let mut evidence = 0usize;
+        let mut leader_fee = 0usize;
+        let mut locked_epoch = 0usize;
         walk_len_fields(buf, budget, |tag, contents, budget| match tag {
-            3 => budget.charge_message::<proto::consensus::Decision>(contents),
-            4 => budget.charge_message::<proto::consensus::Evidence>(contents),
-            6 => budget.charge_message::<proto::consensus::LeaderFee>(contents),
-            8 => budget.charge_message::<proto::consensus::LockedEpoch>(contents),
+            3 => {
+                visit_singular(&mut decision, "MultiShardAtom.decision")?;
+                budget.charge_message::<proto::consensus::Decision>(contents)
+            },
+            4 => {
+                visit_singular(&mut evidence, "MultiShardAtom.evidence")?;
+                budget.charge_message::<proto::consensus::Evidence>(contents)
+            },
+            6 => {
+                visit_singular(&mut leader_fee, "MultiShardAtom.leader_fee")?;
+                budget.charge_message::<proto::consensus::LeaderFee>(contents)
+            },
+            8 => {
+                visit_singular(&mut locked_epoch, "MultiShardAtom.locked_epoch")?;
+                budget.charge_message::<proto::consensus::LockedEpoch>(contents)
+            },
             _ => Ok(()),
         })
     }
@@ -542,9 +671,17 @@ impl DecodeBudget for proto::consensus::MultiShardAtom {
 
 impl DecodeBudget for proto::consensus::LocalOnlyAtom {
     fn count_messages(buf: &[u8], budget: &mut Budget) -> Result<(), DecodeBudgetExceeded> {
+        let mut decision = 0usize;
+        let mut leader_fee = 0usize;
         walk_len_fields(buf, budget, |tag, contents, budget| match tag {
-            2 => budget.charge_message::<proto::consensus::Decision>(contents),
-            4 => budget.charge_message::<proto::consensus::LeaderFee>(contents),
+            2 => {
+                visit_singular(&mut decision, "LocalOnlyAtom.decision")?;
+                budget.charge_message::<proto::consensus::Decision>(contents)
+            },
+            4 => {
+                visit_singular(&mut leader_fee, "LocalOnlyAtom.leader_fee")?;
+                budget.charge_message::<proto::consensus::LeaderFee>(contents)
+            },
             _ => Ok(()),
         })
     }
@@ -552,8 +689,12 @@ impl DecodeBudget for proto::consensus::LocalOnlyAtom {
 
 impl DecodeBudget for proto::consensus::QuorumCertificate {
     fn count_messages(buf: &[u8], budget: &mut Budget) -> Result<(), DecodeBudgetExceeded> {
+        let mut signatures = 0usize;
         walk_len_fields(buf, budget, |tag, contents, budget| match tag {
-            9 => budget.charge_message::<proto::consensus::QcSignatures>(contents),
+            9 => {
+                visit_singular(&mut signatures, "QuorumCertificate.signatures")?;
+                budget.charge_message::<proto::consensus::QcSignatures>(contents)
+            },
             _ => Ok(()),
         })
     }
@@ -561,8 +702,12 @@ impl DecodeBudget for proto::consensus::QuorumCertificate {
 
 impl DecodeBudget for proto::consensus::QcSignatures {
     fn count_messages(buf: &[u8], budget: &mut Budget) -> Result<(), DecodeBudgetExceeded> {
+        let mut scheme = 0usize;
         walk_len_fields(buf, budget, |tag, contents, budget| match tag {
-            1 => budget.charge_message::<proto::consensus::SchnorrQcSignatures>(contents),
+            1 => {
+                visit_singular(&mut scheme, "QcSignatures.scheme")?;
+                budget.charge_message::<proto::consensus::SchnorrQcSignatures>(contents)
+            },
             _ => Ok(()),
         })
     }
@@ -579,8 +724,12 @@ impl DecodeBudget for proto::consensus::SchnorrQcSignatures {
 
 impl DecodeBudget for proto::consensus::TimeoutCertificate {
     fn count_messages(buf: &[u8], budget: &mut Budget) -> Result<(), DecodeBudgetExceeded> {
+        let mut signatures = 0usize;
         walk_len_fields(buf, budget, |tag, contents, budget| match tag {
-            3 => budget.charge_message::<proto::consensus::TcSignatures>(contents),
+            3 => {
+                visit_singular(&mut signatures, "TimeoutCertificate.signatures")?;
+                budget.charge_message::<proto::consensus::TcSignatures>(contents)
+            },
             _ => Ok(()),
         })
     }
@@ -588,8 +737,12 @@ impl DecodeBudget for proto::consensus::TimeoutCertificate {
 
 impl DecodeBudget for proto::consensus::TcSignatures {
     fn count_messages(buf: &[u8], budget: &mut Budget) -> Result<(), DecodeBudgetExceeded> {
+        let mut scheme = 0usize;
         walk_len_fields(buf, budget, |tag, contents, budget| match tag {
-            1 => budget.charge_message::<proto::consensus::SchnorrTcSignatures>(contents),
+            1 => {
+                visit_singular(&mut scheme, "TcSignatures.scheme")?;
+                budget.charge_message::<proto::consensus::SchnorrTcSignatures>(contents)
+            },
             _ => Ok(()),
         })
     }
@@ -606,8 +759,12 @@ impl DecodeBudget for proto::consensus::SchnorrTcSignatures {
 
 impl DecodeBudget for proto::consensus::SignedTimeout {
     fn count_messages(buf: &[u8], budget: &mut Budget) -> Result<(), DecodeBudgetExceeded> {
+        let mut signature = 0usize;
         walk_len_fields(buf, budget, |tag, contents, budget| match tag {
-            2 => budget.charge_message::<proto::common::Signature>(contents),
+            2 => {
+                visit_singular(&mut signature, "SignedTimeout.signature")?;
+                budget.charge_message::<proto::common::Signature>(contents)
+            },
             _ => Ok(()),
         })
     }
@@ -1436,6 +1593,24 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(err.field, Some("Block.commands"));
+
+        // Splitting a page across repeated HotStuffMessage.catch_up_page (tag 11) fields or a block across repeated
+        // ProposalMessage.block (tag 1) fields (which prost would merge into one Vec) is rejected at the second
+        // singular occurrence.
+        let half_page = len_field(11, &padded_block_entry.repeat(MAX_CATCH_UP_PAGE_BLOCKS / 2 + 1));
+        let split_pages = [half_page.as_slice(), half_page.as_slice()].concat();
+        let err = check_decode_budget::<proto::consensus::HotStuffMessage>(&split_pages, HOTSTUFF_MAX_DECODE_ITEMS)
+            .unwrap_err();
+        assert_eq!(err.field, Some("HotStuffMessage.message"));
+
+        let half_block = len_field(1, &padded_cmd_entry.repeat(MAX_BLOCK_COMMANDS / 2 + 1));
+        let split_blocks_proposal = len_field(2, &[half_block.as_slice(), half_block.as_slice()].concat());
+        let err = check_decode_budget::<proto::consensus::HotStuffMessage>(
+            &split_blocks_proposal,
+            HOTSTUFF_MAX_DECODE_ITEMS,
+        )
+        .unwrap_err();
+        assert_eq!(err.field, Some("ProposalMessage.block"));
 
         // NewView (tag 1) -> QuorumCertificate (tag 1) -> QcSignatures (tag 9) -> Schnorr (tag 1) -> Signature (tag 2)
         let qc_sig_flood = len_field(

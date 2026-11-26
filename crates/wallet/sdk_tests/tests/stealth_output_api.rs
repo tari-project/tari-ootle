@@ -1430,6 +1430,7 @@ async fn fee_statement_with_prefer_revealed_includes_revealed_input_in_change_ca
         .transfer(account.clone(), StealthTransferParams {
             fee_params: TransferFeeParams::new(UtxoInputSelection::PreferRevealed),
             input_selection: UtxoInputSelection::ConfidentialOnly,
+            inputs: None,
             outputs: vec![TransferOutput {
                 address: account.address().clone(),
                 revealed_amount: Amount::zero(),

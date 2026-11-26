@@ -18,7 +18,7 @@ type Reply<T> = oneshot::Sender<anyhow::Result<T>>;
 
 pub enum ProcessManagerRequest {
     CreateInstance {
-        name: String,
+        name: Option<String>,
         instance_type: InstanceType,
         settings: HashMap<String, String>,
         reply: Reply<InstanceId>,
@@ -194,7 +194,7 @@ impl ProcessManagerHandle {
 
     pub async fn create_instance<A: Into<HashMap<String, String>>>(
         &self,
-        name: String,
+        name: Option<String>,
         instance_type: InstanceType,
         settings: A,
     ) -> anyhow::Result<InstanceId> {

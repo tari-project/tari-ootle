@@ -229,12 +229,12 @@ pub struct MmrInclusionProof {
     pub mmr_size: u64,
     /// The sibling hashes from the leaf up to its local peak
     #[n(2)]
-    #[serde(deserialize_with = "bounded_hashes::deserialize")]
+    #[serde(deserialize_with = "ootle_serde::bounded_seq::deserialize::<MAX_MMR_PROOF_HASHES, _, _>")]
     #[cbor(with = "bounded_hashes")]
     pub path: Vec<Hash32>,
     /// The MMR peaks, less the leaf's local peak
     #[n(3)]
-    #[serde(deserialize_with = "bounded_hashes::deserialize")]
+    #[serde(deserialize_with = "ootle_serde::bounded_seq::deserialize::<MAX_MMR_PROOF_HASHES, _, _>")]
     #[cbor(with = "bounded_hashes")]
     pub peaks: Vec<Hash32>,
 }
@@ -274,10 +274,7 @@ mod bounded_vec_bytes {
 /// Codecs for a list of at most [`MAX_MMR_PROOF_HASHES`] hashes. The declared length is untrusted, so it is checked
 /// against the bound before anything is allocated.
 mod bounded_hashes {
-    use std::fmt;
-
     use minicbor::{CborLen, Decode, Decoder, Encode, Encoder};
-    use serde::{Deserializer, de};
     use tari_template_lib::types::Hash32;
 
     use super::MAX_MMR_PROOF_HASHES;
@@ -330,33 +327,6 @@ mod bounded_hashes {
         v.iter().fold(<u64 as CborLen<C>>::cbor_len(&len, ctx), |total, hash| {
             total + hash.cbor_len(ctx)
         })
-    }
-
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<Hash32>, D::Error>
-    where D: Deserializer<'de> {
-        struct Visitor;
-
-        impl<'de> de::Visitor<'de> for Visitor {
-            type Value = Vec<Hash32>;
-
-            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-                write!(f, "a sequence of at most {MAX_MMR_PROOF_HASHES} hashes")
-            }
-
-            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
-            where A: de::SeqAccess<'de> {
-                let mut hashes = Vec::new();
-                while let Some(hash) = seq.next_element()? {
-                    if hashes.len() == MAX_MMR_PROOF_HASHES {
-                        return Err(de::Error::invalid_length(MAX_MMR_PROOF_HASHES + 1, &self));
-                    }
-                    hashes.push(hash);
-                }
-                Ok(hashes)
-            }
-        }
-
-        deserializer.deserialize_seq(Visitor)
     }
 }
 

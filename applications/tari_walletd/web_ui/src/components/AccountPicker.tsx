@@ -9,21 +9,24 @@ import Select from "@mui/material/Select";
 import Stack from "@mui/material/Stack";
 import useAccountStore, { setAccount, setOotleAddress } from "@store/accountStore";
 import { substateIdToString } from "@tari-project/ootle-ts-bindings";
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
+import { buildAccountPickerOptions, resolveFallbackAccount } from "./accountPickerHelpers";
+
+const ACCOUNTS_FETCH_LIMIT = 100;
 
 // TODO - replace other file-specific account selectors with this component
 export default function AccountPicker() {
-  const { data } = useAccountsList(0, 10);
+  const { data } = useAccountsList(0, ACCOUNTS_FETCH_LIMIT);
   const currentAccount = useAccountStore((s) => s.account);
-  const defaultAccount = data?.accounts.find((a) => a.account.is_default);
-  const account = currentAccount || defaultAccount?.account;
+  const fallbackAccount = useMemo(() => resolveFallbackAccount(data?.accounts), [data?.accounts]);
+  const account = currentAccount || fallbackAccount?.account;
 
   useEffect(() => {
-    if (!currentAccount && defaultAccount) {
-      setAccount(defaultAccount.account);
-      setOotleAddress(defaultAccount.address);
+    if (!currentAccount && fallbackAccount) {
+      setAccount(fallbackAccount.account);
+      setOotleAddress(fallbackAccount.address);
     }
-  }, [currentAccount, defaultAccount]);
+  }, [currentAccount, fallbackAccount]);
 
   function onAccountChange(e: SelectChangeEvent) {
     const selected = data?.accounts.find((a) => substateIdToString(a.account.component_address) === e.target.value);
@@ -32,14 +35,8 @@ export default function AccountPicker() {
       setOotleAddress(selected.address);
     }
   }
-  const options = data?.accounts.map(({ account }) => {
-    const address = substateIdToString(account.component_address);
-    return (
-      <MenuItem key={`item_${address}`} value={address}>
-        {account.name || address}
-      </MenuItem>
-    );
-  });
+
+  const options = useMemo(() => buildAccountPickerOptions(data?.accounts, account), [data?.accounts, account]);
 
   return account ? (
     <Stack alignItems="center" justifyContent="flex-end" direction="row" spacing={2}>
@@ -52,7 +49,11 @@ export default function AccountPicker() {
           value={substateIdToString(account.component_address)}
           onChange={onAccountChange}
         >
-          {options}
+          {options.map(({ address, label }) => (
+            <MenuItem key={`item_${address}`} value={address}>
+              {label}
+            </MenuItem>
+          ))}
         </Select>
       </FormControl>
     </Stack>

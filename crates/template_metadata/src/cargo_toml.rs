@@ -7,7 +7,7 @@ use cargo_toml::Manifest;
 use tari_template_lib_types::TemplateAddress;
 use url::Url;
 
-use crate::{TemplateMetadata, metadata::SCHEMA_VERSION};
+use crate::{CommitHash, CommitHashError, TemplateMetadata, metadata::SCHEMA_VERSION};
 
 /// Parse template metadata from a Cargo.toml file.
 ///
@@ -76,7 +76,7 @@ fn from_manifest(manifest: &Manifest) -> Result<TemplateMetadata, CargoTomlError
     let category = get_str("category")?.map(String::from);
 
     let commit_hash = get_str("commit_hash")?
-        .map(|s| gix_hash::ObjectId::from_hex(s.as_bytes()))
+        .map(CommitHash::from_hex)
         .transpose()
         .map_err(CargoTomlError::InvalidCommitHash)?;
 
@@ -162,7 +162,7 @@ pub enum CargoTomlError {
     #[error("Invalid URL in field '{0}': {1}")]
     InvalidUrl(&'static str, url::ParseError),
     #[error("Invalid commit hash: {0}")]
-    InvalidCommitHash(gix_hash::decode::Error),
+    InvalidCommitHash(CommitHashError),
 }
 
 #[cfg(test)]

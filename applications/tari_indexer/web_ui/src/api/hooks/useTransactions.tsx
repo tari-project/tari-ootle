@@ -37,7 +37,7 @@ interface UseListRecentTransactionsProps {
 
 export const useListRecentTransactions = ({ last_id, limit, source = null }: UseListRecentTransactionsProps) => {
   return useQuery({
-    queryKey: ["recent_transactions", source],
+    queryKey: ["recent_transactions", last_id, limit, source],
     queryFn: () => {
       return listRecentTransactions({ last_id, limit, source });
     },

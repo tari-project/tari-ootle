@@ -48,11 +48,10 @@ async fn wallet(indexer_trust: IndexerTrust) -> (Vec<ValidatorSetFixture>, Provi
     network.set_latest(3);
     let trusted = test.sdk().validator_set_api().sync().await.unwrap();
     assert_eq!(trusted.epoch(), Epoch(5));
-    let address = test.sdk().key_manager_api().next_account_address().unwrap();
     let account = test
         .sdk()
         .accounts_api()
-        .create_account(Some("test"), false, address)
+        .create_next_account(Some("test"), false)
         .unwrap();
     (sets, network, test, account)
 }

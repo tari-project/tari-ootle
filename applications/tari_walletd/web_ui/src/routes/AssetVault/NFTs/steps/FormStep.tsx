@@ -82,6 +82,7 @@ export default function FormStep({
   availableNfts,
   preSelectedNftId,
   preSelectedNfts,
+  isEstimatingFee,
   onSubmit,
   onCancel,
   onNftsChange,
@@ -89,6 +90,7 @@ export default function FormStep({
 }: FormStepProps) {
   const hasBatchSelection = preSelectedNfts?.length;
   const { transferFormState, disabled, updateFormValue } = useNftTransferStore();
+  const formDisabled = disabled || isEstimatingFee;
   const selectedNftIds = useMemo(() => new Set(transferFormState.nfts.map(nftIdToString)), [transferFormState.nfts]);
   const [submitted, setSubmitted] = useState(false);
 
@@ -137,7 +139,7 @@ export default function FormStep({
             <Select
               id="select-payer-account"
               name="payerAccount"
-              disabled={disabled}
+              disabled={formDisabled}
               displayEmpty
               value={
                 transferFormState.payerAccount ||
@@ -161,7 +163,7 @@ export default function FormStep({
           label="To Account address"
           value={transferFormState.targetAccountAddress}
           onChange={(v) => updateFormValue("targetAccountAddress", v, true)}
-          disabled={disabled}
+          disabled={formDisabled}
           required
           error={transferFormState.targetAccountAddress !== "" && !isAddressValid}
           helperText={
@@ -191,7 +193,7 @@ export default function FormStep({
               multiple
               value={transferFormState.nfts.map((nft) => JSON.stringify(nft))}
               required
-              disabled={disabled}
+              disabled={formDisabled}
               onChange={onNftsChange}
               renderValue={(selected) => selected.map((item) => displayNftId(JSON.parse(item))).join(", ")}
             >
@@ -231,7 +233,7 @@ export default function FormStep({
           <Button
             variant="contained"
             type="submit"
-            disabled={disabled || formErrors.length > 0 || !transferFormState.targetAccountAddress}
+            disabled={formDisabled || formErrors.length > 0 || !transferFormState.targetAccountAddress}
           >
             Continue
           </Button>

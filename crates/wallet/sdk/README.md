@@ -48,12 +48,10 @@ use tari_ootle_wallet_sdk::{WalletSdk, apis::transaction::Submission};
 // Initialize the SDK (typically done once at startup)
 let sdk = WalletSdk::initialize(config, store, key_store, network_interface)?;
 
-// Derive a new account address and create an account
-let address = sdk.key_manager_api().next_account_address()?;
-let account = sdk.accounts_api().create_account(
+// Create an account at the lowest unused account key index
+let account = sdk.accounts_api().create_next_account(
     Some("my-account"),
     true, // set as default
-    address,
 )?;
 
 // List accounts

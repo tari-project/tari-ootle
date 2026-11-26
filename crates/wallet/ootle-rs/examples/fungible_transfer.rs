@@ -15,7 +15,7 @@ use ootle_rs::{
     transaction::TransactionSigner,
     wallet::OotleWallet,
 };
-use tari_ootle_transaction::Epoch;
+use tari_ootle_transaction::{AuthorizerSet, Epoch};
 
 #[tokio::main]
 async fn main() {
@@ -114,9 +114,11 @@ async fn main() {
     // demonstration.
     // NOTE: that you should not change the unsigned transaction after authorization as it will invalidate the
     // signature.
+    // Every authorization signs over the set of all authorizing keys, so the set is fixed before anyone signs.
+    let authorizers: AuthorizerSet = [*another_address.account_public_key()].into_iter().collect();
     let authorization = provider
         .wallet()
-        .authorize_transaction(&another_address, &unsigned_tx)
+        .authorize_transaction(&another_address, &authorizers, &unsigned_tx)
         .await
         .unwrap();
 

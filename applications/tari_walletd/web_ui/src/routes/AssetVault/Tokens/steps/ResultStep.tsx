@@ -23,7 +23,8 @@
 import CancelRoundedIcon from "@mui/icons-material/CancelRounded";
 import CheckCircleRoundedIcon from "@mui/icons-material/CheckCircleRounded";
 import { Button, CircularProgress, Divider, Fade, Stack, Typography } from "@mui/material";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
+import { AUTO_CLOSE_DELAY_MS, shouldAutoCloseTransferResult } from "./resultStepHelpers";
 
 export interface TransferResult {
   success: boolean;
@@ -37,15 +38,18 @@ interface ResultStepProps {
 }
 
 export default function ResultStep({ disabled, transferResult, onClose }: ResultStepProps) {
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
   useEffect(() => {
-    if (!disabled && transferResult) {
+    if (shouldAutoCloseTransferResult(disabled, transferResult)) {
       const timer = setTimeout(() => {
-        onClose();
-      }, 10000);
+        onCloseRef.current();
+      }, AUTO_CLOSE_DELAY_MS);
 
       return () => clearTimeout(timer);
     }
-  }, [disabled, transferResult, onClose]);
+  }, [disabled, transferResult]);
 
   return (
     <Stack direction="column" spacing={2} alignItems="center" justifyContent="center" pt={3}>

@@ -43,7 +43,7 @@ use serde::{Serialize, de::DeserializeOwned};
 use serde_json as json;
 use serde_json::json;
 use tari_crypto::ristretto::RistrettoSecretKey;
-use tari_ootle_wallet_sdk::models::{KeyBranch, KeyType};
+use tari_ootle_wallet_sdk::models::KeyType;
 use types::{
     AccountsCreateFreeTestCoinsRequest,
     AccountsCreateFreeTestCoinsResponse,
@@ -143,14 +143,8 @@ use crate::{
         EncodedJwtString,
         GetValidatorFeesRequest,
         GetValidatorFeesResponse,
-        KeysCreateRequest,
-        KeysCreateResponse,
         KeysImportRequest,
         KeysImportResponse,
-        KeysListRequest,
-        KeysListResponse,
-        KeysSetActiveRequest,
-        KeysSetActiveResponse,
         PublishTemplateRequest,
         PublishTemplateResponse,
         ResourcesGetManyRequest,
@@ -368,28 +362,6 @@ impl WalletDaemonClient {
             .await
     }
 
-    /// Derives the next key for the given [`KeyBranch`].
-    pub async fn create_key(&mut self, branch: KeyBranch) -> Result<KeysCreateResponse, WalletDaemonClientError> {
-        self.send_request("keys.create", &KeysCreateRequest {
-            branch,
-            specific_index: None,
-        })
-        .await
-    }
-
-    /// Derives a key at a specific index for the given [`KeyBranch`].
-    pub async fn create_specific_key(
-        &mut self,
-        branch: KeyBranch,
-        index: u64,
-    ) -> Result<KeysCreateResponse, WalletDaemonClientError> {
-        self.send_request("keys.create", &KeysCreateRequest {
-            branch,
-            specific_index: Some(index),
-        })
-        .await
-    }
-
     /// Imports an externally-generated secret key into the wallet's keystore, returning the [`KeyId`] it can be
     /// referenced by.
     pub async fn import_key(
@@ -399,17 +371,6 @@ impl WalletDaemonClient {
     ) -> Result<KeysImportResponse, WalletDaemonClientError> {
         self.send_request("keys.import", &KeysImportRequest { secret_key, key_type })
             .await
-    }
-
-    /// Sets the active key index used for signing transactions.
-    pub async fn set_active_key(&mut self, index: u64) -> Result<KeysSetActiveResponse, WalletDaemonClientError> {
-        self.send_request("keys.set_active", &KeysSetActiveRequest { index })
-            .await
-    }
-
-    /// Lists all derived keys for the given [`KeyBranch`].
-    pub async fn list_keys(&mut self, branch: KeyBranch) -> Result<KeysListResponse, WalletDaemonClientError> {
-        self.send_request("keys.list", &KeysListRequest { branch }).await
     }
 
     /// Fetches a transaction by ID.
@@ -501,6 +462,8 @@ impl WalletDaemonClient {
             .await
     }
 
+    /// Rejects a pending or approved transaction request. Requires an interactive user session: the daemon refuses an
+    /// API key.
     pub async fn reject_transaction_request<T: Borrow<TransactionRequestDecisionRequest>>(
         &mut self,
         request: T,
@@ -1174,7 +1137,11 @@ impl WalletDaemonClient {
             // If we don't have the token and the method is anything else than "auth.login" it will fail.
             builder = builder.header(AUTHORIZATION, format!("Bearer {}", token.as_str()));
         }
-        let resp = builder.body(request_json.to_string()).send().await?;
+        let resp = builder
+            .body(request_json.to_string())
+            .send()
+            .await?
+            .error_for_status()?;
         let val = resp.json().await?;
         jsonrpc_result(val)
     }
@@ -1199,7 +1166,7 @@ impl WalletDaemonClient {
     }
 }
 
-fn jsonrpc_result(val: json::Value) -> Result<json::Value, WalletDaemonClientError> {
+fn jsonrpc_result(mut val: json::Value) -> Result<json::Value, WalletDaemonClientError> {
     if let Some(err) = val.get("error") {
         let code = err.get("code").and_then(|c| c.as_i64()).unwrap_or(-1);
         let message = err
@@ -1210,19 +1177,153 @@ fn jsonrpc_result(val: json::Value) -> Result<json::Value, WalletDaemonClientErr
         return Err(WalletDaemonClientError::from_error_code(code, message));
     }
 
-    let result = val
-        .get("result")
-        .ok_or_else(|| WalletDaemonClientError::InvalidResponse {
-            message: "Missing result field".to_string(),
-        })?;
-    Ok(result.clone())
+    let result =
+        val.get_mut("result")
+            .map(json::Value::take)
+            .ok_or_else(|| WalletDaemonClientError::InvalidResponse {
+                message: "Missing result field".to_string(),
+            })?;
+    Ok(result)
 }
 
 #[cfg(test)]
 mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    use tari_ootle_common_types::optional::IsNotFoundError;
+    use tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::TcpListener,
+    };
+
     use super::*;
+
+    /// Serves a single HTTP response with the given status line and body, after reading the full request.
+    async fn serve_once(status: &'static str, content_type: &'static str, body: &'static str) -> Url {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            let mut buf = [0u8; 4096];
+            loop {
+                let n = stream.read(&mut buf).await.unwrap();
+                request.extend_from_slice(&buf[..n]);
+                let text = String::from_utf8_lossy(&request);
+                if let Some(header_end) = text.find("\r\n\r\n") {
+                    let content_length = text[..header_end]
+                        .lines()
+                        .find_map(|line| {
+                            let (name, value) = line.split_once(':')?;
+                            if name.eq_ignore_ascii_case("content-length") {
+                                value.trim().parse::<usize>().ok()
+                            } else {
+                                None
+                            }
+                        })
+                        .unwrap_or(0);
+                    if request.len() >= header_end + 4 + content_length {
+                        break;
+                    }
+                }
+                if n == 0 {
+                    break;
+                }
+            }
+            let response = format!(
+                "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: \
+                 close\r\n\r\n{body}",
+                body.len()
+            );
+            stream.write_all(response.as_bytes()).await.unwrap();
+            stream.shutdown().await.unwrap();
+        });
+        Url::parse(&format!("http://{addr}/json_rpc")).unwrap()
+    }
+
+    #[tokio::test]
+    async fn non_2xx_response_fails_with_http_status() {
+        let url = serve_once("502 Bad Gateway", "text/html", "<html>Bad Gateway</html>").await;
+        let mut client = WalletDaemonClient::connect(url, None).unwrap();
+        let err = client.get_wallet_info().await.unwrap_err();
+        assert!(
+            matches!(
+                err,
+                WalletDaemonClientError::RequestFailed { ref source }
+                    if source.status() == Some(reqwest::StatusCode::BAD_GATEWAY)
+            ),
+            "unexpected error: {err}"
+        );
+        assert!(err.to_string().contains("502 Bad Gateway"), "unexpected error: {err}");
+        assert!(!err.to_string().contains("(HTTP 502)"), "unexpected error: {err}");
+    }
+
+    #[tokio::test]
+    async fn http_404_is_a_routing_failure_and_not_a_missing_resource() {
+        let url = serve_once("404 Not Found", "text/plain", "404 page not found").await;
+        let mut client = WalletDaemonClient::connect(url, None).unwrap();
+        let err = client.get_wallet_info().await.unwrap_err();
+        assert!(
+            matches!(
+                err,
+                WalletDaemonClientError::RequestFailed { ref source }
+                    if source.status() == Some(reqwest::StatusCode::NOT_FOUND)
+            ),
+            "unexpected error: {err}"
+        );
+        assert!(!err.is_not_found_error());
+    }
+
+    #[tokio::test]
+    async fn jsonrpc_not_found_error_is_a_not_found_error() {
+        let url = serve_once(
+            "200 OK",
+            "application/json",
+            r#"{"jsonrpc":"2.0","id":1,"error":{"code":404,"message":"Account not found"}}"#,
+        )
+        .await;
+        let mut client = WalletDaemonClient::connect(url, None).unwrap();
+        let err = client.get_wallet_info().await.unwrap_err();
+        assert!(err.is_not_found_error(), "unexpected error: {err}");
+    }
+
+    #[tokio::test]
+    async fn jsonrpc_unauthorized_error_is_unauthorized() {
+        let url = serve_once(
+            "200 OK",
+            "application/json",
+            r#"{"jsonrpc":"2.0","id":1,"error":{"code":401,"message":"Invalid token"}}"#,
+        )
+        .await;
+        let mut client = WalletDaemonClient::connect(url, None).unwrap();
+        let err = client.get_wallet_info().await.unwrap_err();
+        assert!(err.is_unauthorized(), "unexpected error: {err}");
+    }
+
+    #[tokio::test]
+    async fn jsonrpc_success_deserializes_result() {
+        let url = serve_once(
+            "200 OK",
+            "application/json",
+            r#"{"jsonrpc":"2.0","id":1,"result":{"version":"0.51.0","network":"localnet","network_byte":16}}"#,
+        )
+        .await;
+        let mut client = WalletDaemonClient::connect(url, None).unwrap();
+        let info = client.get_wallet_info().await.unwrap();
+        assert_eq!(info.version, "0.51.0");
+        assert_eq!(info.network, "localnet");
+        assert_eq!(info.network_byte, 16);
+    }
+
+    #[test]
+    fn jsonrpc_result_rejects_missing_result_field() {
+        let payload = json!({
+            "jsonrpc": "2.0",
+            "id": 1
+        });
+        let err = jsonrpc_result(payload).unwrap_err();
+        assert!(matches!(err, WalletDaemonClientError::InvalidResponse { .. }));
+    }
 
     fn unique_temp_dir(label: &str) -> PathBuf {
         let nanos = SystemTime::now()

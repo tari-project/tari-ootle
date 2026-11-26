@@ -30,6 +30,10 @@ use crate::messages::HotstuffMessage;
 pub trait OutboundMessaging {
     type Addr: NodeAddressable + Send + 'static;
 
+    /// The number of bytes `message` takes on the wire. A message larger than the transport's frame cannot be sent,
+    /// so a sender filling a message up to a budget measures it with this.
+    fn encoded_len(&self, message: &HotstuffMessage) -> usize;
+
     /// Send a message to self
     fn send_self<T: Into<HotstuffMessage> + Send>(
         &mut self,

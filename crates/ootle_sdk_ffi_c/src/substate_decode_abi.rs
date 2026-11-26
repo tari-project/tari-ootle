@@ -28,11 +28,11 @@ use crate::c_abi::{OotleResult, flatten, guarded, output_json, parse_json, requi
 /// `substate_value_json` is the indexer's substate value (a JSON base64 CBOR string), passed verbatim. On success
 /// `data_json` is `{ "kind": "component|vault|resource|other", "value": { … } }`. For a vault the
 /// `value.revealed_balance` is the revealed/unlocked amount only — the confidential side is surfaced
-/// as `value.confidential_commitment_count` + `value.kind`, never a silent zero. Balances are native
-/// JSON `u64`.
+/// as `value.confidential_commitment_count` + `value.kind`, never a silent zero. Revealed balances are
+/// `{ "hi": <u64>, "lo": <u64> }` records spanning the full 128-bit amount.
 ///
-/// A malformed/unknown substate value yields `"PARSE"`; a balance that does not fit a `u64` yields
-/// `"VALIDATION"`; a null arg yields `"INVALID"`.
+/// A malformed/unknown substate value yields `"PARSE"`; a resource total supply that does not fit a
+/// `u64` yields `"VALIDATION"`; a null arg yields `"INVALID"`.
 ///
 /// # Safety
 /// `substate_value_json` must be a valid NUL-terminated UTF-8 C string. The returned envelope must be
@@ -62,8 +62,8 @@ pub unsafe extern "C" fn ootle_decode_substate(substate_value_json: *const c_cha
 /// silent zero.
 ///
 /// On success `data_json` is `{ "balances": [ { "resource_address": "resource_<hex>",
-/// "revealed_balance": <u64> } ] }`. Revealed balances are native JSON `u64` and are the
-/// revealed/unlocked amounts only (a confidential total requires scanning the relevant stealth UTXOs
+/// "revealed_balance": { "hi": <u64>, "lo": <u64> } } ] }`. Revealed balances span the full 128-bit
+/// amount and are the revealed/unlocked amounts only (a confidential total requires scanning the relevant stealth UTXOs
 /// separately).
 ///
 /// A non-component account / a non-vault entry yields `"VALIDATION"`; a missing referenced vault

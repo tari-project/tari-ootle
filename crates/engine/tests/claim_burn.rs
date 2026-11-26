@@ -205,7 +205,7 @@ fn a_claim_co_signed_by_the_claim_key_is_accepted() {
     let result = test
         .try_execute(
             claim_into_output(Transaction::builder_localnet(Epoch(1)), claim_to(claim_public_key))
-                .add_signer(&test.to_public_key_bytes(), &claim_secret)
+                .authorize(&test.to_public_key_bytes(), [&claim_secret])
                 .seal(test.secret_key()),
             vec![],
         )
@@ -276,7 +276,7 @@ fn the_burner_cannot_claim_a_burn_made_out_to_someone_else() {
     for transaction in [
         claim_into_output(Transaction::builder_localnet(Epoch(1)), proof.clone()).build_and_seal(&burner_secret),
         claim_into_output(Transaction::builder_localnet(Epoch(1)), proof)
-            .add_signer(&burner_public_key, test.secret_key())
+            .authorize(&burner_public_key, [test.secret_key()])
             .seal(&burner_secret),
     ] {
         let result = test
@@ -617,11 +617,12 @@ mod fee_estimate {
     }
 
     /// Reading the native charge back with only native points priced pins the claim's native points to every point
-    /// the engine charged, verification and authorization alike. Every price is a multiple of the divisor, so no
-    /// point is lost to rounding.
+    /// the engine charged, verification, authorization and argument resolution alike. Every price is a multiple of
+    /// the divisor, the per-byte argument price the smallest, so no point is lost to rounding. The claim reveals
+    /// half its value, enough to cover the charge at that divisor.
     #[test]
     fn the_native_points_match_the_claim_shape() {
-        const DIVISOR: u64 = 100;
+        const DIVISOR: u64 = tari_engine_types::limits::NativeExecutionPoints::PER_ENGINE_ARG_BYTE;
         let mut test = setup();
         let mut fee_table = FeeTable::zero_rated();
         fee_table.per_wasm_point_cost = 1;
@@ -629,7 +630,7 @@ mod fee_estimate {
         test.set_fee_table(fee_table);
         test.set_burn_rate_bps(0);
 
-        let result = test.execute_expect_success(build(&test, &new_claim(), PLACEHOLDER_FEE).transaction, vec![]);
+        let result = test.execute_expect_success(build(&test, &new_claim(), CLAIMED_VALUE / 2).transaction, vec![]);
         assert_eq!(
             result
                 .finalize

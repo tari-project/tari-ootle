@@ -72,22 +72,25 @@ export async function getClientAddress(): Promise<URL> {
 
 let clientInstance: IndexerClient | null = null;
 let pendingClientInstance: Promise<IndexerClient> | null = null;
-let outerAddress: URL | null = null;
 
 export async function client() {
   if (clientInstance) {
-    return Promise.resolve(clientInstance);
+    return clientInstance;
   }
 
-  const getAddress = outerAddress ? Promise.resolve(outerAddress) : getClientAddress();
+  if (pendingClientInstance) {
+    return pendingClientInstance;
+  }
 
-  pendingClientInstance = getAddress.then(async (addr) => {
-    const client = IndexerClient.usingFetchTransport(addr.toString());
-    outerAddress = addr;
-    clientInstance = client;
-    pendingClientInstance = null;
-    return client;
-  });
+  pendingClientInstance = getClientAddress()
+    .then((addr) => {
+      const instance = IndexerClient.usingFetchTransport(addr.toString());
+      clientInstance = instance;
+      return instance;
+    })
+    .finally(() => {
+      pendingClientInstance = null;
+    });
 
   return pendingClientInstance;
 }

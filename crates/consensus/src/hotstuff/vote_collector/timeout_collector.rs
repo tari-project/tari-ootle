@@ -13,7 +13,10 @@ use crate::{
     hotstuff::{
         epoch_state::EpochState,
         error::HotStuffError,
-        vote_collector::{collector::exceeds_vote_lookahead, helpers::check_eligibility},
+        vote_collector::{
+            collector::{exceeds_vote_lookahead, is_before_vote_window},
+            helpers::check_eligibility,
+        },
     },
     tracing::TraceTimer,
     traits::{CertificateStore, ConsensusSpec, ValidatorSignatureVerifierService},
@@ -66,12 +69,12 @@ where TConsensusSpec: ConsensusSpec
         let current_epoch = epoch_state.epoch();
         let local_committee_info = epoch_state.local_committee_info();
 
-        // Before any signature verification: a vote this far ahead is dropped by the collector, so the
-        // verification would be work done for nothing.
-        if exceeds_vote_lookahead(current_height, vote.height) {
+        // Check epoch and view bounds before querying epoch_manager or verifying the signature.
+        check_timeout_vote_epoch(current_epoch, &vote)?;
+        if is_before_vote_window(current_height, vote.height) || exceeds_vote_lookahead(current_height, vote.height) {
             warn!(
                 target: LOG_TARGET,
-                "🗑️ Discarding {} from {}: it is too far ahead of our current view {}/{}",
+                "🗑️ Discarding {} from {}: outside collectible view window around {}/{}",
                 vote,
                 from,
                 current_epoch,
@@ -126,16 +129,7 @@ where TConsensusSpec: ConsensusSpec
     }
 
     fn validate_vote(&self, current_epoch: Epoch, vote: &TimeoutVote) -> Result<(), HotStuffError> {
-        if current_epoch != vote.epoch() {
-            return Err(HotStuffError::InvalidVote {
-                signer_public_key: vote.signature.public_key,
-                details: format!(
-                    "Our current view is at epoch {} but the vote was for epoch {}",
-                    current_epoch,
-                    vote.epoch()
-                ),
-            });
-        }
+        check_timeout_vote_epoch(current_epoch, vote)?;
 
         let signed_vote = SignedTimeoutVote {
             message: vote.to_message(self.network),
@@ -149,6 +143,20 @@ where TConsensusSpec: ConsensusSpec
 
         Ok(())
     }
+}
+
+fn check_timeout_vote_epoch(current_epoch: Epoch, vote: &TimeoutVote) -> Result<(), HotStuffError> {
+    if current_epoch != vote.epoch() {
+        return Err(HotStuffError::InvalidVote {
+            signer_public_key: vote.signature.public_key,
+            details: format!(
+                "Our current view is at epoch {} but the vote was for epoch {}",
+                current_epoch,
+                vote.epoch()
+            ),
+        });
+    }
+    Ok(())
 }
 
 /// The certificate for `votes`, each a verified timeout vote by a member of `committee`.
@@ -246,5 +254,11 @@ mod tests {
         let err = create_timeout_certificate(&committee(&[1, 2, 3]), Epoch(1), NodeHeight(5), &[vote(1), vote(5)])
             .unwrap_err();
         assert!(matches!(err, HotStuffError::InvariantError(_)), "{err}");
+    }
+
+    #[test]
+    fn it_rejects_a_vote_from_another_epoch() {
+        let err = check_timeout_vote_epoch(Epoch(2), &vote(1)).unwrap_err();
+        assert!(matches!(err, HotStuffError::InvalidVote { .. }), "{err}");
     }
 }

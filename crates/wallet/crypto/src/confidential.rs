@@ -51,10 +51,7 @@ pub fn create_withdraw_proof(
     {
         return Err(WalletCryptoError::InvalidArgument {
             name: "outputs",
-            details: format!(
-                "Output commitment {} matches change commitment",
-                output.commitment
-            ),
+            details: format!("Output commitment {} matches change commitment", output.commitment),
         });
     }
 

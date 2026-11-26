@@ -539,26 +539,15 @@ mod tests {
         };
 
         // 1. Output commitment colliding with an input commitment is rejected.
-        let err = create_transfer_statement(
-            [input.clone()],
-            Amount::zero(),
-            [&output],
-            None,
-        )
-        .unwrap_err();
+        let err = create_transfer_statement([input.clone()], Amount::zero(), [&output], None).unwrap_err();
         assert!(
             matches!(err, WalletCryptoError::InvalidArgument { name: "outputs", .. }),
             "unexpected error: {err:?}"
         );
 
         // 2. Duplicate output commitments are rejected.
-        let err = create_transfer_statement(
-            std::iter::empty(),
-            Amount::from(200u64),
-            [&output, &output],
-            None,
-        )
-        .unwrap_err();
+        let err =
+            create_transfer_statement(std::iter::empty(), Amount::from(200u64), [&output, &output], None).unwrap_err();
         assert!(
             matches!(err, WalletCryptoError::InvalidArgument { name: "outputs", .. }),
             "unexpected error: {err:?}"
@@ -574,13 +563,10 @@ mod tests {
         )
         .unwrap_err();
         assert!(
-            matches!(
-                err,
-                WalletCryptoError::InvalidArgument {
-                    name: "revealed_output",
-                    ..
-                }
-            ),
+            matches!(err, WalletCryptoError::InvalidArgument {
+                name: "revealed_output",
+                ..
+            }),
             "unexpected error: {err:?}"
         );
 

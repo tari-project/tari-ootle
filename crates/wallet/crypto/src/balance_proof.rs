@@ -232,7 +232,14 @@ mod tests {
     use tari_template_lib_types::{
         EncryptedData,
         crypto::{RangeProofBytes, RistrettoPublicKeyBytes, UtxoTag},
-        stealth::{RevealedOutput, SpendAuthorization, SpendWitness, StealthInput, StealthUnspentOutput, UnspentOutput},
+        stealth::{
+            RevealedOutput,
+            SpendAuthorization,
+            SpendWitness,
+            StealthInput,
+            StealthUnspentOutput,
+            UnspentOutput,
+        },
     };
 
     use super::*;
@@ -273,12 +280,7 @@ mod tests {
             agg_range_proof: RangeProofBytes::empty(),
         };
         let sig = generate_stealth_balance_proof_signature(&in_mask, &out_mask, &inputs_stmt, &outputs_stmt, &[]);
-        assert!(validate_balance_proof_signature(
-            &sig,
-            &inputs_stmt,
-            &outputs_stmt,
-            &[]
-        ));
+        assert!(validate_balance_proof_signature(&sig, &inputs_stmt, &outputs_stmt, &[]));
 
         // 1. Duplicate output commitments are rejected even when masks/commitments balance.
         let dup_in_mask = &out_mask + &out_mask;

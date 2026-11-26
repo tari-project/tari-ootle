@@ -9,8 +9,10 @@
 //! where {} is replaced with the node address.
 
 use std::{
+    collections::HashSet,
     sync::{
         Arc,
+        Mutex,
         atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     time::Duration,
@@ -236,6 +238,79 @@ async fn single_transaction_abort_then_resubmit_is_sequenced_again() {
         }
         let leaf = test.get_validator(&TestAddress::new("1")).get_leaf_block();
         if leaf.height >= NodeHeight(20) {
+            panic!("Resubmitted transaction not finalized after {} blocks", leaf.height);
+        }
+    }
+
+    test.stop();
+    test.assert_all_validators_committed(tx1.id());
+    test.assert_all_validators_have_decision(tx1.id(), Decision::Commit)
+        .await;
+
+    test.assert_clean_shutdown().await;
+}
+
+/// Whether a proposal containing a previously aborted id is votable must not depend on what a
+/// validator's local records remember. Only validators 1 and 2 receive the resubmission, as they would
+/// if their records of the abort were gone; validators 3 and 4 still hold the aborted attempt's
+/// finalized marker and learn of the resubmission only from proposals. Neither pair alone is a quorum,
+/// so the resubmission finalizes only if 3 and 4 sequence it from the proposal and vote for it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn resubmitted_aborted_transaction_is_votable_by_validators_holding_the_abort() {
+    setup_logger();
+    let mut test = Test::builder().add_committee(0, vec!["1", "2", "3", "4"]).start().await;
+    let (tx1, inputs, new_outputs) = test
+        .send_transaction_to_all(Decision::Abort(AbortReason::ExecutionFailure), 1, 1, 1)
+        .await;
+    test.start_epoch(Epoch(1)).await;
+
+    loop {
+        test.on_block_committed().await;
+
+        if test.is_transaction_pool_empty() {
+            break;
+        }
+        let leaf = test.get_validator(&TestAddress::new("1")).get_leaf_block();
+        if leaf.height >= NodeHeight(20) {
+            panic!("Transaction not finalized after {} blocks", leaf.height);
+        }
+    }
+
+    test.assert_all_validators_have_decision(tx1.id(), Decision::Abort(AbortReason::ExecutionFailure))
+        .await;
+    test.assert_all_validators_did_not_commit(tx1.id());
+
+    test.create_execution_at_destination_for_transaction(
+        TestVnDestination::All,
+        &tx1,
+        Decision::Commit,
+        1,
+        inputs
+            .iter()
+            .map(|input| (input.substate_id().clone(), SubstateLockType::Write))
+            .collect(),
+        new_outputs,
+    );
+    for addr in ["1", "2"] {
+        test.send_transaction_to_destination(TestVnDestination::Address(TestAddress::new(addr)), tx1.clone())
+            .await;
+    }
+
+    // The pool alone cannot signal completion here: it is empty on every validator until the
+    // resubmission reaches 1 and 2.
+    loop {
+        test.on_block_committed().await;
+
+        if test
+            .validators()
+            .values()
+            .all(|vn| vn.has_committed_substates(tx1.id())) &&
+            test.is_transaction_pool_empty()
+        {
+            break;
+        }
+        let leaf = test.get_validator(&TestAddress::new("1")).get_leaf_block();
+        if leaf.height >= NodeHeight(50) {
             panic!("Resubmitted transaction not finalized after {} blocks", leaf.height);
         }
     }
@@ -771,6 +846,96 @@ async fn foreign_shard_group_decides_to_abort() {
 
     test.assert_clean_shutdown().await;
     log::info!("total messages sent: {}", test.network().total_messages_sent());
+}
+
+/// A shard group that decides to abort may finalize before it has processed every other shard
+/// group's proposal for the transaction. Those proposals still arrive afterwards and belong to the
+/// attempt that just aborted, so they must not start another attempt: each shard group finalizes the
+/// transaction exactly once.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn late_foreign_proposal_does_not_resequence_aborted_transaction() {
+    setup_logger();
+    let mut test = Test::builder()
+        .with_test_timeout(Duration::from_secs(60))
+        .add_committee(0, vec!["1", "2", "3"])
+        .add_committee(1, vec!["4", "5", "6"])
+        .start()
+        .await;
+
+    let (tx1, inputs) = test.build_transaction(5);
+    test.create_execution_at_destination_for_transaction(
+        TestVnDestination::Committee(0),
+        &tx1,
+        Decision::Commit,
+        5,
+        inputs
+            .iter()
+            .map(|input| (input.substate_id().clone(), SubstateLockType::Write))
+            .collect(),
+        vec![],
+    )
+    .create_execution_at_destination_for_transaction(
+        TestVnDestination::Committee(1),
+        &tx1,
+        Decision::Abort(AbortReason::ExecutionFailure),
+        5,
+        inputs
+            .into_iter()
+            .map(|input| (input.substate_id().clone(), SubstateLockType::Write))
+            .collect(),
+        vec![],
+    );
+    test.send_transaction_to_destination(TestVnDestination::All, tx1.clone())
+        .await;
+    test.start_epoch(Epoch(1)).await;
+
+    loop {
+        test.on_block_committed().await;
+
+        if test.is_transaction_pool_empty() {
+            break;
+        }
+        let leaf = test.get_validator(&TestAddress::new("1")).get_leaf_block();
+        if leaf.height > NodeHeight(50) {
+            panic!("Transaction not finalized after {} blocks", leaf.height);
+        }
+    }
+
+    // Give the other shard group's remaining proposals time to arrive and be processed.
+    for _ in 0..30 {
+        test.on_block_committed().await;
+    }
+
+    test.stop();
+    test.assert_all_validators_have_decision(tx1.id(), Decision::Abort(AbortReason::ExecutionFailure))
+        .await;
+
+    for (addr, vn) in test.validators() {
+        let num_finalizing = vn
+            .state_store
+            .with_read_tx(|tx| {
+                let leaf = tx.leaf_block_get(Epoch(1))?;
+                let mut block = Block::get(tx, &leaf.block_id)?;
+                let mut count = 0usize;
+                while !block.id().is_zero() {
+                    count += block
+                        .commands()
+                        .iter()
+                        .filter_map(|cmd| cmd.some_accept().or_else(|| cmd.all_accept()))
+                        .filter(|atom| atom.id == *tx1.id())
+                        .count();
+                    block = block.get_parent(tx)?;
+                }
+                Ok::<_, HotStuffError>(count)
+            })
+            .unwrap();
+        assert_eq!(
+            num_finalizing, 1,
+            "Validator {addr} finalized the aborted transaction {num_finalizing} times"
+        );
+    }
+
+    test.assert_clean_shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -1992,10 +2157,36 @@ async fn transaction_missing_from_pool_is_resequenced_from_its_record() {
     // at which the pool record is dropped deterministic.
     let drop_proposals = Arc::new(AtomicBool::new(true));
     let drop_proposals_f = drop_proposals.clone();
+    // A block proposed while proposals are dropped stays withheld afterwards, in a proposal or a catch-up page, so it
+    // never gathers a certificate and no block carries the transaction until it is re-sequenced.
+    let withheld = Arc::new(Mutex::new(HashSet::new()));
     let mut test = Test::builder()
         .add_committee(0, vec!["1", "2"])
         .with_message_filter(Box::new(move |_from, _to, msg| {
-            !(drop_proposals_f.load(Ordering::SeqCst) && matches!(msg, HotstuffMessage::Proposal(_)))
+            let mut withheld = withheld.lock().unwrap();
+            let blocks = match msg {
+                HotstuffMessage::Proposal(proposal) => vec![*proposal.block.id()],
+                HotstuffMessage::CatchUpPage(page) => page
+                    .blocks
+                    .iter()
+                    .chain(page.leaf.iter())
+                    .map(|proposal| *proposal.block.id())
+                    .collect(),
+                _ => return true,
+            };
+            if drop_proposals_f.load(Ordering::SeqCst) {
+                if matches!(msg, HotstuffMessage::Proposal(_)) {
+                    withheld.extend(blocks);
+                    return false;
+                }
+                if let HotstuffMessage::CatchUpPage(page) = msg &&
+                    let Some(leaf) = &page.leaf
+                {
+                    withheld.insert(*leaf.block.id());
+                    return false;
+                }
+            }
+            !blocks.iter().any(|id| withheld.contains(id))
         }))
         // Dropping proposals burns a pacemaker round, so shorten the round...
         .modify_consensus_constants(|c| {

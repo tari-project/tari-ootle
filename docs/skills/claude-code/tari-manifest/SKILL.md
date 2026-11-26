@@ -118,6 +118,10 @@ let addr = new_resource_addr!();
 authorize!(proof);          // Open an authorization window over a workspace proof
 drop_authorize!(proof);     // Close it
 drop_all_proofs!();
+
+// Component rules (only for components created with a rules updater that allows it)
+set_access_rules!(component, default = deny_all, mint = resource(admin_badge));
+set_owner_rule!(component, public_key(owner_pk));
 ```
 
 ## Writing Manifests Workflow

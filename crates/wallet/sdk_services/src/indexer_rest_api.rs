@@ -2,6 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
+    collections::HashMap,
     ops::Deref,
     sync::{Arc, Mutex},
     time::Duration,
@@ -20,6 +21,7 @@ use tari_indexer_client::{
     error::IndexerRestClientError,
     event::{IndexerEvent, TransactionFinalizedEvent},
     protobuf,
+    protobuf_stream::ProtobufStreamError,
     rest_api_client::IndexerRestApiClient,
     sse::SseStreamError,
     types::{
@@ -27,6 +29,7 @@ use tari_indexer_client::{
         GetCommitteeRequest,
         GetLatestEpochCheckpointRequest,
         GetSubstateRequest,
+        GetSubstateVersionsRequest,
         GetSubstatesRequest,
         GetTransactionResultRequest,
         GetUtxoUpdatesRequest,
@@ -413,6 +416,36 @@ impl WalletNetworkInterface for IndexerRestApiNetworkInterface {
         Ok(fetched)
     }
 
+    async fn get_substate_versions(
+        &self,
+        substate_ids: &[SubstateId],
+    ) -> Result<HashMap<SubstateId, SubstateVersion>, Self::Error> {
+        let client = self.tracked_client();
+        let mut versions = HashMap::with_capacity(substate_ids.len());
+        for chunk in substate_ids.chunks(MAX_SUBSTATES_PER_FETCH) {
+            let ids = chunk.to_vec().try_into().map_err(|_| {
+                IndexerRestApiNetworkInterfaceError::IndexerClientError(IndexerRestClientError::RequestInvariant {
+                    details: "Too many substate IDs requested".to_string(),
+                })
+            })?;
+            let resp = self
+                .observe_checked(
+                    &client,
+                    client.get_substate_versions(GetSubstateVersionsRequest { substate_ids: ids }),
+                    |resp| match resp.versions.keys().find(|id| !chunk.contains(id)) {
+                        Some(id) => Err(IndexerRestApiNetworkInterfaceError::UnrequestedSubstateVersion {
+                            substate_id: id.clone(),
+                        }),
+                        None => Ok(()),
+                    },
+                )
+                .await?;
+            versions.extend(resp.versions);
+        }
+
+        Ok(versions)
+    }
+
     async fn submit_transaction(&self, transaction: Transaction) -> Result<TransactionId, Self::Error> {
         let transaction = TransactionEnvelope::encode(transaction)?;
         self.submit_transaction_envelope(transaction).await
@@ -570,7 +603,7 @@ impl WalletNetworkInterface for IndexerRestApiNetworkInterface {
     ) -> Result<UtxoUpdateStream<Self::Error>, Self::Error> {
         let client = self.tracked_client();
         let stream = self
-            .observe(
+            .observe_stream_open(
                 &client,
                 client.stream_utxo_updates_protobuf(GetUtxoUpdatesRequest {
                     from_epoch,
@@ -581,60 +614,23 @@ impl WalletNetworkInterface for IndexerRestApiNetworkInterface {
                 }),
             )
             .await?;
-        let stream = stream
-            .map_err(|e| IndexerRestApiNetworkInterfaceError::StreamDecodeError(e.into()))
-            .and_then(|res| async move {
-                let sos = res.sos.map(|sos| StartOfShard {
-                    shard: Shard::from(sos.shard),
-                    max_state_version: StateVersion::from(sos.max_state_version),
-                    has_more: sos.has_more,
-                    spends_incomplete: sos.spends_incomplete,
-                });
-                let update = res
-                    .update
-                    .map(|u| match u {
-                        protobuf::WalletUtxoUpdate::Unspent(unspent) => {
-                            let public_nonce =
-                                RistrettoPublicKeyBytes::from_bytes(&unspent.public_nonce).map_err(|e| {
-                                    IndexerRestApiNetworkInterfaceError::StreamDecodeError(anyhow!(
-                                        "Failed to decode public nonce: {e}"
-                                    ))
-                                })?;
-                            Ok::<_, IndexerRestApiNetworkInterfaceError>(WalletUtxoUpdate::Unspent(UtxoUnspent {
-                                tag: unspent.tag.into(),
-                                public_nonce,
-                            }))
-                        },
-                        protobuf::WalletUtxoUpdate::Spent(spent) => {
-                            let id_arr = copy_fixed_checked(&spent.id).ok_or_else(|| {
-                                IndexerRestApiNetworkInterfaceError::StreamDecodeError(anyhow!(
-                                    "Failed to decode UTXO ID, incorrect length"
-                                ))
-                            })?;
-                            Ok::<_, IndexerRestApiNetworkInterfaceError>(WalletUtxoUpdate::Spent(UtxoSpent {
-                                id: UtxoId::from_array(id_arr),
-                                version: SubstateVersion::new(spent.version),
-                            }))
-                        },
-                        protobuf::WalletUtxoUpdate::Burnt(burnt) => {
-                            let id_arr = copy_fixed_checked(&burnt.id).ok_or_else(|| {
-                                IndexerRestApiNetworkInterfaceError::StreamDecodeError(anyhow!(
-                                    "Failed to decode UTXO ID, incorrect length"
-                                ))
-                            })?;
-                            Ok::<_, IndexerRestApiNetworkInterfaceError>(WalletUtxoUpdate::Burnt(UtxoBurnt {
-                                id: UtxoId::from_array(id_arr),
-                                version: SubstateVersion::new(burnt.version),
-                            }))
-                        },
-                    })
-                    .transpose()?;
-                let eos = res.eos.map(|eos| EndOfShard {
-                    max_state_version: eos.max_state_version.into(),
-                });
-
-                Ok(UtxoUpdatePayload { sos, update, eos })
-            });
+        let network = self.clone();
+        let stream = stream.map(move |res| {
+            let res = res.map_err(|e| {
+                // A transport failure shows when the stream is reopened; a malformed stream reopens without error.
+                if !matches!(e, ProtobufStreamError::ReqwestError(_)) {
+                    network.record_health(&client.endpoint, IndexerHealth::Unavailable);
+                }
+                IndexerRestApiNetworkInterfaceError::StreamDecodeError(e.into())
+            })?;
+            let payload = decode_utxo_update_payload(res).inspect_err(|_| {
+                network.record_health(&client.endpoint, IndexerHealth::Unavailable);
+            })?;
+            if payload.eos.is_some() {
+                network.record_health(&client.endpoint, IndexerHealth::Answered);
+            }
+            Ok(payload)
+        });
         Ok(stream.boxed())
     }
 
@@ -679,6 +675,14 @@ impl WalletNetworkInterface for IndexerRestApiNetworkInterface {
                                 Ok((id, utxo))
                             })
                             .collect::<Result<Vec<_>, IndexerRestApiNetworkInterfaceError>>()?;
+                        if let Some(next) = resp.next_cursor &&
+                            (unspent.is_empty() || cursor.is_some_and(|prev| next <= prev))
+                        {
+                            return Err(IndexerRestApiNetworkInterfaceError::InvalidUtxoPageCursor {
+                                cursor,
+                                next_cursor: next,
+                            });
+                        }
                         Ok::<_, IndexerRestApiNetworkInterfaceError>((unspent, resp.spent, resp.next_cursor))
                     },
                 )
@@ -813,6 +817,13 @@ pub enum IndexerRestApiNetworkInterfaceError {
         substate_id: SubstateId,
         version: SubstateVersion,
     },
+    #[error("Indexer answered with the version of {substate_id}, which was not asked for")]
+    UnrequestedSubstateVersion { substate_id: SubstateId },
+    #[error("Indexer returned an invalid UTXO page cursor {next_cursor:?} after {cursor:?}")]
+    InvalidUtxoPageCursor {
+        cursor: Option<UtxoId>,
+        next_cursor: UtxoId,
+    },
 }
 
 impl IsNotFoundError for IndexerRestApiNetworkInterfaceError {
@@ -875,7 +886,9 @@ impl TransactionStatusResponseError for IndexerRestApiNetworkInterfaceError {
             IndexerRestApiNetworkInterfaceError::IndexerTimedOut { .. } |
             IndexerRestApiNetworkInterfaceError::SubstateTypeMismatch(_) |
             IndexerRestApiNetworkInterfaceError::UndecodableValue { .. } |
-            IndexerRestApiNetworkInterfaceError::UnrequestedDownAnswer { .. } => ResponseErrorStatus::InternalError {
+            IndexerRestApiNetworkInterfaceError::UnrequestedDownAnswer { .. } |
+            IndexerRestApiNetworkInterfaceError::UnrequestedSubstateVersion { .. } |
+            IndexerRestApiNetworkInterfaceError::InvalidUtxoPageCursor { .. } => ResponseErrorStatus::InternalError {
                 message: self.to_string(),
             },
         }
@@ -884,6 +897,60 @@ impl TransactionStatusResponseError for IndexerRestApiNetworkInterfaceError {
     fn get_error_message(&self) -> String {
         self.to_string()
     }
+}
+
+fn decode_utxo_update_payload(
+    res: protobuf::UtxoUpdatePayload,
+) -> Result<UtxoUpdatePayload, IndexerRestApiNetworkInterfaceError> {
+    let sos = res.sos.map(|sos| StartOfShard {
+        shard: Shard::from(sos.shard),
+        max_state_version: StateVersion::from(sos.max_state_version),
+        has_more: sos.has_more,
+        spends_incomplete: sos.spends_incomplete,
+    });
+    let update = res
+        .update
+        .map(|u| match u {
+            protobuf::WalletUtxoUpdate::Unspent(unspent) => {
+                let public_nonce = RistrettoPublicKeyBytes::from_bytes(&unspent.public_nonce).map_err(|e| {
+                    IndexerRestApiNetworkInterfaceError::StreamDecodeError(anyhow!(
+                        "Failed to decode public nonce: {e}"
+                    ))
+                })?;
+                Ok::<_, IndexerRestApiNetworkInterfaceError>(WalletUtxoUpdate::Unspent(UtxoUnspent {
+                    tag: unspent.tag.into(),
+                    public_nonce,
+                }))
+            },
+            protobuf::WalletUtxoUpdate::Spent(spent) => {
+                let id_arr = copy_fixed_checked(&spent.id).ok_or_else(|| {
+                    IndexerRestApiNetworkInterfaceError::StreamDecodeError(anyhow!(
+                        "Failed to decode UTXO ID, incorrect length"
+                    ))
+                })?;
+                Ok::<_, IndexerRestApiNetworkInterfaceError>(WalletUtxoUpdate::Spent(UtxoSpent {
+                    id: UtxoId::from_array(id_arr),
+                    version: SubstateVersion::new(spent.version),
+                }))
+            },
+            protobuf::WalletUtxoUpdate::Burnt(burnt) => {
+                let id_arr = copy_fixed_checked(&burnt.id).ok_or_else(|| {
+                    IndexerRestApiNetworkInterfaceError::StreamDecodeError(anyhow!(
+                        "Failed to decode UTXO ID, incorrect length"
+                    ))
+                })?;
+                Ok::<_, IndexerRestApiNetworkInterfaceError>(WalletUtxoUpdate::Burnt(UtxoBurnt {
+                    id: UtxoId::from_array(id_arr),
+                    version: SubstateVersion::new(burnt.version),
+                }))
+            },
+        })
+        .transpose()?;
+    let eos = res.eos.map(|eos| EndOfShard {
+        max_state_version: eos.max_state_version.into(),
+    });
+
+    Ok(UtxoUpdatePayload { sos, update, eos })
 }
 
 /// The wallet's form of an indexer's transaction result, with its execution result decoded, and the execution result as
@@ -970,12 +1037,16 @@ mod tests {
         substate::{EncodedSubstate, Substate, SubstateDiff, SubstateValue},
         vault::Vault,
     };
-    use tari_indexer_client::types::{
-        GetSubstateResponse,
-        GetSubstatesResponse,
-        GetTransactionResultResponse,
-        GetUtxosResponse,
-        SubmitTransactionDryRunResponse,
+    use tari_indexer_client::{
+        prost::Message,
+        types::{
+            GetSubstateResponse,
+            GetSubstateVersionsResponse,
+            GetSubstatesResponse,
+            GetTransactionResultResponse,
+            GetUtxosResponse,
+            SubmitTransactionDryRunResponse,
+        },
     };
     use tari_template_lib_types::{
         ComponentAddress,
@@ -1356,6 +1427,40 @@ mod tests {
         ));
     }
 
+    #[tokio::test]
+    async fn substate_versions_are_served_for_the_ids_asked_for() {
+        let body = serde_json::to_string(&GetSubstateVersionsResponse {
+            versions: HashMap::from([(component_id(), SubstateVersion::new(3))]),
+        })
+        .unwrap();
+        let network = network_answering_with(body).await;
+
+        let versions = network.get_substate_versions(&[component_id()]).await.unwrap();
+
+        assert_eq!(versions, HashMap::from([(component_id(), SubstateVersion::new(3))]));
+    }
+
+    /// A version for an id the wallet did not ask for would be pinned as an input it never chose.
+    #[tokio::test]
+    async fn a_substate_version_that_was_not_asked_for_is_refused() {
+        let other: SubstateId = ComponentAddress::from_array([2; 32]).into();
+        let body = serde_json::to_string(&GetSubstateVersionsResponse {
+            versions: HashMap::from([(other.clone(), SubstateVersion::new(1))]),
+        })
+        .unwrap();
+        let network = network_answering_with(body).await;
+
+        let err = network.get_substate_versions(&[component_id()]).await.unwrap_err();
+
+        assert!(
+            matches!(
+                &err,
+                IndexerRestApiNetworkInterfaceError::UnrequestedSubstateVersion { substate_id } if substate_id == &other
+            ),
+            "{err}"
+        );
+    }
+
     /// An accepted execution whose diff brings up `component_id()` with a vault value.
     fn mistyped_execute_result(transaction_id: TransactionId) -> ExecuteResult {
         let mut diff = SubstateDiff::new();
@@ -1623,5 +1728,139 @@ mod tests {
             Some(UtxoId::from_array([2; 32])),
             Some(UtxoId::from_array([4; 32]))
         ]);
+    }
+
+    async fn spawn_protobuf_stream_server(body: Vec<u8>) -> Url {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = Url::parse(&format!("http://{}/", listener.local_addr().unwrap())).unwrap();
+        tokio::spawn(async move {
+            loop {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut buf = [0u8; 4096];
+                let _ignore = socket.read(&mut buf).await;
+                let head = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/x-protobuf\r\nContent-Length: {}\r\nConnection: \
+                     close\r\n\r\n",
+                    body.len()
+                );
+                let _ignore = socket.write_all(head.as_bytes()).await;
+                let _ignore = socket.write_all(&body).await;
+            }
+        });
+        url
+    }
+
+    #[tokio::test]
+    async fn an_indexer_that_streams_truncated_utxo_updates_is_failed_over() {
+        let truncated = spawn_protobuf_stream_server(vec![0x05, 0x08]).await;
+        let other = spawn_status_server("503 Service Unavailable", "{}").await;
+        let network = IndexerRestApiNetworkInterface::init(vec![truncated.clone()]).unwrap();
+        network.set_endpoints(vec![truncated.clone(), other.clone()]).unwrap();
+
+        for _ in 0..FAILOVER_THRESHOLD {
+            assert_eq!(network.get_endpoint(), truncated);
+            let mut stream = network
+                .stream_stealth_utxo_updates(Epoch(1), TARI_TOKEN, vec![], false)
+                .await
+                .unwrap();
+            let err = tokio::time::timeout(Duration::from_secs(5), stream.next())
+                .await
+                .expect("the stream produced nothing within the timeout")
+                .expect("the stream ended without an error")
+                .unwrap_err();
+            assert!(
+                matches!(err, IndexerRestApiNetworkInterfaceError::StreamDecodeError(_)),
+                "{err}"
+            );
+        }
+
+        assert_eq!(network.get_endpoint(), other);
+    }
+
+    #[tokio::test]
+    async fn an_indexer_that_streams_invalid_utxo_update_payloads_is_failed_over() {
+        let payload = protobuf::UtxoUpdatePayload {
+            sos: None,
+            update: Some(protobuf::WalletUtxoUpdate::Spent(protobuf::UtxoSpent {
+                id: vec![1, 2, 3],
+                version: 1,
+            })),
+            eos: None,
+        };
+        let invalid = spawn_protobuf_stream_server(payload.encode_length_delimited_to_vec()).await;
+        let other = spawn_status_server("503 Service Unavailable", "{}").await;
+        let network = IndexerRestApiNetworkInterface::init(vec![invalid.clone()]).unwrap();
+        network.set_endpoints(vec![invalid.clone(), other.clone()]).unwrap();
+
+        for _ in 0..FAILOVER_THRESHOLD {
+            assert_eq!(network.get_endpoint(), invalid);
+            let mut stream = network
+                .stream_stealth_utxo_updates(Epoch(1), TARI_TOKEN, vec![], false)
+                .await
+                .unwrap();
+            let err = tokio::time::timeout(Duration::from_secs(5), stream.next())
+                .await
+                .expect("the stream produced nothing within the timeout")
+                .expect("the stream ended without an error")
+                .unwrap_err();
+            assert!(
+                matches!(err, IndexerRestApiNetworkInterfaceError::StreamDecodeError(_)),
+                "{err}"
+            );
+        }
+
+        assert_eq!(network.get_endpoint(), other);
+    }
+
+    #[tokio::test]
+    async fn a_complete_utxo_update_shard_resets_the_failure_count() {
+        let payload = protobuf::UtxoUpdatePayload {
+            sos: None,
+            update: None,
+            eos: Some(protobuf::EndOfShard { max_state_version: 5 }),
+        };
+        let answering = spawn_protobuf_stream_server(payload.encode_length_delimited_to_vec()).await;
+        let other = spawn_status_server("503 Service Unavailable", "{}").await;
+        let network = IndexerRestApiNetworkInterface::init(vec![answering.clone()]).unwrap();
+        network.set_endpoints(vec![answering.clone(), other]).unwrap();
+
+        record(&network, IndexerHealth::Unavailable, FAILOVER_THRESHOLD - 1);
+        let mut stream = network
+            .stream_stealth_utxo_updates(Epoch(1), TARI_TOKEN, vec![], false)
+            .await
+            .unwrap();
+        let item = stream.next().await.unwrap().unwrap();
+        assert_eq!(item.eos.unwrap().max_state_version, StateVersion::from(5));
+        record(&network, IndexerHealth::Unavailable, FAILOVER_THRESHOLD - 1);
+
+        assert_eq!(network.get_endpoint(), answering);
+    }
+
+    #[tokio::test]
+    async fn an_indexer_whose_utxo_page_cursor_does_not_advance_is_failed_over() {
+        let body = serde_json::to_string(&GetUtxosResponse {
+            utxos: Vec::new(),
+            spent: Vec::new(),
+            next_cursor: Some(UtxoId::from_array([1; 32])),
+        })
+        .unwrap();
+        let invalid = spawn_status_server("200 OK", body).await;
+        let other = spawn_status_server("503 Service Unavailable", "{}").await;
+        let network = IndexerRestApiNetworkInterface::init(vec![invalid.clone()]).unwrap();
+        network.set_endpoints(vec![invalid.clone(), other.clone()]).unwrap();
+
+        for _ in 0..FAILOVER_THRESHOLD {
+            assert_eq!(network.get_endpoint(), invalid);
+            let err = tokio::time::timeout(Duration::from_secs(5), network.fetch_utxos(TARI_TOKEN, vec![]))
+                .await
+                .expect("fetch_utxos did not terminate")
+                .unwrap_err();
+            assert!(
+                matches!(err, IndexerRestApiNetworkInterfaceError::InvalidUtxoPageCursor { .. }),
+                "{err}"
+            );
+        }
+
+        assert_eq!(network.get_endpoint(), other);
     }
 }

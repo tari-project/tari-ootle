@@ -30,12 +30,14 @@ mod template {
     }
 
     impl PushItToTheLimit {
-        pub fn new(data: Bytes) -> Self {
-            Self {
+        pub fn new(data: Bytes) -> Component<Self> {
+            Component::new(Self {
                 data,
                 items: Vec::new(),
                 extra: tari_bor::Value::Null,
-            }
+            })
+            .with_rules_updater(RulesUpdater::Owner)
+            .create()
         }
 
         /// Opens every method of this component to any caller.

@@ -23,6 +23,16 @@ impl Validator<Transaction> for TransactionSignatureValidator {
             });
         }
 
+        if !transaction.has_canonical_authorizations() {
+            warn!(
+                target: LOG_TARGET,
+                "TransactionSignatureValidator - FAIL: Authorization list is not strictly ascending by public key"
+            );
+            return Err(TransactionValidationError::AuthorizationsNotCanonical {
+                transaction_id: transaction.calculate_id(),
+            });
+        }
+
         if let MainSigner::Authorizer(public_key) = transaction.declared_main_signer() &&
             transaction.main_signer().is_none()
         {
@@ -47,7 +57,6 @@ mod tests {
     use tari_common_types::types::PrivateKey;
     use tari_crypto::{keys::PublicKey as _, ristretto::RistrettoPublicKey, tari_utilities::ByteArray};
     use tari_ootle_common_types::Epoch;
-    use tari_ootle_transaction::TransactionSignature;
     use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
 
     use super::*;
@@ -62,8 +71,9 @@ mod tests {
         let unsigned = Transaction::builder_localnet(Epoch(10))
             .with_main_signer(main_signer)
             .build_unsigned();
-        let signature = TransactionSignature::sign(signer, &public_key(&seal_secret), &unsigned);
-        unsigned.with_signatures(vec![signature]).seal(&seal_secret)
+        unsigned
+            .authorize(&public_key(&seal_secret), [signer])
+            .seal(&seal_secret)
     }
 
     #[test]

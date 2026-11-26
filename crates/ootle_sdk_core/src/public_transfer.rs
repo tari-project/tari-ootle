@@ -121,16 +121,17 @@ mod tests {
         );
     }
 
-    /// The random-nonce seal yields differing bytes/id across runs.
+    /// The random-nonce signatures yield differing bytes across runs, but the id hashes signer keys
+    /// rather than signatures, so the same intent signed twice is the same transaction.
     #[test]
-    fn seal_is_not_reproducible() {
+    fn seal_bytes_are_not_reproducible_but_the_id_is() {
         let a = build_and_encode_public_transfer(Network::Esmeralda, &sample_intent(), &keys()).unwrap();
         let b = build_and_encode_public_transfer(Network::Esmeralda, &sample_intent(), &keys()).unwrap();
         assert_ne!(
             a.encoded_transaction, b.encoded_transaction,
             "random-nonce seal must produce differing bytes across runs"
         );
-        assert_ne!(a.transaction_id, b.transaction_id, "and a differing transaction id");
+        assert_eq!(a.transaction_id, b.transaction_id, "and the same transaction id");
     }
 
     /// The injected signatures must be real signatures.

@@ -33,11 +33,11 @@ ootle_byte_type = { workspace = true }
 
 log = { workspace = true }
 serde = { workspace = true, default-features = true }
-tokio = { workspace = true, default-features = false, features = ["sync", "rt-multi-thread"] }
+tokio = { workspace = true, default-features = false, features = ["sync", "rt-multi-thread", "test-util"] }
 rand = { workspace = true }
 futures = { workspace = true }
 fern = { workspace = true }
-humantime = { workspace = true }
+time = { workspace = true, features = ["formatting"] }
 itertools = "0.13.0"
 serde_json = { workspace = true }
 tempfile = { workspace = true }

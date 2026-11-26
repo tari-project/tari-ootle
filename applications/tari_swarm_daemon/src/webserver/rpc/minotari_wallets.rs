@@ -23,7 +23,7 @@ pub async fn create(
 ) -> Result<MinotariWalletCreateResponse, anyhow::Error> {
     let instance_id = context
         .process_manager()
-        .create_instance(req.name, InstanceType::MinoTariConsoleWallet, HashMap::new())
+        .create_instance(Some(req.name), InstanceType::MinoTariConsoleWallet, HashMap::new())
         .await?;
 
     Ok(MinotariWalletCreateResponse { instance_id })

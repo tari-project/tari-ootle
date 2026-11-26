@@ -29,6 +29,7 @@ use crate::{
     StorageError,
     consensus_models::{
         Evidence,
+        FinalizedTransactionInclusion,
         LockedSubstateValue,
         SubstatePledge,
         SubstatePledges,
@@ -162,6 +163,19 @@ impl TransactionRecord {
         Ok(recs)
     }
 
+    /// Whether any of `tx_ids` has no stored record. Checks keys only and returns at the first missing one.
+    pub fn any_missing<'a, TTx: StateStoreReadTransaction, I: IntoIterator<Item = &'a TransactionId>>(
+        tx: &TTx,
+        tx_ids: I,
+    ) -> Result<bool, StorageError> {
+        for tx_id in tx_ids {
+            if !tx.transactions_exists(tx_id)? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
     pub fn get_missing<'a, TTx: StateStoreReadTransaction, I: IntoIterator<Item = &'a TransactionId>>(
         tx: &TTx,
         tx_ids: I,
@@ -265,7 +279,7 @@ impl TransactionRecord {
     where
         TTx: StateStoreWriteTransaction + Deref,
         TTx::Target: StateStoreReadTransaction,
-        I: IntoIterator<Item = &'a TransactionPoolRecord>,
+        I: IntoIterator<Item = (&'a TransactionPoolRecord, Option<FinalizedTransactionInclusion>)>,
     {
         tx.transactions_finalize_all(epoch, transactions)
     }

@@ -43,7 +43,7 @@ An instruction is the smallest unit of work in a transaction. The Ootle engine s
 | `AllocateAddress(type, workspace_id)`                                  | Pre-allocates a component or resource address, placing it on the workspace        |
 | `PublishTemplate(blob_index)`                                          | Publishes a new WASM template referenced from the transaction's [blob list](#blobs) |
 | `DropAllProofsInWorkspace`                                             | Drops all proofs currently held in the workspace                                  |
-| `ClaimBurn(claim_proof, output_data)`                                  | Claims a burn proof from the Minotari layer-1 chain                               |
+| `ClaimBurn(claim_proof)`                                               | Claims a burn proof from the Minotari layer-1 chain into a revealed TARI bucket   |
 | `ClaimValidatorFees(address)`                                          | Claims accumulated validator fees from a fee pool                                 |
 
 ---

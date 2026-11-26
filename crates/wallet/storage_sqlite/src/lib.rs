@@ -32,11 +32,16 @@ pub struct SqliteWalletStore {
 
 impl SqliteWalletStore {
     pub fn try_open<P: AsRef<Path>>(path: P) -> Result<Self, WalletStorageError> {
-        create_dir_all(path.as_ref().parent().unwrap()).expect("Failed to create DB path");
+        let path = path.as_ref();
+        if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+            create_dir_all(parent).map_err(|e| WalletStorageError::general("create_dir_all", e))?;
+        }
 
-        let database_url = path.as_ref().to_str().expect("database_url utf-8 error").to_string();
+        let database_url = path
+            .to_str()
+            .ok_or_else(|| WalletStorageError::general("try_open", "database path is not valid UTF-8"))?;
         let mut connection =
-            SqliteConnection::establish(&database_url).map_err(|e| WalletStorageError::general("connect", e))?;
+            SqliteConnection::establish(database_url).map_err(|e| WalletStorageError::general("connect", e))?;
 
         // WAL with synchronous = FULL keeps every commit durable across power loss at one fsync of the log per commit.
         for pragma in [
@@ -116,5 +121,19 @@ impl Debug for SqliteWalletStore {
         f.debug_struct("SqliteWalletStore")
             .field("connection", &"SqliteConnection")
             .finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn try_open_handles_memory_path_and_invalid_parent_without_panicking() {
+        let store = SqliteWalletStore::try_open(":memory:").unwrap();
+        store.run_migrations().unwrap();
+
+        let err = SqliteWalletStore::try_open("/dev/null/impossible/wallet.sqlite").unwrap_err();
+        assert!(matches!(err, WalletStorageError::GeneralFailure { .. }));
     }
 }

@@ -1,7 +1,7 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use ootle_byte_type::ToByteType;
 use tari_crypto::{
@@ -10,9 +10,9 @@ use tari_crypto::{
 };
 use tari_engine::runtime::{ArgumentValidationError, RuntimeError};
 use tari_engine_types::{
-    crypto::{ElgamalVerifiableBalance, OutputBody, ValueLookup, commit_amount},
+    crypto::{ElgamalVerifiableBalance, OutputBody, ValueLookup, commit_range_provable_amount},
     limits::CONFIDENTIAL_LIMITS,
-    resource_container::ResourceError,
+    resource_container::{ResourceContainer, ResourceError},
     substate::SubstateId,
 };
 use tari_ootle_common_types::substate_type::SubstateType;
@@ -121,7 +121,9 @@ fn minting_a_commitment_without_a_value_proof_is_rejected() {
     let owner = test.owner_proof();
 
     let (mint_proof, mint_mask, _value_proofs) = mint_statement(42, None);
-    let commitment = commit_amount(&mint_mask, Amount::from(42u64)).unwrap().to_byte_type();
+    let commitment = commit_range_provable_amount(&mint_mask, Amount::from(42u64))
+        .unwrap()
+        .to_byte_type();
 
     let reason = test.execute_expect_failure(
         test.transaction()
@@ -613,7 +615,9 @@ fn freeze_then_attempt_spend() {
     let (confidential_proof, mask, value_proofs) = mint_statement(100, None);
     let (mut test, faucet, faucet_resx) = setup(confidential_proof, value_proofs, None);
 
-    let commitment = commit_amount(&mask, Amount::from(100u64)).unwrap().to_byte_type();
+    let commitment = commit_range_provable_amount(&mask, Amount::from(100u64))
+        .unwrap()
+        .to_byte_type();
     let frozen_address = ConfidentialOutputAddress::new(faucet_resx.as_resource_address().unwrap(), commitment);
 
     let owner = test.owner_proof();
@@ -671,7 +675,9 @@ fn freezing_confidential_outputs_invokes_the_auth_hook() {
         .get_previous_output_address(SubstateType::Resource)
         .as_resource_address()
         .unwrap();
-    let commitment = commit_amount(&mask, Amount::from(100u64)).unwrap().to_byte_type();
+    let commitment = commit_range_provable_amount(&mask, Amount::from(100u64))
+        .unwrap()
+        .to_byte_type();
 
     let owner = test.owner_proof();
     test.call_function::<()>(
@@ -694,7 +700,9 @@ fn unfreeze_and_spend_in_one_transaction_downs_the_output() {
     let (confidential_proof, mask, value_proofs) = mint_statement(100, None);
     let (mut test, faucet, faucet_resx) = setup(confidential_proof, value_proofs, None);
 
-    let commitment = commit_amount(&mask, Amount::from(100u64)).unwrap().to_byte_type();
+    let commitment = commit_range_provable_amount(&mask, Amount::from(100u64))
+        .unwrap()
+        .to_byte_type();
     let output_address = ConfidentialOutputAddress::new(faucet_resx.as_resource_address().unwrap(), commitment);
 
     let owner = test.owner_proof();
@@ -738,7 +746,9 @@ fn receipt_lists_the_spent_output_as_downed() {
     let (confidential_proof, mask, value_proofs) = mint_statement(100, None);
     let (mut test, faucet, faucet_resx) = setup(confidential_proof, value_proofs, None);
 
-    let commitment = commit_amount(&mask, Amount::from(100u64)).unwrap().to_byte_type();
+    let commitment = commit_range_provable_amount(&mask, Amount::from(100u64))
+        .unwrap()
+        .to_byte_type();
     let output_address = ConfidentialOutputAddress::new(faucet_resx.as_resource_address().unwrap(), commitment);
 
     let (user_account, user_proof, user_key) = test.create_empty_account();
@@ -793,7 +803,9 @@ fn minting_a_duplicate_commitment_is_rejected() {
         vec![owner.clone()],
     );
 
-    let commitment = commit_amount(&mint_mask, Amount::from(42u64)).unwrap().to_byte_type();
+    let commitment = commit_range_provable_amount(&mint_mask, Amount::from(42u64))
+        .unwrap()
+        .to_byte_type();
     let address = ConfidentialOutputAddress::new(faucet_resx.as_resource_address().unwrap(), commitment);
     let reason = test.execute_expect_failure(
         Transaction::builder_localnet(Epoch(1))
@@ -881,7 +893,7 @@ fn burning_a_bucket_holding_commitments_without_a_value_proof_is_rejected() {
     let utilities = test.get_template_address("ConfidentialUtilities");
 
     let withdraw_proof = generate_withdraw_proof(&mask, 500, None, 0u64);
-    let commitment = commit_amount(&withdraw_proof.output_mask, Amount::from(500u64))
+    let commitment = commit_range_provable_amount(&withdraw_proof.output_mask, Amount::from(500u64))
         .unwrap()
         .to_byte_type();
     let reason = test.execute_expect_failure(
@@ -913,7 +925,7 @@ fn burning_a_bucket_holding_commitments_with_value_proofs_decreases_total_supply
     // Split the 500 into a 200 output and 300 change, then burn the 200 output commitment.
     let withdraw_proof = generate_withdraw_proof(&mask, 200, Some(300), 0u64);
     let burnt = Amount::from(200u64);
-    let commitment = commit_amount(&withdraw_proof.output_mask, burnt)
+    let commitment = commit_range_provable_amount(&withdraw_proof.output_mask, burnt)
         .unwrap()
         .to_byte_type();
     let value_proofs = BTreeMap::from([(
@@ -1023,5 +1035,31 @@ fn liquidity_pool_rejects_confidential_commitments() {
             .call_method(pool, "protected_add_liquidity", args![Workspace("added")])
             .build_and_seal(&owner_secret),
         vec![owner_proof],
+    );
+}
+
+#[test]
+fn withdraw_rejects_a_change_commitment_the_container_holds_locked() {
+    let input_mask = RistrettoSecretKey::from(7u64);
+    let input = commit_range_provable_amount(&input_mask, Amount::new(100))
+        .unwrap()
+        .to_byte_type();
+    let withdraw = generate_withdraw_proof(&input_mask, 60, Some(40), Amount::zero());
+    let change_mask = withdraw.change_mask.as_ref().unwrap();
+    let change = commit_range_provable_amount(change_mask, Amount::new(40))
+        .unwrap()
+        .to_byte_type();
+
+    let mut container = ResourceContainer::Confidential {
+        address: TARI_TOKEN,
+        commitments: BTreeSet::from([input]),
+        revealed_amount: Amount::zero(),
+        locked_commitments: BTreeSet::from([change]),
+        locked_revealed_amount: Amount::zero(),
+    };
+    let err = container.withdraw_confidential(withdraw.proof, None).unwrap_err();
+    assert!(
+        matches!(&err, ResourceError::InvariantError(msg) if msg.contains("change commitment")),
+        "unexpected error: {err:?}"
     );
 }

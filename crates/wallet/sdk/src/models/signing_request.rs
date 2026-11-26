@@ -3,7 +3,7 @@
 
 use std::{fmt, str::FromStr, time::Duration};
 
-use tari_ootle_transaction::{TransactionSignature, UnsignedTransaction};
+use tari_ootle_transaction::{AuthorizerSet, TransactionSignature, UnsignedTransaction};
 use tari_template_lib::types::crypto::RistrettoPublicKeyBytes;
 use time::{OffsetDateTime, PrimitiveDateTime};
 
@@ -93,6 +93,7 @@ impl fmt::Display for SigningRequester {
 pub struct NewSigningRequest<'a> {
     pub unsigned_transaction: &'a UnsignedTransaction,
     pub seal_public_key: &'a RistrettoPublicKeyBytes,
+    pub authorizers: &'a AuthorizerSet,
     pub key_id: KeyId,
     pub signer_public_key: &'a RistrettoPublicKeyBytes,
     pub message_hash: &'a [u8; 64],
@@ -109,12 +110,16 @@ pub struct SigningRequestModel {
     /// Public key of whoever seals the transaction. Every co-signature commits
     /// to it, so it is fixed before anyone signs.
     pub seal_public_key: RistrettoPublicKeyBytes,
+    /// Public keys of every authorizer of the transaction, `signer_public_key`
+    /// among them. Every co-signature commits to the whole set, so it is fixed
+    /// before anyone signs.
+    pub authorizers: AuthorizerSet,
     /// The wallet key that signs on approval.
     pub key_id: KeyId,
     /// Public key of `key_id`, resolved when the request was created.
     pub signer_public_key: RistrettoPublicKeyBytes,
-    /// `TransactionSignature::create_message(seal_public_key, unsigned_transaction)`:
-    /// exactly what the signature signs.
+    /// `TransactionSignature::create_message` under `seal_public_key` and
+    /// `authorizers` over `unsigned_transaction`: exactly what the signature signs.
     pub message_hash: [u8; 64],
     /// Free text from the requester. Display only; nothing verifies it.
     pub memo: String,
@@ -167,6 +172,7 @@ mod tests {
             id: 1,
             unsigned_transaction: UnsignedTransaction::new(0u8, tari_ootle_common_types::Epoch(1)),
             seal_public_key: RistrettoPublicKeyBytes::default(),
+            authorizers: AuthorizerSet::new(),
             key_id: KeyId::Derived {
                 key_branch: KeyBranch::Account,
                 index: 0u64,

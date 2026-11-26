@@ -1,10 +1,10 @@
 //  Copyright 2026 The Tari Project
 //  SPDX-License-Identifier: BSD-3-Clause
 
-import type { Instruction, InstructionArg } from "@tari-project/ootle-ts-bindings";
+import type { Instruction, InstructionArg, StealthTransferStatement } from "@tari-project/ootle-ts-bindings";
 import { encode, Tag } from "cbor2";
 import { describe, expect, it } from "vitest";
-import { describeInstructions } from "./describe";
+import { describeFee, describeInstructions } from "./describe";
 
 const RESOURCE_ADDRESS_TAG = 131;
 const RESOURCE_HEX = "ab".repeat(32);
@@ -129,5 +129,78 @@ describe("describeInstructions", () => {
       fees: [{ account: OWN_ACCOUNT, amount: 2_000n }],
       undescribed: 0,
     });
+  });
+
+  it("allows a stealth transfer output bucket to pay the fee without counting as undescribed", () => {
+    const statement = {} as StealthTransferStatement;
+    const instructions: Instruction[] = [
+      {
+        StealthTransfer: {
+          resource_address_ref: { Address: RESOURCE },
+          statement,
+          revealed_input_bucket: null,
+        },
+      },
+      putOnWorkspace(0),
+      { PayFeeFromBucket: { bucket: { id: 0, offset: null } } },
+    ];
+
+    expect(describeInstructions(instructions, [], OWN)).toEqual({
+      withdrawals: [],
+      fees: [],
+      undescribed: 0,
+    });
+  });
+
+  it("counts PayFeeFromBucket as undescribed when the bucket is not an untouched withdrawal or stealth reveal", () => {
+    const instructions: Instruction[] = [
+      call(OWN_ACCOUNT, "withdraw", [resourceArg(), amountArg(1_000_000)]),
+      putOnWorkspace(0),
+      { TakeFromBucket: { input_bucket: { id: 0, offset: null }, amount: 1_000, output_bucket: 1 } },
+      call(OWN_ACCOUNT, "deposit", [bucket(0)]),
+      { PayFeeFromBucket: { bucket: { id: 1, offset: null } } },
+    ];
+
+    const { withdrawals, undescribed } = describeInstructions(instructions, [], OWN);
+
+    expect(withdrawals.map((w) => w.destination)).toEqual([{ kind: "unknown" }]);
+    expect(undescribed).toBe(3);
+  });
+
+  it("evicts a tracked withdrawal when another instruction overwrites its workspace key", () => {
+    const statement = {} as StealthTransferStatement;
+    const instructions: Instruction[] = [
+      call(OWN_ACCOUNT, "withdraw", [resourceArg(), amountArg(1_000_000)]),
+      putOnWorkspace(0),
+      {
+        StealthTransfer: {
+          resource_address_ref: { Address: RESOURCE },
+          statement,
+          revealed_input_bucket: null,
+        },
+      },
+      putOnWorkspace(0),
+      call(OWN_ACCOUNT, "deposit", [bucket(0)]),
+    ];
+
+    const { withdrawals, undescribed } = describeInstructions(instructions, [], OWN);
+
+    expect(withdrawals.map((w) => w.destination)).toEqual([{ kind: "unknown" }]);
+    expect(undescribed).toBe(1);
+  });
+
+  it("counts withdrawal and fee calls with unexpected or workspace arguments as undescribed", () => {
+    const instructions: Instruction[] = [
+      call(OWN_ACCOUNT, "withdraw", [resourceArg(), amountArg(100), bucket(0)]),
+      call(OWN_ACCOUNT, "withdraw_non_fungible", [resourceArg(), bucket(0)]),
+      call(OWN_ACCOUNT, "pay_fee", [amountArg(100), bucket(0)]),
+    ];
+
+    expect(describeInstructions(instructions, [], OWN)).toEqual({
+      withdrawals: [],
+      fees: [],
+      undescribed: 3,
+    });
+    expect(describeFee(instructions[2], [])).toBeNull();
   });
 });

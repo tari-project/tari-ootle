@@ -80,12 +80,6 @@ import type {
   ConfidentialViewVaultBalanceResponse,
   GetValidatorFeesRequest,
   GetValidatorFeesResponse,
-  KeysCreateRequest,
-  KeysCreateResponse,
-  KeysListRequest,
-  KeysListResponse,
-  KeysSetActiveRequest,
-  KeysSetActiveResponse,
   ListNftsRequest,
   ListNftsResponse,
   MintFaucetNftRequest,
@@ -274,14 +268,6 @@ export const settingsSet = (request: SettingsSetRequest): Promise<SettingsSetRes
 // webrtc
 export const webrtcStart = (request: WebRtcStartRequest): Promise<WebRtcStartResponse> =>
   client().then((c) => c.webrtcStart(request));
-
-// keys
-export const keysCreate = (request: KeysCreateRequest): Promise<KeysCreateResponse> =>
-  client().then((c) => c.createKey(request));
-export const keysList = (request: KeysListRequest): Promise<KeysListResponse> =>
-  client().then((c) => c.listKeys(request));
-export const keysSetActive = (request: KeysSetActiveRequest): Promise<KeysSetActiveResponse> =>
-  client().then((c) => c.keysSetActive(request));
 
 export const transactionsSubmit = (request: TransactionSubmitRequest): Promise<TransactionSubmitResponse> =>
   client().then((c) => c.submitTransaction(request));

@@ -59,6 +59,7 @@ use crate::{
     MessagingMode,
     NetworkingError,
     ReachabilityMode,
+    address_scope::dialable_listen_addresses,
     connection::Connection,
     event::NetworkingEvent,
     global_ip::GlobalIp,
@@ -999,6 +1000,8 @@ where
             return Ok(());
         }
 
+        self.add_dialable_listen_addresses(connection_id, peer_id, &info.listen_addrs);
+
         if self.rendezvous_state.contains(&peer_id) {
             info!(target: LOG_TARGET, "Connected to rendezvous server {}. Registering", peer_id);
             let ns = self.get_rendezvous_namespace();
@@ -1071,6 +1074,29 @@ where
             supported_protocols: info.protocols,
         });
         Ok(())
+    }
+
+    /// Records the peer's listen addresses that can reach it from here as dial candidates. This is the only path by
+    /// which identify-reported listen addresses reach a dial, because identify's own address cache is disabled.
+    fn add_dialable_listen_addresses(
+        &mut self,
+        connection_id: ConnectionId,
+        peer_id: PeerId,
+        listen_addrs: &[Multiaddr],
+    ) {
+        let Some(connected_on) = self
+            .active_connections
+            .get(&peer_id)
+            .and_then(|conns| conns.iter().find(|c| c.connection_id == connection_id))
+            .map(|c| c.endpoint.get_remote_address().clone())
+        else {
+            debug!(target: LOG_TARGET, "Identify from {peer_id} on connection {connection_id} that is no longer active. Ignoring its listen addresses");
+            return;
+        };
+
+        for address in dialable_listen_addresses(listen_addrs, &connected_on) {
+            self.swarm.add_peer_address(peer_id, address.clone());
+        }
     }
 
     fn update_connected_peers(&mut self, peer_id: &PeerId, info: &identify::Info) {

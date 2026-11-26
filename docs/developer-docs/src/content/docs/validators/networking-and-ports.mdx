@@ -1,0 +1,132 @@
+---
+title: Networking and Ports
+description: Which validator node ports to expose to the internet, which to keep private, and how to run the node behind a firewall, a reverse proxy or Docker.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+import { basePath } from '../../../helpers/path';
+
+### Covered in this guide
+
+- The ports a validator listens on, and which of them may be public.
+- Firewall rules for a validator host.
+- Reaching the web UI and JSON-RPC safely.
+- Running the node in Docker.
+
+## Ports
+
+| Port | Protocol | Default | Expose? | Purpose |
+|---|---|---|---|---|
+| p2p | **TCP and UDP** (QUIC) | `listener_port`, random if unset | **Yes, public** | Consensus, gossip and state sync with other validators |
+| JSON-RPC and web UI | TCP (HTTP) | `127.0.0.1:18200` | **No, never** | Operator API and dashboard |
+| Metrics | TCP (HTTP) | `127.0.0.1:18201` | No. Only to your Prometheus | `GET /_metrics` |
+| Base node gRPC | TCP, outbound | 18102 (mainnet), 18142 (esmeralda) | No inbound needed | Epochs, headers and burns from the base layer |
+
+### p2p: public
+
+The p2p port is the only one other validators need. The node listens on the **same port number for TCP and
+UDP**: `/ip4/0.0.0.0/tcp/<port>` and `/ip4/0.0.0.0/udp/<port>/quic-v1`. Open both.
+
+Set the port explicitly with `validator_node.p2p.listener_port` or `--listener-port`. The default of `0` picks a
+random port at every start, which no firewall rule can follow. The public seed nodes use `50123`, which is a
+reasonable choice.
+
+The node listens on IPv4. It learns its public address from its peers, so it needs no address in its
+configuration. Behind NAT, forward the port (TCP and UDP) to the host. A validator that peers cannot dial
+cannot do its job properly.
+
+### JSON-RPC and web UI: private
+
+The JSON-RPC listener serves the API at `/json_rpc`, the web UI at `/`, and a health check at `/health`. The API
+**has no authentication** and exposes every operator function, including signing payloads with the node's key.
+Anyone who can reach it can operate your node.
+
+- Keep `json_rpc_listener_address` on `127.0.0.1`.
+- Do not open the port in a firewall or publish it from a container.
+- Requests must name the node by `localhost` or an IP address, or the node returns `421 Misdirected Request`. This
+  blocks DNS-rebinding attacks from a browser. Browser requests from other origins are refused unless the node runs
+  with `--enable-permissive-cors`. Leave that off.
+
+To use the web UI from your workstation, tunnel to it:
+
+```sh
+ssh -L 18200:127.0.0.1:18200 you@validator-host
+# then open http://127.0.0.1:18200
+```
+
+If you put a reverse proxy in front of it, require authentication at the proxy. Add the host name the proxy
+forwards to `validator_node.json_rpc_allowed_hosts` (or `--json-rpc-allowed-host`).
+
+### Metrics: private
+
+Metrics have their own listener so they can be bound to a private interface on their own. Bind it to an address
+your Prometheus can reach, for example a private network interface, and allow only Prometheus to connect. See
+<a href={basePath("/reference/metrics/")}>Metrics</a> for what is exported.
+
+### Base node gRPC: outbound
+
+The validator connects *out* to a Minotari base node's gRPC server. Do not expose the base node's gRPC to the
+internet either. Run it on the same host or reach it over a private network. The base node's own p2p port is a
+separate concern, covered by the Minotari documentation.
+
+## Firewall
+
+A minimal inbound policy for a validator host, shown with `ufw`:
+
+```sh
+ufw default deny incoming
+ufw default allow outgoing
+ufw allow 22/tcp                       # SSH, ideally restricted to your own addresses
+ufw allow 50123/tcp                    # Ootle p2p
+ufw allow 50123/udp                    # Ootle p2p (QUIC)
+# Only if Prometheus scrapes from another host:
+# ufw allow from <prometheus-ip> to any port 18201 proto tcp
+ufw enable
+```
+
+Ports 18200 and 18201 stay closed because they are bound to loopback anyway. The firewall is a second line of
+defence in case a configuration change moves them.
+
+## Docker
+
+The JSON-RPC and metrics listeners bind `127.0.0.1` *inside* the container, so a published port cannot reach them.
+There are two ways to deal with this.
+
+**Host networking (simplest).** The node shares the host's network stack. The loopback-only defaults then
+mean the same as on bare metal:
+
+```sh
+docker run -d --name ootle-vn --network host --restart unless-stopped \
+  -v /srv/ootle:/data \
+  ghcr.io/tari-project/ootle \
+  tari_validator_node -b /data --network mainnet --listener-port 50123 \
+    --node-grpc http://127.0.0.1:18102 start
+```
+
+**Bridge networking.** Bind the listeners to all interfaces inside the container, then publish them to the
+host's loopback only. Publish p2p normally:
+
+```sh
+docker run -d --name ootle-vn --restart unless-stopped \
+  -p 50123:50123/tcp -p 50123:50123/udp \
+  -p 127.0.0.1:18200:18200 -p 127.0.0.1:18201:18201 \
+  -v /srv/ootle:/data \
+  ghcr.io/tari-project/ootle \
+  tari_validator_node -b /data --network mainnet --listener-port 50123 \
+    --json-rpc-address 0.0.0.0:18200 --metrics-listener-address 0.0.0.0:18201 \
+    --node-grpc http://<base-node-host>:18102 start
+```
+
+<Aside type="caution">
+In the bridge setup, `-p 127.0.0.1:18200:18200` is what keeps the JSON-RPC private. Writing `-p 18200:18200`
+publishes it on every host interface, and Docker's port publishing bypasses `ufw` rules.
+</Aside>
+
+The image runs as user `tari` (uid 1000), so the mounted directory must be writable by uid 1000. With `-b /data`,
+the node's files go to `/srv/ootle/<network>/` on the host. Generate or restore the identity with the same
+mount before the first start:
+
+```sh
+docker run --rm -it -v /srv/ootle:/data ghcr.io/tari-project/ootle \
+  tari_validator_node -b /data --network mainnet generate-identity
+```

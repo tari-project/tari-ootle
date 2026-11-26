@@ -17,9 +17,9 @@ use crate::types::error::OotleSdkError;
 ///
 /// Hosts that lack a native 128-bit integer reassemble the value as `(hi as u128) << 64 | lo`. This
 /// is the *only* shape a `u128` ever takes at the boundary; native `u128` / [`Amount`] stays
-/// internal. Public transfers only need [`Amount`] (a `u64` µTari) today; `U128` is part of the
-/// contract so the wire shape stays stable if a `u128` field is added later.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// internal. Revealed amounts (stealth revealed inputs and outputs, revealed vault balances) cross
+/// as `U128`: they are public, carry no range proof, and span the full [`Amount`] width.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct U128 {
     /// The high (most-significant) 64 bits.
     pub hi: u64,
@@ -28,9 +28,22 @@ pub struct U128 {
 }
 
 impl U128 {
+    /// Zero.
+    pub const ZERO: Self = Self::new(0, 0);
+
     /// Constructs a `U128` from its two `u64` words.
     pub const fn new(hi: u64, lo: u64) -> Self {
         Self { hi, lo }
+    }
+
+    /// Widens a `u64`.
+    pub const fn from_u64(value: u64) -> Self {
+        Self::new(0, value)
+    }
+
+    /// Whether the value is zero.
+    pub const fn is_zero(self) -> bool {
+        self.hi == 0 && self.lo == 0
     }
 
     /// Reassembles the native `u128`.

@@ -7,12 +7,12 @@ use tari_ootle_common_types::substate_type::SubstateType;
 use tari_ootle_wallet_sdk::{WalletSdk, WalletSdkSpec, models::WalletEvent};
 use tari_ootle_wallet_sdk_services::notify::Notify;
 use tari_shutdown::ShutdownSignal;
-use tokio::task;
+use tokio::{sync::broadcast, task};
 
 const LOG_TARGET: &str = "tari::ootle_wallet_daemon::services::template_monitor";
 
 pub struct TemplateMonitor<TSpec: WalletSdkSpec> {
-    notify: Notify<WalletEvent>,
+    events_subscription: broadcast::Receiver<WalletEvent>,
     wallet_sdk: WalletSdk<TSpec>,
     shutdown_signal: ShutdownSignal,
 }
@@ -22,7 +22,7 @@ where TSpec: WalletSdkSpec
 {
     pub fn new(notify: Notify<WalletEvent>, wallet_sdk: WalletSdk<TSpec>, shutdown_signal: ShutdownSignal) -> Self {
         Self {
-            notify,
+            events_subscription: notify.subscribe(),
             wallet_sdk,
             shutdown_signal,
         }
@@ -81,16 +81,25 @@ where TSpec: WalletSdkSpec
     }
 
     pub async fn run(mut self) -> anyhow::Result<()> {
-        let mut events_subscription = self.notify.subscribe();
         loop {
             tokio::select! {
                 _ = self.shutdown_signal.wait() => {
                     break Ok(());
                 }
 
-                Ok(event) = events_subscription.recv() => {
-                    if let Err(error) = self.handle_wallet_event(event).await {
-                        error!(target: LOG_TARGET, "Error handling event: {}", error);
+                result = self.events_subscription.recv() => {
+                    match result {
+                        Ok(event) => {
+                            if let Err(error) = self.handle_wallet_event(event).await {
+                                error!(target: LOG_TARGET, "Error handling event: {}", error);
+                            }
+                        },
+                        Err(broadcast::error::RecvError::Lagged(n)) => {
+                            warn!(target: LOG_TARGET, "Template monitor lagged behind by {} event(s)", n);
+                        },
+                        Err(broadcast::error::RecvError::Closed) => {
+                            break Ok(());
+                        },
                     }
                 }
             }

@@ -12,6 +12,8 @@ use tari_engine_types::substate::SubstateId;
 use tari_indexer_client::types::{
     GetSubstateRequest,
     GetSubstateResponse,
+    GetSubstateVersionsRequest,
+    GetSubstateVersionsResponse,
     GetSubstatesRequest,
     GetSubstatesResponse,
     MAX_SUBSTATES_PER_FETCH,
@@ -261,6 +263,53 @@ pub async fn fetch_substates(
     Ok(Json(GetSubstatesResponse::new(substates, proofs)))
 }
 
+#[utoipa::path(
+    post,
+    path = "/substates/versions",
+    description = "Looks up the live version of several substates, without their values or proofs. The versions \
+                   cannot be verified by the caller: they are for pinning transaction inputs, where a wrong version \
+                   makes the transaction fail.",
+    responses(
+        (status = 200, description = "The live version of each substate that has one", body = GetSubstateVersionsResponse),
+        (status = BAD_REQUEST, description = "Too many substates requested", body = ErrorResponse),
+        (
+            status = SERVICE_UNAVAILABLE,
+            description = "Indexer is still syncing, or no committee answers for the substate's shard group",
+            body = ErrorResponse
+        ),
+        (status = INTERNAL_SERVER_ERROR, description = "Failed to look up substates", body = ErrorResponse),
+    ),
+)]
+pub async fn get_substate_versions(
+    Extension(context): Extension<HandlerContext>,
+    Json(req): Json<GetSubstateVersionsRequest>,
+) -> HandlerResult<Json<GetSubstateVersionsResponse>> {
+    let GetSubstateVersionsRequest { substate_ids } = req;
+
+    if substate_ids.len() > MAX_SUBSTATES_PER_FETCH {
+        return Err(ErrorResponse::bad_request(format!(
+            "Cannot request more than {MAX_SUBSTATES_PER_FETCH} substates at once"
+        )));
+    }
+
+    let fetched = context
+        .substate_manager()
+        .fetch_and_cache_substates(substate_ids.as_slice())
+        .await
+        .map_err(substate_lookup_error)?;
+
+    Ok(Json(to_substate_versions_response(fetched)))
+}
+
+fn to_substate_versions_response(fetched: HashMap<SubstateId, ProvenSubstate>) -> GetSubstateVersionsResponse {
+    GetSubstateVersionsResponse {
+        versions: fetched
+            .into_iter()
+            .map(|(id, ProvenSubstate { substate, .. })| (id, substate.version()))
+            .collect(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use axum::http::StatusCode;
@@ -353,6 +402,28 @@ mod tests {
             *substate
         );
         assert!(json["proof"].get("down_proof").is_none(), "{json}");
+    }
+
+    /// Each live substate is answered with its version alone, keyed by the id it was asked for.
+    #[test]
+    fn substate_versions_are_served_without_values() {
+        let fetched = HashMap::from([(substate(), ProvenSubstate {
+            substate: EncodedSubstate::encode(&Substate::new(
+                7,
+                SubstateValue::NonFungible(NonFungibleContainer::no_data()),
+            ))
+            .unwrap(),
+            proof: None,
+        })]);
+
+        let resp = to_substate_versions_response(fetched);
+
+        let json = serde_json::to_value(&resp).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({ "versions": { substate().to_string(): 7 } }),
+            "{json}"
+        );
     }
 
     #[test]

@@ -25,7 +25,7 @@
 #![deny(clippy::disallowed_methods)]
 
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     iter,
     ops::Deref,
     sync::Arc,
@@ -77,6 +77,7 @@ use tari_ootle_storage::{
         BlockTransactionExecution,
         EpochCheckpoint,
         Evidence,
+        FinalizedTransactionInclusion,
         ForeignParkedProposal,
         ForeignProposal,
         ForeignProposalRecord,
@@ -149,7 +150,12 @@ use crate::{
         diagnostic_no_vote::{DiagnosticsNoVoteCf, DiagnosticsNoVoteData},
         epoch_checkpoint::EpochCheckpointCf,
         finalized_transaction,
-        finalized_transaction::{FinalizedTransactionLinkCf, FinalizedTransactionLinkData},
+        finalized_transaction::{
+            BlockCommitProofTransactionCitationByBlockQuery,
+            BlockCommitProofTransactionCitationCf,
+            FinalizedTransactionLinkCf,
+            FinalizedTransactionLinkData,
+        },
         foreign_parked_blocks,
         foreign_parked_blocks::ForeignParkedBlockCf,
         foreign_proposal,
@@ -469,6 +475,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
         let index_cf = self.db().cf(block::EpochHeightIndex)?;
         index_cf.delete(&(block.epoch(), block.height(), *block.id()), OPERATION)?;
+        self.db().cf(block::ExecutedBlockIndex)?.delete(block_id, OPERATION)?;
 
         // TODO: could lead to orphan chains left in DB - need to recursively remove all children
         let chain_cf = self.db().cf(PendingChainIndex)?;
@@ -476,6 +483,13 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         let parent_child_cf = self.db().cf(chain::PendingParentChildIndex)?;
         parent_child_cf.delete(&(*block.parent(), *block.id()), OPERATION)?;
 
+        Ok(())
+    }
+
+    fn blocks_set_executed(&mut self, block_id: &BlockId) -> Result<(), StorageError> {
+        self.db()
+            .cf(block::ExecutedBlockIndex)?
+            .put(block_id, &(), "blocks_set_executed")?;
         Ok(())
     }
 
@@ -498,6 +512,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             block.set_commit_qc(*qc_id);
             // The block is committed, remove it from the pending chain
             self.db().cf(PendingChainIndex)?.delete(block_id, OPERATION)?;
+            self.db().cf(block::ExecutedBlockIndex)?.delete(block_id, OPERATION)?;
             self.db()
                 .cf(chain::PendingParentChildIndex)?
                 .delete(&(*block.parent(), *block_id), OPERATION)?;
@@ -787,33 +802,37 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         Ok(())
     }
 
-    fn transactions_finalize_all<'a, I: IntoIterator<Item = &'a TransactionPoolRecord>>(
-        &mut self,
-        epoch: Epoch,
-        transactions: I,
-    ) -> Result<(), StorageError> {
+    fn transactions_finalize_all<'a, I>(&mut self, epoch: Epoch, transactions: I) -> Result<(), StorageError>
+    where I: IntoIterator<Item = (&'a TransactionPoolRecord, Option<FinalizedTransactionInclusion>)> {
         const OPERATION: &str = "transactions_finalize_all";
 
-        let finalized_cf = self.db().cf(FinalizedTransactionLinkCf)?;
-        let epoch_index_cf = self.db().cf(finalized_transaction::EpochIndex)?;
+        let db = self.db();
+        let finalized_cf = db.cf(FinalizedTransactionLinkCf)?;
+        let epoch_index_cf = db.cf(finalized_transaction::EpochIndex)?;
+        let citations_cf = db.cf(BlockCommitProofTransactionCitationCf)?;
 
-        let iter = transactions.into_iter();
-        // Add transactions to finalized CF
-        let data = FinalizedTransactionLinkData {
-            finalized_at: now(),
-            epoch,
-        };
-        for transaction in iter {
-            // The epoch index holds exactly one entry per id: a re-finalized id (a previously
-            // aborted transaction sequenced again) moves to the epoch it last finalized in, so the
-            // GC horizon applies to the latest attempt.
-            if let Some(prev) = finalized_cf.get(transaction.id(), OPERATION).optional()? &&
-                prev.epoch != epoch
-            {
-                epoch_index_cf.delete(&(prev.epoch, *transaction.id()), OPERATION)?;
+        let finalized_at = now();
+        for (transaction, inclusion) in transactions {
+            let id = transaction.id();
+            if let Some(prev) = finalized_cf.get(id, OPERATION).optional()? {
+                // The epoch index holds exactly one entry per id: a re-finalized id (a previously
+                // aborted transaction sequenced again) moves to the epoch it last finalized in, so the
+                // GC horizon applies to the latest attempt.
+                if prev.epoch != epoch {
+                    epoch_index_cf.delete(&(prev.epoch, *id), OPERATION)?;
+                }
+                release_link(&db, id, &prev)?;
             }
-            finalized_cf.put(transaction.id(), &data, OPERATION)?;
-            epoch_index_cf.put(&(epoch, *transaction.id()), &(), OPERATION)?;
+            if let Some(inclusion) = &inclusion {
+                citations_cf.put(&(inclusion.block_id, *id), &(), OPERATION)?;
+            }
+            let data = FinalizedTransactionLinkData {
+                finalized_at,
+                epoch,
+                inclusion: inclusion.map(Into::into),
+            };
+            finalized_cf.put(id, &data, OPERATION)?;
+            epoch_index_cf.put(&(epoch, *id), &(), OPERATION)?;
         }
 
         Ok(())
@@ -829,6 +848,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             self.db()
                 .cf(finalized_transaction::EpochIndex)?
                 .delete(&(link.epoch, *tx_id), OPERATION)?;
+            release_link(&self.db(), tx_id, &link)?;
         }
         finalized_cf.delete(tx_id, OPERATION)?;
 
@@ -1336,6 +1356,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         let head_cf = db.cf(substate::HeadIndex)?;
         let unpruned_cf = db.cf(substate::UnprunedDownedValuesIndex)?;
         let records_transitions = update_batch.records_transitions();
+        let mut heads = HashMap::<SubstateId, SubstateHeadData>::new();
 
         for (shard, updates) in update_batch.updates {
             for (state_version, updates) in updates {
@@ -1379,7 +1400,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
 
                             let address = rec.to_substate_address();
                             cf.put(&address, &rec, OPERATION)?;
-                            head_cf.put(rec.substate_id(), &SubstateHeadData { version, is_up: true }, OPERATION)?;
+                            fold_head(&mut heads, rec.substate_id(), SubstateHeadData { version, is_up: true });
 
                             transitions.push(StateTransitionRecordData {
                                 substate_address: address,
@@ -1395,14 +1416,10 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
                                 at_state_version: state_version,
                             });
                             cf.put(&address, &substate, OPERATION)?;
-                            head_cf.put(
-                                &substate.substate_id,
-                                &SubstateHeadData {
-                                    version: substate.version(),
-                                    is_up: false,
-                                },
-                                OPERATION,
-                            )?;
+                            fold_head(&mut heads, &substate.substate_id, SubstateHeadData {
+                                version: substate.version(),
+                                is_up: false,
+                            });
                             downed_substate_addresses.push(address);
 
                             transitions.push(StateTransitionRecordData {
@@ -1435,6 +1452,10 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
                 db.cf(StateTransitionCf)?
                     .put(&(shard, state_version), &transition, OPERATION)?;
             }
+        }
+
+        for (substate_id, head) in &heads {
+            head_cf.put(substate_id, head, OPERATION)?;
         }
 
         Ok(())
@@ -2047,25 +2068,26 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         transaction_ids: I,
     ) -> Result<(), StorageError> {
         const OPERATION: &str = "lock_conflicts_remove_by_transaction_ids";
-        let mut transaction_ids = transaction_ids.into_iter().peekable();
-        if transaction_ids.peek().is_none() {
+        let transaction_ids = transaction_ids.into_iter().collect::<HashSet<_>>();
+        if transaction_ids.is_empty() {
             return Ok(());
         }
 
         let db = self.db();
         let cf = db.cf(LockConflictCf)?;
         let index_cf = db.cf(lock_conflict::LockConflictBlockIdIndex)?;
-        let query = db.cf(lock_conflict::ByTransactionIdQuery)?;
 
-        for tx_id in transaction_ids {
-            for key in query.query_prefix_range_keys(Ordering::Ascending, tx_id)? {
-                cf.delete(&key, OPERATION)?;
-                // Delete if the dependent transaction and depending transaction are swapped
-                let (transaction_id, block_id, depends_on_tx_id) = key;
-                cf.delete(&(depends_on_tx_id, block_id, transaction_id), OPERATION)?;
-                index_cf.delete(&(block_id, transaction_id, depends_on_tx_id), OPERATION)?;
-                index_cf.delete(&(block_id, depends_on_tx_id, transaction_id), OPERATION)?;
+        let mut keys_to_remove = Vec::new();
+        for result in cf.key_iterator(Ordering::Ascending, OPERATION) {
+            let key @ (transaction_id, _, depends_on_tx_id) = result?;
+            if transaction_ids.contains(&transaction_id) || transaction_ids.contains(&depends_on_tx_id) {
+                keys_to_remove.push(key);
             }
+        }
+
+        for key @ (transaction_id, block_id, depends_on_tx_id) in keys_to_remove {
+            cf.delete(&key, OPERATION)?;
+            index_cf.delete(&(block_id, transaction_id, depends_on_tx_id), OPERATION)?;
         }
 
         Ok(())
@@ -2082,7 +2104,6 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             index_cf.delete(&key, OPERATION)?;
             let (block_id, transaction_id, depends_on_tx) = key;
             cf.delete(&(transaction_id, block_id, depends_on_tx), OPERATION)?;
-            cf.delete(&(depends_on_tx, block_id, transaction_id), OPERATION)?;
         }
 
         Ok(())
@@ -2223,6 +2244,23 @@ impl<TAddr> Drop for RocksDbStateStoreWriteTransaction<'_, TAddr> {
                 );
             }
         }
+    }
+}
+
+/// Folds `head` into `heads`, keeping the later of the two for `substate_id`: the higher version, and at the same
+/// version DOWN, since a version that is put down stays down. A batch holds whole state versions and a substate's
+/// versions only increase from one state version to the next, so what this keeps is the substate's head whatever order
+/// the batch lists its transitions in, and is never below the head already stored.
+fn fold_head(heads: &mut HashMap<SubstateId, SubstateHeadData>, substate_id: &SubstateId, head: SubstateHeadData) {
+    match heads.get_mut(substate_id) {
+        Some(current) => {
+            if (head.version, !head.is_up) > (current.version, !current.is_up) {
+                *current = head;
+            }
+        },
+        None => {
+            heads.insert(substate_id.clone(), head);
+        },
     }
 }
 
@@ -2405,14 +2443,49 @@ mod state_version_proofs {
             return Ok(());
         }
         citations.delete(&(*block_id, shard), OPERATION)?;
-        let remaining = db
-            .cf(BlockCommitProofCitationByBlockQuery)?
-            .query_prefix_range_keys(Ordering::Ascending, block_id)?;
-        if remaining.is_empty() {
+        delete_commit_proof_if_uncited(db, block_id)
+    }
+
+    /// Drops the citation of `block_id` by the finalized transaction link of `transaction_id`, and deletes the
+    /// block's commit proof once nothing cites it.
+    pub fn release_transaction_citation(
+        db: &DbWriteContext<'_>,
+        block_id: &BlockId,
+        transaction_id: &TransactionId,
+    ) -> Result<(), StorageError> {
+        const OPERATION: &str = "state_version_proofs::release_transaction_citation";
+        let citations = db.cf(BlockCommitProofTransactionCitationCf)?;
+        if !citations.exists(&(*block_id, *transaction_id), OPERATION)? {
+            return Ok(());
+        }
+        citations.delete(&(*block_id, *transaction_id), OPERATION)?;
+        delete_commit_proof_if_uncited(db, block_id)
+    }
+
+    fn delete_commit_proof_if_uncited(db: &DbWriteContext<'_>, block_id: &BlockId) -> Result<(), StorageError> {
+        const OPERATION: &str = "state_version_proofs::delete_commit_proof_if_uncited";
+        let cited_by_shard = db.cf(BlockCommitProofCitationByBlockQuery)?.exists_prefix(block_id)?;
+        let cited_by_transaction = db
+            .cf(BlockCommitProofTransactionCitationByBlockQuery)?
+            .exists_prefix(block_id)?;
+        if !cited_by_shard && !cited_by_transaction {
             db.cf(BlockCommitProofCf)?.delete(block_id, OPERATION)?;
         }
         Ok(())
     }
+}
+
+/// Drops what the finalized transaction link of `transaction_id` holds outside itself: the citation of its
+/// inclusion's block.
+fn release_link(
+    db: &DbWriteContext<'_>,
+    transaction_id: &TransactionId,
+    link: &FinalizedTransactionLinkData,
+) -> Result<(), StorageError> {
+    if let Some(inclusion) = &link.inclusion {
+        state_version_proofs::release_transaction_citation(db, &inclusion.block_id, transaction_id)?;
+    }
+    Ok(())
 }
 
 mod cleanup {
@@ -2459,6 +2532,7 @@ mod cleanup {
         let cf = db.cf(BlockCf)?;
         let committed_cf = db.cf(chain::CommittedParentChildChainIndex)?;
         let index_cf = db.cf(block::EpochHeightIndex)?;
+        let executed_cf = db.cf(block::ExecutedBlockIndex)?;
 
         // Don't delete epoch 0 blocks (i.e the zero block)
         let keys =
@@ -2470,6 +2544,7 @@ mod cleanup {
             cf.delete(&block_id, OPERATION)?;
             committed_cf.delete(&block_id, OPERATION)?;
             index_cf.delete(&(epoch, height, block_id), OPERATION)?;
+            executed_cf.delete(&block_id, OPERATION)?;
         }
         Ok(count)
     }
@@ -2504,6 +2579,9 @@ mod cleanup {
         let count = keys.len();
         for (epoch, tx_id) in keys {
             tx_cf.delete(&tx_id, OPERATION)?;
+            if let Some(link) = link_cf.get(&tx_id, OPERATION).optional()? {
+                release_link(db, &tx_id, &link)?;
+            }
             link_cf.delete(&tx_id, OPERATION)?;
             for (tx_id, block_id, epoch, height) in exec_query.query_prefix_range_keys(Ordering::default(), &tx_id)? {
                 exec_cf.delete(&(tx_id, block_id, epoch, height), OPERATION)?;

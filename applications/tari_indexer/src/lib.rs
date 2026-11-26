@@ -50,6 +50,7 @@ mod substate_cache;
 mod substate_manager;
 mod transaction_gossip;
 mod transaction_manager;
+mod validator_oracle_config;
 
 use std::fs;
 
@@ -166,12 +167,24 @@ where
         .map_err(|e| ExitError::new(ExitCode::IOError, e))?;
 
     let mut epoch_manager_events = services.epoch_manager.subscribe();
+    let mut epoch_events_closed = false;
 
     loop {
         tokio::select! {
-            Ok(event) = epoch_manager_events.recv() => {
-                if let Err(err) = handle_epoch_manager_event(&services, event).await {
-                    error!(target: LOG_TARGET, "Error handling epoch manager event: {}", err);
+            result = epoch_manager_events.recv(), if !epoch_events_closed => {
+                match result {
+                    Ok(event) => {
+                        if let Err(err) = handle_epoch_manager_event(&services, event).await {
+                            error!(target: LOG_TARGET, "Error handling epoch manager event: {}", err);
+                        }
+                    },
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        warn!(target: LOG_TARGET, "Epoch manager event subscriber lagged by {} event(s)", n);
+                    },
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        warn!(target: LOG_TARGET, "Epoch manager event stream closed");
+                        epoch_events_closed = true;
+                    },
                 }
             },
 

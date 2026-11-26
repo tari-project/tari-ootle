@@ -72,6 +72,9 @@ pub struct ParsedOotleAddress {
 /// Parse a bech32m Ootle address string into its components.
 pub fn parse_ootle_address(address: &str) -> Result<ParsedOotleAddress, OotleWasmError> {
     let parsed = OotleAddress::decode_bech32(address).map_err(|e| OotleWasmError::InvalidAddress(e.to_string()))?;
+    parsed
+        .validate()
+        .map_err(|e| OotleWasmError::InvalidAddress(e.to_string()))?;
 
     Ok(ParsedOotleAddress {
         owner_key: parsed.account_public_key().as_bytes().to_vec(),
@@ -211,6 +214,19 @@ mod tests {
     #[test]
     fn parse_invalid_address_fails() {
         assert!(parse_ootle_address("not_a_valid_address").is_err());
+    }
+
+    #[test]
+    fn parse_address_rejects_non_canonical_curve_points() {
+        use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
+
+        // [0xff; 32] is 32 bytes and bech32m-encodes cleanly, but is not a canonical Ristretto point.
+        let non_canonical = RistrettoPublicKeyBytes::from([0xff; 32]);
+        let forged = OotleAddress::new(Network::LocalNet, non_canonical, non_canonical).to_bech32_string();
+        assert!(matches!(
+            parse_ootle_address(&forged),
+            Err(OotleWasmError::InvalidAddress(_))
+        ));
     }
 
     #[test]

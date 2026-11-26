@@ -15,7 +15,6 @@ tari_ootle_wallet_crypto = { workspace = true, features = ["mmap-value-lookup"] 
 clap = { workspace = true, features = ["derive"] }
 futures = { workspace = true }
 human_bytes = { version = "0.4.3", default-features = false }
-humantime = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 

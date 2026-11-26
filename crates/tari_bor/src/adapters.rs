@@ -219,7 +219,9 @@ pub mod indexmap_codec {
                 for _ in 0..n {
                     let k = K::decode(d, ctx)?;
                     let v = V::decode(d, ctx)?;
-                    out.insert(k, v);
+                    if out.insert(k, v).is_some() {
+                        return Err(minicbor::decode::Error::message("duplicate key in IndexMap"));
+                    }
                 }
                 Ok(out)
             },
@@ -232,7 +234,9 @@ pub mod indexmap_codec {
                     }
                     let k = K::decode(d, ctx)?;
                     let v = V::decode(d, ctx)?;
-                    out.insert(k, v);
+                    if out.insert(k, v).is_some() {
+                        return Err(minicbor::decode::Error::message("duplicate key in IndexMap"));
+                    }
                 }
                 Ok(out)
             },
@@ -400,5 +404,30 @@ mod indexset_codec_tests {
         let mut d = Decoder::new(&[0x82, 0x01, 0x02]);
         let set = indexset_codec::decode::<(), u8, RandomState>(&mut d, &mut ()).unwrap();
         assert_eq!(set.into_iter().collect::<Vec<_>>(), vec![1, 2]);
+    }
+}
+
+#[cfg(all(test, feature = "indexmap"))]
+mod indexmap_codec_tests {
+    use std::collections::hash_map::RandomState;
+
+    use minicbor::Decoder;
+
+    use super::indexmap_codec;
+
+    #[test]
+    fn a_map_with_a_duplicate_key_is_rejected() {
+        // {1: 10, 1: 20} as a definite-length and an indefinite-length map.
+        for bytes in [
+            &[0xa2, 0x01, 0x0a, 0x01, 0x14][..],
+            &[0xbf, 0x01, 0x0a, 0x01, 0x14, 0xff][..],
+        ] {
+            let mut d = Decoder::new(bytes);
+            assert!(indexmap_codec::decode::<(), u8, u8, RandomState>(&mut d, &mut ()).is_err());
+        }
+
+        let mut d = Decoder::new(&[0xa2, 0x01, 0x0a, 0x02, 0x14]);
+        let map = indexmap_codec::decode::<(), u8, u8, RandomState>(&mut d, &mut ()).unwrap();
+        assert_eq!(map.into_iter().collect::<Vec<_>>(), vec![(1, 10), (2, 20)]);
     }
 }

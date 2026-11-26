@@ -247,13 +247,10 @@ mod tests {
     fn decode_fixed_hex_reports_decoded_byte_length_on_mismatch() {
         let short_hex = "00".repeat(31);
         let err = decode_secret_key(&short_hex, "mask").unwrap_err();
-        assert!(matches!(
-            err,
-            OotleWasmError::InvalidByteLength {
-                field: "mask",
-                expected: 32,
-                got: 31,
-            }
-        ));
+        assert!(matches!(err, OotleWasmError::InvalidByteLength {
+            field: "mask",
+            expected: 32,
+            got: 31,
+        }));
     }
 }

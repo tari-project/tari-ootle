@@ -1384,6 +1384,8 @@ fn resolve_foreign_input_pledges(
         }
     }
     Ok(resolved_inputs)
+}
+
 /// The lock a shard group takes on an input it holds but cannot execute against, from the transaction's
 /// declaration alone. Writing to a read-declared input aborts in the engine, so a read lock cannot be escaped by
 /// the transaction that asked for it. A substate that no transaction can write takes a read lock whatever was

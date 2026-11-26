@@ -2,6 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use anyhow::Context;
+use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 
 use crate::config::{Config, DatabaseConfig, WebServerConfig};
 
@@ -41,18 +42,20 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Current UTC time in RFC 3339, with fractional seconds only when they are non-zero.
+fn now_rfc3339() -> String {
+    let now = OffsetDateTime::now_utc();
+    // Rfc3339 formatting fails only for years outside 0..=9999.
+    now.format(&Rfc3339).unwrap_or_else(|_| now.to_string())
+}
+
 fn init_logging() {
     fern::Dispatch::new()
         .format(|out, message, record| {
             if record.level() == log::Level::Info {
                 out.finish(format_args!("{}", message))
             } else {
-                out.finish(format_args!(
-                    "[{}][{}] {}",
-                    humantime::format_rfc3339(std::time::SystemTime::now()),
-                    record.level(),
-                    message
-                ))
+                out.finish(format_args!("[{}][{}] {}", now_rfc3339(), record.level(), message))
             }
         })
         .level(log::LevelFilter::Info)

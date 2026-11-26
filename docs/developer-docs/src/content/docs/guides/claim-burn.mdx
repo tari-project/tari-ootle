@@ -26,7 +26,7 @@ exactly the amount that L2 supply increases.
    │ Burn transaction         │   claim proof   │ ClaimBurn instruction    │
    │  • burn output           │ ──────────────▶ │  • verify proof          │
    │  • commitment C = vH+kG  │                 │  • write tombstone       │
-   │  • ownership proof       │                 │  • mint stealth UTXO     │
+   │  • ownership proof       │                 │  • reveal TARI bucket    │
    └──────────────────────────┘                 └──────────────────────────┘
         value leaves L1                              value appears on L2
 ```
@@ -163,27 +163,33 @@ validator in the committee reaches the same verdict from the same inputs.
 ## Execution
 
 `ClaimBurn` is a transaction instruction. It may appear in the fee instructions, which lets a brand-new account pay
-its first fee from the funds it is claiming. On success the engine writes two substates:
+its first fee from the funds it is claiming. On success the engine writes the tombstone and returns the burnt value
+as a revealed TARI bucket:
 
 ```
-   ClaimBurn { claim_proof, output_data }
+   ClaimBurn { claim }
       │
       ├─▶ verify (see above)
       │
       ├─▶ ClaimedOutputTombstone @ address(C)      { value }
       │
-      └─▶ Utxo @ address(TARI, C)                  stealth UTXO worth v,
-                                                   spendable by the claim key S
+      └─▶ bucket                                   v revealed TARI, the instruction's output
 ```
 
-The UTXO is minted directly into the genesis TARI resource with the claim key `S` as the spend authorization, so the
-claimant alone can spend it, whoever sealed the claim. A typical claim transaction immediately spends it in a stealth transfer: a small revealed amount pays
-the fee and the remainder becomes a stealth output owned by the claiming account.
+The value `v` is already public in the claim proof and bound to `C` by the ownership proof, so revealing it costs no
+privacy. The bucket must leave the transaction like any other: a claim that leaves it in the workspace is rejected.
+Because `S` signs the claim transaction, the claimant decides where the bucket goes, whoever sealed it. A typical
+claim pays the bucket straight into a stealth transfer: a small revealed amount pays the fee and the remainder
+becomes a stealth output owned by the claiming account.
+
+The burner knows `C`'s opening, so a stealth transfer of theirs can create, and spend, a UTXO at `address(TARI, C)`.
+The claim creates nothing at that address, so such a UTXO has no bearing on it.
 
 ```
    fee instructions:
-     ClaimBurn(proof, output_data)             mint UTXO(C) owned by S
-     StealthTransfer { input: UTXO(C),
+     ClaimBurn(proof)                          bucket of v TARI
+     PutLastInstructionOutputOnWorkspace("claimed")
+     StealthTransfer { revealed input: "claimed",
                        reveal: max_fee,        → bucket used to pay the fee
                        output: stealth → account }
 ```

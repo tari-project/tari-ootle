@@ -96,3 +96,49 @@ impl ConfidentialOutput {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use tari_ootle_wallet_sdk::models::KeyId;
+    use tari_template_lib_types::{ComponentAddress, ObjectKey, VaultId};
+    use time::macros::datetime;
+
+    use super::*;
+    use crate::serialization::{serialize_hex, serialize_json};
+
+    fn sample_confidential_output(value: i64) -> (ConfidentialOutput, String, String) {
+        let account = ComponentAddress::from_array([0x11; ObjectKey::LENGTH]);
+        let vault = VaultId::new(ObjectKey::from_array([0x22; ObjectKey::LENGTH]));
+        let key_id = KeyId::imported(1);
+        let output = ConfidentialOutput {
+            id: 1,
+            account_id: 1,
+            vault_id: 1,
+            commitment: serialize_hex([0x33; 32]),
+            value,
+            sender_public_nonce: None,
+            view_only_key_id: serialize_json(&key_id).unwrap(),
+            owner_key_id: None,
+            public_asset_tag: None,
+            memo_json: None,
+            status: "Unspent".to_string(),
+            locked_at: None,
+            locked_by_proof: None,
+            encrypted_data: vec![0u8; EncryptedData::min_size()],
+            created_at: datetime!(2026-01-01 00:00:00),
+            updated_at: datetime!(2026-01-01 00:00:00),
+        };
+        (output, account.to_string(), vault.to_string())
+    }
+
+    #[test]
+    fn try_into_output_round_trips_u64_max_value() {
+        let (valid, account, vault) = sample_confidential_output(500);
+        let model = valid.try_into_output(&account, &vault).unwrap();
+        assert_eq!(model.value, 500u64);
+
+        let (max_val, account, vault) = sample_confidential_output(u64::MAX as i64);
+        let model = max_val.try_into_output(&account, &vault).unwrap();
+        assert_eq!(model.value, u64::MAX);
+    }
+}

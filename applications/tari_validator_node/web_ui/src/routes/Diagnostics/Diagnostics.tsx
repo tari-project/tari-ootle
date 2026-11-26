@@ -27,7 +27,7 @@ import ToggleButtonGroup from "@mui/material/ToggleButtonGroup";
 import Tooltip from "@mui/material/Tooltip";
 import Typography from "@mui/material/Typography";
 import type { DiagnosticEventRecord, DiagnosticLevel } from "@tari-project/ootle-ts-bindings";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   IoCheckmarkCircleOutline,
   IoChevronDown,
@@ -198,10 +198,18 @@ export default function Diagnostics() {
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [isClearing, setIsClearing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now());
+  const requestIdRef = useRef(0);
+
+  useEffect(() => {
+    return () => {
+      requestIdRef.current += 1;
+    };
+  }, []);
 
   const filter = useMemo(
     () => ({
@@ -214,21 +222,36 @@ export default function Diagnostics() {
   );
 
   const load = useCallback(() => {
+    const requestId = ++requestIdRef.current;
+    setIsLoadingMore(false);
     return getDiagnosticEvents({ ...filter, before_id: null, limit: PAGE_SIZE })
       .then((response) => {
+        if (requestIdRef.current !== requestId) {
+          return;
+        }
         setEvents(response.events);
         setCursor(response.next_cursor);
         setError(null);
         setNow(Date.now());
       })
       .catch((reason) => {
+        if (requestIdRef.current !== requestId) {
+          return;
+        }
         console.error(reason);
         setError("Failed to load diagnostic events. Check the console for details.");
       })
-      .finally(() => setIsLoading(false));
+      .finally(() => {
+        if (requestIdRef.current === requestId) {
+          setIsLoading(false);
+        }
+      });
   }, [filter]);
 
   useEffect(() => {
+    setConfirmClear(false);
+    setEvents([]);
+    setCursor(null);
     setIsLoading(true);
     load();
   }, [load]);
@@ -238,40 +261,64 @@ export default function Diagnostics() {
   const isPaged = events.length > PAGE_SIZE;
 
   useEffect(() => {
-    if (!autoRefresh || isPaged) {
+    if (!autoRefresh || isPaged || isLoadingMore || isClearing) {
       return;
     }
     const id = window.setInterval(() => load(), AUTO_REFRESH_MS);
     return () => window.clearInterval(id);
-  }, [autoRefresh, isPaged, load]);
+  }, [autoRefresh, isPaged, isLoadingMore, isClearing, load]);
 
   const loadMore = () => {
-    if (cursor === null) {
+    if (cursor === null || isLoadingMore || isClearing) {
       return;
     }
+    const requestId = ++requestIdRef.current;
     setIsLoadingMore(true);
     getDiagnosticEvents({ ...filter, before_id: cursor, limit: PAGE_SIZE })
       .then((response) => {
+        if (requestIdRef.current !== requestId) {
+          return;
+        }
         setEvents((current) => [...current, ...response.events]);
         setCursor(response.next_cursor);
+        setError(null);
+        setNow(Date.now());
       })
       .catch((reason) => {
+        if (requestIdRef.current !== requestId) {
+          return;
+        }
         console.error(reason);
         setError("Failed to load more diagnostic events. Check the console for details.");
       })
-      .finally(() => setIsLoadingMore(false));
+      .finally(() => {
+        if (requestIdRef.current === requestId) {
+          setIsLoadingMore(false);
+        }
+      });
   };
 
   const doClear = () => {
+    if (isClearing) {
+      return;
+    }
+    const clearRequestId = ++requestIdRef.current;
     setConfirmClear(false);
+    setIsClearing(true);
+    setIsLoadingMore(false);
     clearDiagnosticEvents(filter)
       .then((response) => {
         setNotice(`Cleared ${response.deleted} event${response.deleted === 1 ? "" : "s"}.`);
-        return load();
+        if (requestIdRef.current === clearRequestId) {
+          return load();
+        }
       })
       .catch((reason) => {
         console.error(reason);
         setError("Failed to clear diagnostic events. Check the console for details.");
+      })
+      .finally(() => {
+        setIsClearing(false);
       });
   };
 
@@ -362,16 +409,18 @@ export default function Diagnostics() {
                 />
               </Tooltip>
               <Tooltip title="Refresh now">
-                <IconButton onClick={() => load()} aria-label="Refresh">
-                  <IoRefresh size={20} />
-                </IconButton>
+                <span>
+                  <IconButton onClick={() => load()} disabled={isClearing} aria-label="Refresh">
+                    <IoRefresh size={20} />
+                  </IconButton>
+                </span>
               </Tooltip>
               <Button
                 variant="outlined"
                 color="error"
                 startIcon={<IoTrashOutline size={16} />}
                 onClick={() => setConfirmClear(true)}
-                disabled={events.length === 0}
+                disabled={events.length === 0 || isClearing}
               >
                 Clear{isFiltered ? " filtered" : " all"}
               </Button>
@@ -382,10 +431,10 @@ export default function Diagnostics() {
                 severity="warning"
                 action={
                   <Stack direction="row" spacing={1}>
-                    <Button size="small" onClick={() => setConfirmClear(false)}>
+                    <Button size="small" onClick={() => setConfirmClear(false)} disabled={isClearing}>
                       Cancel
                     </Button>
-                    <Button size="small" color="error" variant="contained" onClick={doClear}>
+                    <Button size="small" color="error" variant="contained" onClick={doClear} disabled={isClearing}>
                       Delete
                     </Button>
                   </Stack>
@@ -414,15 +463,17 @@ export default function Diagnostics() {
                 <CircularProgress />
               </Box>
             ) : events.length === 0 ? (
-              <Stack alignItems="center" spacing={1.5} sx={{ py: 6, opacity: 0.6 }}>
-                <IoCheckmarkCircleOutline size={48} color={theme.palette.primary.main} />
-                <Typography variant="h5">Nothing to report</Typography>
-                <Typography variant="body2">
-                  {isFiltered
-                    ? "No events match the current filters."
-                    : "This node has not recorded any diagnostic events."}
-                </Typography>
-              </Stack>
+              error === null && (
+                <Stack alignItems="center" spacing={1.5} sx={{ py: 6, opacity: 0.6 }}>
+                  <IoCheckmarkCircleOutline size={48} color={theme.palette.primary.main} />
+                  <Typography variant="h5">Nothing to report</Typography>
+                  <Typography variant="body2">
+                    {isFiltered
+                      ? "No events match the current filters."
+                      : "This node has not recorded any diagnostic events."}
+                  </Typography>
+                </Stack>
+              )
             ) : (
               <>
                 <TableContainer>
@@ -446,7 +497,7 @@ export default function Diagnostics() {
 
                 <Stack direction="row" spacing={2} alignItems="center" justifyContent="center">
                   {cursor !== null && (
-                    <Button variant="outlined" onClick={loadMore} disabled={isLoadingMore}>
+                    <Button variant="outlined" onClick={loadMore} disabled={isLoadingMore || isClearing}>
                       {isLoadingMore ? "Loading…" : "Load more"}
                     </Button>
                   )}

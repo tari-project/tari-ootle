@@ -5,10 +5,13 @@ import { bech32m, Decoded } from "bech32";
 import { Network } from "../types/Network";
 import { OotleAddress } from "../types/OotleAddress";
 
+const PUBLIC_KEY_LENGTH = 32;
+const KEYS_PAYLOAD_LENGTH = PUBLIC_KEY_LENGTH * 2;
 const DESTINATION_TAG_MAX_LENGTH = 64;
+const MAX_PAYLOAD_LENGTH = KEYS_PAYLOAD_LENGTH + DESTINATION_TAG_MAX_LENGTH;
 
 // Longest HRP (8) + separator (1) + 64 key bytes and a full destination tag as 5-bit words + checksum (6).
-const MAX_LENGTH_LIMIT = 8 + 1 + Math.ceil(((64 + DESTINATION_TAG_MAX_LENGTH) * 8) / 5) + 6;
+const MAX_LENGTH_LIMIT = 8 + 1 + Math.ceil((MAX_PAYLOAD_LENGTH * 8) / 5) + 6;
 
 export type DecodedOotleAddress = {
   network: Network;
@@ -39,8 +42,11 @@ export function decodeOotleAddress(address: OotleAddress): DecodedOotleAddress {
   const { prefix, words }: Decoded = bech32m.decode(address, MAX_LENGTH_LIMIT);
   const data = bech32m.fromWords(words);
 
-  if (data.length < 64) {
-    throw new Error(`Invalid Ootle address length: ${data.length}, expected 64`);
+  if (data.length < KEYS_PAYLOAD_LENGTH) {
+    throw new Error(`Invalid Ootle address length: ${data.length}, expected at least ${KEYS_PAYLOAD_LENGTH}`);
+  }
+  if (data.length > MAX_PAYLOAD_LENGTH) {
+    throw new Error(`Invalid Ootle address length: ${data.length}, maximum is ${MAX_PAYLOAD_LENGTH}`);
   }
 
   const accountPublicKey = buf2hex(data.slice(0, 32));
@@ -126,6 +132,12 @@ export function encodeOotleAddress(decoded: DecodedOotleAddress): OotleAddress {
       ? new TextEncoder().encode(decoded.destinationTag)
       : decoded.destinationTag
     : new Uint8Array();
+
+  if (destinationTagBytes.length > DESTINATION_TAG_MAX_LENGTH) {
+    throw new Error(
+      `Destination tag length ${destinationTagBytes.length} exceeds maximum of ${DESTINATION_TAG_MAX_LENGTH} bytes`,
+    );
+  }
 
   const addressBytes = new Uint8Array(accountPubKeyBytes.length + viewOnlyKeyBytes.length + destinationTagBytes.length);
   addressBytes.set(accountPubKeyBytes, 0);

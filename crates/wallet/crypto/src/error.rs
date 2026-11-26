@@ -11,8 +11,6 @@ pub enum StealthProofError {
     RangeProof(RangeProofError),
     #[error("Aead error")]
     AeadError,
-    #[error("Negative amount")]
-    NegativeAmount,
 }
 
 impl From<aead::Error> for StealthProofError {

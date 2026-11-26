@@ -32,7 +32,8 @@ import useMediaQuery from "@mui/material/useMediaQuery";
 import useAccountStore, { setAccount, setOotleAddress } from "@store/accountStore";
 import { AccountsCreateFreeTestCoinsResponse, substateIdToString } from "@tari-project/ootle-ts-bindings";
 import { settingsGet, settingsSet } from "@utils/json_rpc";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { applyClaimSuccess, markAccountClaimed } from "./claimCoinsHelpers";
 
 function ClaimCoinsButton() {
   const { mutate: claimTestnetFaucetFunds, isPending } = useAccountsCreateFreeTestCoins();
@@ -46,9 +47,12 @@ function ClaimCoinsButton() {
   const isLg = useMediaQuery(theme.breakpoints.up("md"));
 
   const accountAddress = account ? substateIdToString(account.component_address) : null;
+  const activeAccountRef = useRef<string | null>(accountAddress);
+  activeAccountRef.current = accountAddress;
   const { data: faucet } = useFaucetBalance(isTestnet && !!accountAddress && !hasClaimed);
 
   useEffect(() => {
+    setHasClaimed(false);
     if (!accountAddress) return;
     let cancelled = false;
     settingsGet()
@@ -65,23 +69,24 @@ function ClaimCoinsButton() {
     };
   }, [accountAddress]);
 
-  const markClaimed = useCallback(async () => {
-    if (!accountAddress) return;
-    setHasClaimed(true);
+  const markClaimed = useCallback(async (targetAddress: string) => {
     try {
-      const current = await settingsGet();
-      if (current.claimed_accounts.includes(accountAddress)) return;
-      const updated = [...current.claimed_accounts, accountAddress];
-      await settingsSet({
-        indexer_url: null,
-        indexer_urls: null,
-        advanced_ui_features: null,
-        claimed_accounts: updated,
+      await markAccountClaimed(targetAddress, {
+        getActiveAccount: () => activeAccountRef.current,
+        setHasClaimed,
+        getSettings: settingsGet,
+        saveClaimedAccounts: (claimed_accounts) =>
+          settingsSet({
+            indexer_url: null,
+            indexer_urls: null,
+            advanced_ui_features: null,
+            claimed_accounts,
+          }),
       });
     } catch (e) {
       console.error("Failed to persist claimed account:", e);
     }
-  }, [accountAddress]);
+  }, []);
 
   if (!account || !accountAddress) {
     return <></>;
@@ -94,9 +99,10 @@ function ClaimCoinsButton() {
   const faucetIsEmpty = !!faucet && BigInt(faucet.balance) < BigInt(faucet.claim_amount);
 
   const onClaimFreeCoins = () => {
+    const claimedAddress = accountAddress;
     claimTestnetFaucetFunds(
       {
-        account: { ComponentAddress: accountAddress },
+        account: { ComponentAddress: claimedAddress },
         // The claim creates the account and funds it, so it pays for a component, a vault, a badge
         // and the receipt. Allocated well above that — the excess is refunded, and too low a value
         // rejects the claim after the funds appear to have arrived.
@@ -104,9 +110,12 @@ function ClaimCoinsButton() {
       },
       {
         onSuccess: async (resp: AccountsCreateFreeTestCoinsResponse) => {
-          setAccount(resp.account);
-          setOotleAddress(resp.address);
-          markClaimed();
+          applyClaimSuccess(claimedAddress, resp, {
+            getActiveAccount: () => activeAccountRef.current,
+            setAccount,
+            setOotleAddress,
+          });
+          void markClaimed(claimedAddress);
           showSuccess("Successfully claimed testnet coins!");
           await queryClient.invalidateQueries({
             predicate: (query) => {
@@ -123,7 +132,7 @@ function ClaimCoinsButton() {
           if ((error?.cause as any)?.code === 1002) {
             showError("The testnet faucet is empty. Burn on L1 to claim tTARI instead.");
           } else if ((error?.cause as any)?.code === 1001) {
-            markClaimed();
+            void markClaimed(claimedAddress);
             showError("You have already claimed your testnet funds. Each account can only claim once.");
           } else {
             showError(error?.message || "Failed to claim testnet funds. Please try again.");

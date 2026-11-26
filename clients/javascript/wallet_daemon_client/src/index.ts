@@ -80,14 +80,8 @@ import type {
   GetNftRequest,
   GetValidatorFeesRequest,
   GetValidatorFeesResponse,
-  KeysCreateRequest,
-  KeysCreateResponse,
   KeysImportRequest,
   KeysImportResponse,
-  KeysListRequest,
-  KeysListResponse,
-  KeysSetActiveRequest,
-  KeysSetActiveResponse,
   ListNftsRequest,
   ListNftsResponse,
   MintFaucetNftRequest,
@@ -576,18 +570,6 @@ export class WalletDaemonClient<T extends RpcTransport = FetchRpcTransport> {
 
   public getFaucetBalance(params: AccountsGetFaucetBalanceRequest): Promise<AccountsGetFaucetBalanceResponse> {
     return this.sendRequest("accounts.get_faucet_balance", params);
-  }
-
-  public createKey(params: KeysCreateRequest): Promise<KeysCreateResponse> {
-    return this.sendRequest("keys.create", params);
-  }
-
-  public keysSetActive(params: KeysSetActiveRequest): Promise<KeysSetActiveResponse> {
-    return this.sendRequest("keys.set_active", params);
-  }
-
-  public listKeys(params: KeysListRequest): Promise<KeysListResponse> {
-    return this.sendRequest("keys.list", params);
   }
 
   public importKey(params: KeysImportRequest): Promise<KeysImportResponse> {

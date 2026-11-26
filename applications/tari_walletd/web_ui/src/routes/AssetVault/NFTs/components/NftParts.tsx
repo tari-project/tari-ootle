@@ -40,7 +40,9 @@ import {
 } from "@mui/material";
 import { convertCborValue, type NonFungibleToken } from "@tari-project/ootle-ts-bindings";
 import { displayNftId, shortenSubstateId } from "@utils/helpers";
+import type { SyntheticEvent } from "react";
 import { Fragment } from "react/jsx-runtime";
+import { extractNftMetadata, formatNftDataValue, getNftImageUrl, isPlainRecord } from "./nftData";
 import SendNft from "./SendNft";
 
 const ERR_IMG =
@@ -55,8 +57,8 @@ interface NftItemProps {
 
 function NftCard({ nft, selected, selectDisabled, onToggleSelect }: NftItemProps) {
   const mutableData = convertCborValue(nft.mutable_data);
-  const data = convertCborValue(nft.data) as Record<string, any> | undefined;
-  const imageUrl = mutableData?.image_url;
+  const data = convertCborValue(nft.data);
+  const imageUrl = getNftImageUrl(mutableData);
 
   return (
     <Grid size={{ xs: 12, sm: 6, md: 4, lg: 3 }}>
@@ -77,11 +79,13 @@ function NftCard({ nft, selected, selectDisabled, onToggleSelect }: NftItemProps
         <CardMedia
           component="img"
           height="200"
-          image={imageUrl || "/api/placeholder/300/200"}
+          image={imageUrl || ERR_IMG}
           alt={`NFT ${displayNftId(nft.nft_id)}`}
-          style={{ objectFit: "cover", backgroundColor: "grey.200" }}
-          onError={(e: any) => {
-            e.target.src = ERR_IMG;
+          sx={{ objectFit: "cover", backgroundColor: "grey.200" }}
+          onError={(e: SyntheticEvent<HTMLImageElement>) => {
+            if (e.currentTarget.src !== ERR_IMG) {
+              e.currentTarget.src = ERR_IMG;
+            }
           }}
         />
         <CardContent style={{ flexGrow: 1, display: "flex", flexDirection: "column", gap: 8 }}>
@@ -106,7 +110,7 @@ function NftCard({ nft, selected, selectDisabled, onToggleSelect }: NftItemProps
           </Stack>
 
           <Divider />
-          {data ? <NftData data={data} /> : null}
+          {isPlainRecord(data) ? <NftData data={data} /> : null}
 
           <SendNft nftId={nft.nft_id} resourceAddress={nft.resource_address} />
         </CardContent>
@@ -115,18 +119,15 @@ function NftCard({ nft, selected, selectDisabled, onToggleSelect }: NftItemProps
   );
 }
 
-function NftData({ data }: { data: Record<string, any> }) {
+function NftData({ data }: { data: Record<string, unknown> }) {
   return (
     <>
-      {Object.keys(data).map((key, i) => {
-        const value = data[key];
-        return (
-          <Fragment key={i}>
-            <Typography variant="subtitle2">{key}</Typography>
-            <CopyAddress address={String(value)} />
-          </Fragment>
-        );
-      })}
+      {Object.entries(data).map(([key, value]) => (
+        <Fragment key={key}>
+          <Typography variant="subtitle2">{key}</Typography>
+          <CopyAddress address={formatNftDataValue(value)} />
+        </Fragment>
+      ))}
     </>
   );
 }
@@ -134,19 +135,8 @@ function NftData({ data }: { data: Record<string, any> }) {
 function NftRow({ nft, selected, selectDisabled, onToggleSelect }: NftItemProps) {
   const mutableData = convertCborValue(nft.mutable_data);
   const data = convertCborValue(nft.data);
-  const imageUrl = mutableData?.image_url;
-
-  const metadata: [string, string][] = [];
-  if (data && typeof data === "object") {
-    let limit = 5;
-    for (const [key, value] of Object.entries(data)) {
-      if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
-        metadata.push([key, value.toString()]);
-        limit -= 1;
-        if (limit === 0) break;
-      }
-    }
-  }
+  const imageUrl = getNftImageUrl(mutableData);
+  const metadata = extractNftMetadata(data);
 
   return (
     <TableRow>
@@ -159,7 +149,7 @@ function NftRow({ nft, selected, selectDisabled, onToggleSelect }: NftItemProps)
         <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
           <Avatar
             src={imageUrl}
-            style={{
+            sx={{
               width: 60,
               height: 60,
               backgroundColor: "grey.200",
@@ -178,7 +168,7 @@ function NftRow({ nft, selected, selectDisabled, onToggleSelect }: NftItemProps)
       </DataTableCell>
       <DataTableCell>
         {metadata.map(([key, value]) => (
-          <Typography variant="body2" key={`meta_item_${key.slice(0, 4)}:${value}`}>
+          <Typography variant="body2" key={key}>
             <strong>{key}:</strong> {value}
           </Typography>
         ))}

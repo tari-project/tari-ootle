@@ -17,7 +17,6 @@ use tari_crypto::{keys::PublicKey as _, ristretto::RistrettoPublicKey};
 use tari_engine_types::{
     commit_result::{ExecutionFailureCode, RejectReason},
     component::derive_component_address_from_public_key,
-    confidential::ClaimBurnOutputData,
     fees::FEE_ESTIMATE_ALLOWANCE,
     stealth::{ClaimBurnShape, declared_input_bytes, persisted_utxo_bytes},
     substate::SubstateId,
@@ -51,9 +50,11 @@ use tari_ootle_wallet_sdk::{
         stealth_transfer::{StealthTransferApiError, StealthTransferParams, TransferOutput, TransferStatementSpec},
         substate::{SubstateApiError, ValidatorScanResult},
         transaction::TransactionApiError,
+        validator_set::ValidatorSetApiError,
     },
     models::{
         AccountWithAddress,
+        DerivedKeyIndex,
         KeyBranch,
         NewAccountData,
         TransactionContext,
@@ -173,20 +174,7 @@ pub async fn handle_create(
         .unwrap_or_else(|| accounts_api.has_default_account().map(|b| !b))?;
 
     ensure_seed_recovery_finished(sdk)?;
-    let owner_address = match req.key_index {
-        Some(id) => sdk.key_manager_api().derive_account_address(id)?,
-        None => sdk.key_manager_api().next_account_address()?,
-    };
-
-    let acc = accounts_api
-        .create_account(req.account_name.as_deref(), set_as_default, owner_address)
-        .map_err(|e| {
-            if e.is_name_exists_error() {
-                invalid_request(e)
-            } else {
-                general_error(e)
-            }
-        })?;
+    let acc = create_derived_account(context, req.account_name.as_deref(), set_as_default, req.key_index)?;
 
     info!(
         target: LOG_TARGET,
@@ -245,20 +233,12 @@ pub async fn handle_create_or_get(
         .unwrap_or_else(|| accounts_api.has_default_account().map(|b| !b))?;
 
     ensure_seed_recovery_finished(sdk)?;
-    let wallet_keys = match req.key_index {
-        Some(id) => sdk.key_manager_api().derive_account_address(id)?,
-        None => sdk.key_manager_api().next_account_address()?,
-    };
-
-    let acc = accounts_api
-        .create_account(req.account.as_ref().and_then(|a| a.name()), set_as_default, wallet_keys)
-        .map_err(|e| {
-            if e.is_name_exists_error() {
-                invalid_request(e)
-            } else {
-                general_error(e)
-            }
-        })?;
+    let acc = create_derived_account(
+        context,
+        req.account.as_ref().and_then(|a| a.name()),
+        set_as_default,
+        req.key_index,
+    )?;
 
     info!(
         target: LOG_TARGET,
@@ -269,6 +249,27 @@ pub async fn handle_create_or_get(
         account: acc.account,
         address: acc.address,
         created: true,
+    })
+}
+
+/// Creates a derived account at `key_index`, or at the lowest account key index no account uses.
+fn create_derived_account(
+    context: &HandlerContext,
+    account_name: Option<&str>,
+    is_default: bool,
+    key_index: Option<DerivedKeyIndex>,
+) -> Result<AccountWithAddress, anyhow::Error> {
+    let accounts_api = context.wallet_sdk().accounts_api();
+    let created = match key_index {
+        Some(index) => accounts_api.create_account_at_index(account_name, is_default, index),
+        None => accounts_api.create_next_account(account_name, is_default),
+    };
+    created.map_err(|e| {
+        if e.is_name_exists_error() || e.is_account_exists_error() {
+            invalid_request(e)
+        } else {
+            general_error(e)
+        }
     })
 }
 
@@ -753,7 +754,7 @@ pub(crate) async fn execute_claim_burn(
     })
 }
 
-/// Decrypts the burn proof and builds the claim transaction, signed by the claim key.
+/// Builds the claim transaction, signed by the claim key.
 #[allow(clippy::too_many_lines)]
 fn build_claim_burn_transaction(
     sdk: &crate::WalletSdk,
@@ -764,10 +765,7 @@ fn build_claim_burn_transaction(
     is_dry_run: bool,
     input_pricing: &DeclaredInputPricing,
 ) -> Result<Transaction, anyhow::Error> {
-    let ClaimBurnProofContents {
-        encrypted_data: claimed_encrypted_data,
-        claim_proof,
-    } = proof_contents;
+    let ClaimBurnProofContents { claim_proof } = proof_contents;
 
     let account_owner_key_id = account
         .owner_key_id()
@@ -821,16 +819,8 @@ fn build_claim_burn_transaction(
         stealth_claim_pk,
     );
 
-    let decrypted = sdk.stealth_crypto_api().decrypt_utxo_data(
-        &claimed_encrypted_data,
-        &claim_proof.commitment,
-        account_owner_key.secret(),
-        &sender_offset_pub_key,
-        true,
-    )?;
-
-    // The secrets required to spend the claimed output
-    let claimed = decrypted.into_mask_and_value();
+    // The ownership proof checked above binds the claimed value to the burn commitment
+    let claimed_value = claim_proof.value;
 
     let mask = sdk.key_manager_api().next_key(KeyBranch::StealthMask)?;
     let (nonce, output_public_nonce) = RistrettoPublicKey::random_keypair(&mut rand::rng());
@@ -853,17 +843,10 @@ fn build_claim_burn_transaction(
         &nonce,
     );
 
-    // We'll create an output with the same encrypted data that was used on L1 burn. Note that this is not strictly
-    // necessary. The engine will create the output with whatever you give it, so we could reencrypt.
-    let output_data = ClaimBurnOutputData {
-        encrypted_data: claimed_encrypted_data,
-    };
-
     // Builds the claim revealing `fee` out of the claimed value, returning the signed transaction and the
     // statement that reveals the fee.
     let build = |fee: u64| -> Result<(Transaction, StealthTransferStatement), anyhow::Error> {
-        let final_amount = claimed
-            .value
+        let final_amount = claimed_value
             .checked_sub(fee)
             .ok_or_else(|| invalid_params("max_fee", Some("more fees paid than claimed amount")))?;
 
@@ -893,8 +876,8 @@ fn build_claim_burn_transaction(
         };
 
         let pay_fee_and_mint_output = sdk.stealth_crypto_api().generate_transfer_statement(
-            iter::once(StealthInputWitness::new(claimed.clone())),
-            Amount::zero(),
+            iter::empty::<StealthInputWitness>(),
+            Amount::from(claimed_value),
             iter::once(&output_witness),
             // The claim key signs this transaction, so it is the only badge in scope to take the revealed fee.
             Some(RevealedOutput::new(Amount::from(fee), stealth_claim_pk)),
@@ -903,10 +886,11 @@ fn build_claim_burn_transaction(
         let transaction = Transaction::builder(network.as_byte(), max_epoch)
             .with_fee_instructions_builder(|fee_builder| {
                 fee_builder
-                    // Mint the UTXO
-                    .claim_burn(claim_proof.clone(), output_data.clone())
-                    // Transfer the UTXO to another UTXO with some revealed output for fees
-                    .stealth_transfer(TARI_TOKEN, pay_fee_and_mint_output.clone())
+                    // Reveal the claimed value in a bucket
+                    .claim_burn(claim_proof.clone())
+                    .put_last_instruction_output_on_workspace("claimed")
+                    // Pay the bucket into a stealth output, revealing the fee
+                    .stealth_transfer_with_input_bucket(TARI_TOKEN, pay_fee_and_mint_output.clone(), "claimed")
                     // Pay fee
                     .put_last_instruction_output_on_workspace("fee")
                     .pay_fee_from_bucket("fee")
@@ -1422,9 +1406,6 @@ pub async fn handle_confidential_transfer(
     let sdk = context.wallet_sdk().clone();
     let notifier = context.notifier().clone();
 
-    if req.amount.is_negative() {
-        return Err(invalid_params("amount", Some("must be positive")));
-    }
     let account = get_account_or_default(req.account.as_ref(), &sdk.accounts_api())?;
     enforce_scopes(&granted, &[Permission::Transfer(
         Crud::Create,
@@ -1530,6 +1511,14 @@ pub async fn handle_stealth_transfer(
         Crud::Create,
         Some(*owner_account.component_address()),
     )])?;
+    // Naming exact UTXOs (and thus learning their decrypted totals through the balance check) requires scoped
+    // stealth-UTXO read authority in addition to the transfer-create scope.
+    if req.inputs.is_some() {
+        enforce_scopes(&granted, &[Permission::StealthUtxos(
+            Crud::Read,
+            Some(*owner_account.component_address()),
+        )])?;
+    }
     if owner_account.owner_key_id().is_none() {
         return Err(invalid_params(
             "owner_account",
@@ -1650,6 +1639,7 @@ pub async fn handle_stealth_transfer(
         max_epoch: context.transaction_max_epoch().await?,
         fee_params: req.fee_params,
         input_selection: req.input_selection,
+        inputs: req.inputs,
         resource_address: req.resource_address,
         max_fee: req.max_fee,
         badge_usage: req.badge_usage,
@@ -1708,21 +1698,17 @@ pub async fn handle_stealth_transfer(
             };
 
             let transaction = transfer.transaction;
+            let spent_inputs = transfer.inputs;
             let main_pk = transfer.main_signer.public_key().to_byte_type();
 
-            // Signer api which sign transaction types that require the seal signer public key
-            let main_signer = sdk.signer_api().with_context(&main_pk);
-            // Add additional signature if needed
-            let transaction = match transfer.additional_signer.as_ref() {
-                Some(s) => main_signer.sign(s.key_id, transaction)?,
-                None => transaction.finish(),
-            };
-
-            // Add required UTXO spend key signatures
-            let transaction = transfer
-                .utxo_spend_keys
-                .iter()
-                .try_fold(transaction, |tx, key| main_signer.sign_with_stealth_key(key, tx))?;
+            // The additional signer and every UTXO spend key authorize together, each over the set of all their keys.
+            let additional_signers: Vec<_> = transfer.additional_signer.iter().map(|s| s.key_id).collect();
+            let transaction = sdk.signer_api().authorize(
+                &main_pk,
+                &additional_signers,
+                &transfer.utxo_spend_keys,
+                transaction.finish(),
+            )?;
 
             // Sign and seal the final transaction
             let transaction = sdk.signer_api().sign(transfer.main_signer.key_id, transaction)?;
@@ -1799,6 +1785,7 @@ pub async fn handle_stealth_transfer(
                     } else {
                         required_fees
                     }),
+                    inputs: Some(spent_inputs.clone()),
                     dry_run_result: Some(result),
                 };
                 rounds += 1;
@@ -1835,7 +1822,11 @@ pub async fn handle_stealth_transfer(
                         if settled_statically {
                             return Ok(response);
                         }
-                        return Ok(candidate.expect("BUG: Settle needs a candidate or a static settle"));
+                        // This round was built at the candidate's fee, so its inputs are the ones a
+                        // submission at that fee spends.
+                        let mut answer = candidate.expect("BUG: Settle needs a candidate or a static settle");
+                        answer.inputs = Some(spent_inputs);
+                        return Ok(answer);
                     },
                     FeeEstimateStep::GiveUp => {
                         warn!(
@@ -1878,6 +1869,7 @@ pub async fn handle_stealth_transfer(
             return Ok(StealthTransferResponse {
                 transaction_id: tx_id,
                 required_fees: None,
+                inputs: None,
                 dry_run_result: None,
             });
         }
@@ -1931,7 +1923,7 @@ impl DeclaredInputPricing {
     const UNPROVEN_READ_RETRY_WINDOW: Duration = Duration::from_secs(30);
 
     /// Reads the substates `ids` names from the network, and the layout the latest end-of-epoch
-    /// checkpoints describe, one per shard group (see [`committees_of_checkpoint_layout`]).
+    /// checkpoints describe, one per shard group (see [`latest_checkpoint_layout`]).
     async fn fetch<I: IntoIterator<Item = SubstateId>>(sdk: &WalletSdk, ids: I) -> Result<Self, anyhow::Error> {
         let ids = ids.into_iter().collect::<HashSet<_>>().into_iter().collect::<Vec<_>>();
         let started = tokio::time::Instant::now();
@@ -1957,13 +1949,7 @@ impl DeclaredInputPricing {
             .collect();
 
         let num_preshards = NumPreshards::current();
-        let checkpoints = sdk.get_network_interface().get_latest_shard_group_checkpoints().await?;
-        let num_committees = committees_of_checkpoint_layout(
-            num_preshards,
-            checkpoints
-                .iter()
-                .map(|checkpoint| (checkpoint.epoch, checkpoint.shard_group)),
-        );
+        let num_committees = committees_of_checkpoint_layout(num_preshards, latest_checkpoint_layout(sdk).await?);
         Ok(Self {
             value_bytes,
             num_preshards,
@@ -1986,6 +1972,33 @@ impl DeclaredInputPricing {
             input_bytes,
             transaction.input_fanout(self.num_preshards, self.num_committees),
         )
+    }
+}
+
+/// The epoch and shard group of the latest end-of-epoch checkpoint of every shard group, in shard
+/// order. A verifying wallet takes only checkpoints it verified as the network's latest, and none
+/// while it cannot verify them, as in the epoch it anchors in: no layout prices the input fanout
+/// from above (see [`committees_of_checkpoint_layout`]).
+async fn latest_checkpoint_layout(sdk: &WalletSdk) -> Result<Vec<(Epoch, ShardGroup)>, anyhow::Error> {
+    if !sdk.sdk_config().indexer_trust.is_verify() {
+        return Ok(sdk
+            .get_network_interface()
+            .get_latest_shard_group_checkpoints()
+            .await?
+            .into_iter()
+            .map(|checkpoint| (checkpoint.epoch, checkpoint.shard_group))
+            .collect());
+    }
+    match sdk.validator_set_api().verified_checkpoint_layout().await {
+        Ok(layout) => Ok(layout),
+        Err(ValidatorSetApiError::StoreError(err)) => Err(err.into()),
+        Err(err) => {
+            warn!(
+                target: LOG_TARGET,
+                "⚠️ No verified checkpoint layout to price the input fanout by: {err}. Pricing one committee per shard."
+            );
+            Ok(vec![])
+        },
     }
 }
 
@@ -3781,6 +3794,7 @@ mod create_stealth_transfer_statement_handler_tests {
             owner_account: watch.clone(),
             fee_params: TransferFeeParams::new(UtxoInputSelection::PreferRevealed),
             input_selection: UtxoInputSelection::PreferRevealed,
+            inputs: None,
             resource_address: test.stealth_resource,
             badge_usage: BadgeUsage::None,
             transfers: vec![],
@@ -3885,6 +3899,7 @@ mod claim_burn_fee_tests {
     };
     use tari_ootle_address::Network;
     use tari_ootle_common_types::base_layer_hashing::ownership_proof_hasher64;
+    use tari_ootle_light_client::test_fixtures::{ValidatorSetFixture, high, low};
     use tari_ootle_transaction::Instruction;
     use tari_ootle_wallet_sdk::{
         IndexerTrust,
@@ -3898,7 +3913,10 @@ mod claim_burn_fee_tests {
     use tari_utilities::SafePassword;
 
     use super::*;
-    use crate::WalletSdk;
+    use crate::{
+        WalletSdk,
+        handlers::test_support::{FakeIndexer, TestDaemon, checkpoint_signed_by, handover_checkpoint},
+    };
 
     /// What the burn being claimed is worth.
     const CLAIMED_VALUE: u64 = 5_000_000_000;
@@ -3950,8 +3968,7 @@ mod claim_burn_fee_tests {
     }
 
     /// An L1 burn of `value` made out to the test account, as the L1 wallet would produce it: a stealth
-    /// claim key derived from the account key, an ownership proof by the commitment's mask, and the
-    /// value and mask encrypted to the account.
+    /// claim key derived from the account key and an ownership proof by the commitment's mask.
     fn burn_to_account(test: &ClaimTest, value: u64) -> ClaimBurnProofContents {
         let crypto = test.sdk.stealth_crypto_api();
         let account_key = test
@@ -3965,9 +3982,6 @@ mod claim_burn_fee_tests {
 
         let mask = RistrettoSecretKey::random(&mut rand::rng());
         let commitment = commit_u64_amount(&mask, value).to_byte_type();
-        let encrypted_data = crypto
-            .encrypt_value_and_mask(value, &mask, &sender_offset_public_key, account_key.secret(), None)
-            .unwrap();
         let sidechain_id: Option<&[u8]> = None;
         let message = ownership_proof_hasher64(Network::LocalNet)
             .chain(&commitment.as_bytes())
@@ -4013,7 +4027,6 @@ mod claim_burn_fee_tests {
                     block_output_proof: mmr_proof(),
                 },
             },
-            encrypted_data,
         }
     }
 
@@ -4025,7 +4038,7 @@ mod claim_burn_fee_tests {
                 Instruction::StealthTransfer { statement, .. } => Some(statement),
                 _ => None,
             })
-            .expect("a claim spends the claimed UTXO in a stealth transfer")
+            .expect("a claim pays the claimed bucket into a stealth transfer")
     }
 
     fn revealed_fee(transaction: &Transaction) -> Amount {
@@ -4060,6 +4073,75 @@ mod claim_burn_fee_tests {
                 "{layout:?}"
             );
         }
+    }
+
+    async fn priced_committees(daemon: &TestDaemon) -> u32 {
+        DeclaredInputPricing::fetch(daemon.context.wallet_sdk(), [])
+            .await
+            .unwrap()
+            .num_committees
+    }
+
+    async fn checkpoint_layout(daemon: &TestDaemon) -> Vec<(Epoch, ShardGroup)> {
+        latest_checkpoint_layout(daemon.context.wallet_sdk()).await.unwrap()
+    }
+
+    /// In the epoch a verifying wallet anchors in, it trusts no validator set that the latest checkpoints can be
+    /// verified against.
+    #[tokio::test]
+    async fn a_verifying_wallet_prices_one_committee_per_shard_in_the_epoch_it_anchors_in() {
+        let indexer = FakeIndexer::spawn().await;
+        indexer.end_epoch(&ValidatorSetFixture::new(1), &ValidatorSetFixture::new(2));
+        let daemon = TestDaemon::start_with_indexer(&indexer, IndexerTrust::Verify).await;
+        daemon.context.wallet_sdk().validator_set_api().sync().await.unwrap();
+
+        assert_eq!(checkpoint_layout(&daemon).await, vec![]);
+        assert_eq!(priced_committees(&daemon).await, NumPreshards::current().as_u32());
+    }
+
+    #[tokio::test]
+    async fn a_verifying_wallet_takes_only_the_checkpoint_layout_it_verifies() {
+        let sets = [1, 2, 3].map(ValidatorSetFixture::new);
+        let indexer = FakeIndexer::spawn().await;
+        indexer.end_epoch(&sets[0], &sets[1]);
+        let daemon = TestDaemon::start_with_indexer(&indexer, IndexerTrust::Verify).await;
+        daemon.context.wallet_sdk().validator_set_api().sync().await.unwrap();
+
+        indexer.end_epoch(&sets[1], &sets[2]);
+        let low_checkpoint = handover_checkpoint(low(), &sets[1], &sets[2]);
+        indexer.list_shard_group_checkpoints(vec![
+            low_checkpoint.clone(),
+            checkpoint_signed_by(high(), &sets[1], &sets[2], &sets[0].high),
+        ]);
+        assert_eq!(
+            checkpoint_layout(&daemon).await,
+            vec![],
+            "a checkpoint that another committee signed"
+        );
+
+        indexer.list_shard_group_checkpoints(vec![low_checkpoint, handover_checkpoint(high(), &sets[1], &sets[2])]);
+        assert_eq!(checkpoint_layout(&daemon).await, vec![
+            (Epoch(2), low()),
+            (Epoch(2), high())
+        ]);
+    }
+
+    /// A trusting wallet takes the layout the indexer lists as it is.
+    #[tokio::test]
+    async fn a_trusting_wallet_takes_the_listed_checkpoint_layout() {
+        let sets = [1, 2, 3].map(ValidatorSetFixture::new);
+        let indexer = FakeIndexer::spawn().await;
+        indexer.end_epoch(&sets[0], &sets[1]);
+        indexer.list_shard_group_checkpoints(vec![
+            handover_checkpoint(low(), &sets[0], &sets[1]),
+            checkpoint_signed_by(high(), &sets[0], &sets[1], &sets[2].high),
+        ]);
+        let daemon = TestDaemon::start_with_indexer(&indexer, IndexerTrust::Trust).await;
+
+        assert_eq!(checkpoint_layout(&daemon).await, vec![
+            (Epoch(1), low()),
+            (Epoch(1), high())
+        ]);
     }
 
     /// Prices the TARI resource every claim declares at a nominal size, on a network of two shard
@@ -4197,5 +4279,35 @@ mod claim_burn_dry_run_failure_tests {
             ClaimBurnError::from_dry_run(TransactionServiceError::ServiceShutdown),
             ClaimBurnError::Network(_)
         ));
+    }
+}
+
+#[cfg(test)]
+mod create_account_handler_tests {
+    use super::*;
+    use crate::handlers::test_support::TestDaemon;
+
+    fn key_index(response: &AccountsCreateResponse) -> Option<DerivedKeyIndex> {
+        response.account.owner_key_id.and_then(|id| id.derived_index())
+    }
+
+    #[tokio::test]
+    async fn accounts_fill_the_lowest_key_index_around_an_explicit_one() {
+        let daemon = TestDaemon::start().await;
+        let create = |key_index| {
+            handle_create(&daemon.context, Some(&daemon.session), AccountsCreateRequest {
+                account_name: None,
+                is_default: None,
+                key_index,
+            })
+        };
+
+        let explicit = create(Some(1000)).await.unwrap();
+        assert_eq!(key_index(&explicit), Some(1000));
+        let next = create(None).await.unwrap();
+        assert_eq!(key_index(&next), Some(0));
+
+        let err = create(Some(1000)).await.unwrap_err();
+        assert!(err.to_string().contains("already exists"), "{err}");
     }
 }

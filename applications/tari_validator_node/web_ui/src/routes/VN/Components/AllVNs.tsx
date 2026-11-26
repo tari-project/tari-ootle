@@ -20,6 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+import Alert from "@mui/material/Alert";
 import Table from "@mui/material/Table";
 import TableBody from "@mui/material/TableBody";
 import TableCell from "@mui/material/TableCell";
@@ -38,15 +39,38 @@ function AllVNs({ epoch }: { epoch: number }) {
   const [vns, setVns] = useState<BaseLayerValidatorNode[]>([]);
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string>();
+
   useEffect(() => {
-    getAllVns({ epoch }).then((response) => {
-      setVns(response.vns);
-    });
+    let cancelled = false;
+    setLoading(true);
+    setError(undefined);
+    setPage(0);
+    getAllVns({ epoch })
+      .then((response) => {
+        if (!cancelled) {
+          setVns(response.vns);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setError(err && err.message ? err.message : `Unknown error: ${JSON.stringify(err)}`);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [epoch]);
 
   const emptyRowsCnt = emptyRows(page, rowsPerPage, vns);
 
-  const handleChangePage = (event: unknown, newPage: number) => {
+  const handleChangePage = (_event: unknown, newPage: number) => {
     setPage(newPage);
   };
 
@@ -55,7 +79,9 @@ function AllVNs({ epoch }: { epoch: number }) {
     setPage(0);
   };
 
-  if (!(vns?.length > 0)) return <Typography>All VNS are loading</Typography>;
+  if (loading) return <Typography>All VNs are loading...</Typography>;
+  if (error) return <Alert severity="error">{error}</Alert>;
+  if (vns.length === 0) return <Typography>No validator nodes found for epoch {epoch}</Typography>;
 
   return (
     <TableContainer>
@@ -67,7 +93,7 @@ function AllVNs({ epoch }: { epoch: number }) {
           </TableRow>
         </TableHead>
         <TableBody>
-          {vns.map(({ public_key, shard_key }, i) => (
+          {vns.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage).map(({ public_key, shard_key }) => (
             <TableRow key={public_key}>
               <DataTableCell>{public_key}</DataTableCell>
               <DataTableCell>{shard_key}</DataTableCell>

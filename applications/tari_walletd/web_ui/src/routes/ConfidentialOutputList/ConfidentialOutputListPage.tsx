@@ -10,11 +10,17 @@ import Grid from "@mui/material/Grid";
 import ConfidentialBalanceDisplay from "@routes/AssetVault/Components/ConfidentialBalanceDisplay";
 import ConfidentialOutputList from "@routes/ConfidentialOutputList/ConfidentialOutputList";
 import useAccountStore, { setAccount, setOotleAddress } from "@store/accountStore";
+import { getDefaultAccountFetchState } from "@utils/accountFallback";
 import { useEffect } from "react";
 
 function ConfidentialOutputListPage() {
   const account = useAccountStore((state) => state.account);
-  const { data: defaultAccount, isLoading, isError, error } = useAccountsGetDefault();
+  const { data: defaultAccount, isLoading, isError, error } = useAccountsGetDefault(!account);
+  const { showLoading, showError } = getDefaultAccountFetchState({
+    hasAccount: Boolean(account),
+    isLoading,
+    isError,
+  });
 
   useEffect(() => {
     if (!isError && defaultAccount && !account) {
@@ -24,7 +30,11 @@ function ConfidentialOutputListPage() {
   }, [defaultAccount, isError, account]);
 
   return (
-    <FetchStatusCheck isLoading={isLoading} isError={isError} errorMessage={error?.message || "Error loading account"}>
+    <FetchStatusCheck
+      isLoading={showLoading}
+      isError={showError}
+      errorMessage={error?.message || "Error loading account"}
+    >
       {account ? (
         <>
           <PageHeader title="Confidential Outputs" balanceComponent={<ConfidentialBalanceDisplay />} />

@@ -174,7 +174,7 @@ impl ObjectIds {
         if id as usize >= self.max_ids {
             return Err(IdProviderError::MaxIdsExceeded { max: self.max_ids });
         }
-        self.current_id += 1;
+        self.current_id = bump(id, "object")?;
         Ok(id)
     }
 
@@ -208,9 +208,16 @@ mod tests {
     /// call that would have to repeat it errors instead.
     #[test]
     fn an_exhausted_transient_counter_refuses_rather_than_repeating() {
-        let mut object_ids = ObjectIds::new(1);
+        let mut object_ids = ObjectIds::new(usize::MAX);
+        object_ids.current_id = u32::MAX - 1;
         object_ids.bucket_or_proof_id = u32::MAX - 1;
         object_ids.uuid = u32::MAX - 1;
+
+        assert_eq!(object_ids.next_id().unwrap(), u32::MAX - 1);
+        assert!(matches!(
+            object_ids.next_id(),
+            Err(IdProviderError::CounterExhausted { counter: "object" })
+        ));
 
         assert_eq!(object_ids.next_bucket_id().unwrap(), BucketId::from(u32::MAX - 1));
         assert!(matches!(

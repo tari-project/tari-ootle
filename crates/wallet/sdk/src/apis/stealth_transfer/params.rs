@@ -21,7 +21,7 @@ use tari_template_lib::types::{
 use crate::{
     apis::{
         confidential_transfer::UtxoInputSelection,
-        stealth_outputs::StealthOutputsApiError,
+        stealth_outputs::{Candidates, StealthOutputsApiError},
         stealth_transfer::{StealthOutputToCreate, StealthTransferApiError},
     },
     models::AccountWithAddress,
@@ -33,6 +33,11 @@ pub struct StealthTransferParams {
     pub fee_params: TransferFeeParams,
     /// Strategy for input selection
     pub input_selection: UtxoInputSelection,
+    /// The stealth UTXOs selection may choose from, in place of every UTXO the account holds: the `inputs` an
+    /// earlier build of this transfer reported. Selection targets `amount + max_fee`, so with the same candidates
+    /// and `max_fee` it spends what that build spent, whatever UTXOs have arrived since. Every one named must still be
+    /// spendable.
+    pub inputs: Option<Vec<UtxoAddress>>,
     pub outputs: Vec<TransferOutput>,
     pub badge_usage: BadgeUsage,
     /// Address of the resource to transfer
@@ -48,6 +53,11 @@ pub struct StealthTransferParams {
 }
 
 impl StealthTransferParams {
+    /// The UTXOs selection may choose from: those [`Self::inputs`] names, or all of them.
+    pub fn candidates(&self) -> Candidates<'_> {
+        self.inputs.as_deref().map_or(Candidates::All, Candidates::Only)
+    }
+
     pub fn validate(&self, network: Network) -> Result<(), StealthTransferApiError> {
         if self.outputs.is_empty() {
             return Err(StealthTransferApiError::InvalidParameter {
@@ -68,13 +78,6 @@ impl StealthTransferParams {
         }
 
         for output in &self.outputs {
-            if output.revealed_amount.is_negative() {
-                return Err(StealthTransferApiError::InvalidParameter {
-                    param: "revealed_output_amount",
-                    reason: "Revealed output amount must be non-negative".to_string(),
-                });
-            }
-
             if output.blinded_amount == 0 && output.revealed_amount.is_zero() {
                 return Err(StealthTransferApiError::InvalidParameter {
                     param: "blinded_output_amount and revealed_output_amount",
@@ -408,6 +411,7 @@ mod tests {
             max_epoch: Epoch(1),
             fee_params: TransferFeeParams::new(UtxoInputSelection::PreferConfidential),
             input_selection: UtxoInputSelection::PreferConfidential,
+            inputs: None,
             outputs: vec![TransferOutput {
                 address: address(),
                 revealed_amount: Amount::from(revealed_amount),

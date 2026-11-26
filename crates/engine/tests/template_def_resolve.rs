@@ -113,6 +113,7 @@ fn creator_module(template_name: &str, def: &TemplateDef) -> Vec<u8> {
         access_rules: ComponentAccessRules::allow_all(),
         address_allocation: None,
         upgrade_rule: UpdateRule::Locked,
+        rules_updater: None,
     })
     .unwrap();
     let invoke_arg = tari_bor::encode(&ComponentInvokeArg {
@@ -152,7 +153,7 @@ fn creator_module(template_name: &str, def: &TemplateDef) -> Vec<u8> {
         tdef = wat_bytes(&def.encode_for_wasm_embedding().unwrap()),
     );
     let code = wat::parse_str(&wat).unwrap();
-    WasmModule::validate_code(&code).expect("template must pass publish admission");
+    WasmModule::validate_and_load(&code).expect("template must pass publish admission");
     code
 }
 

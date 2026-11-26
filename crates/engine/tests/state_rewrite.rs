@@ -14,6 +14,9 @@ const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
 
 const N: u32 = 3_000;
 const TIMES: u32 = 40;
+/// How many times slower than the baseline a rewrite may run. Quadratic validation is about `N` times
+/// slower, so this bound catches it while leaving room for a loaded CI runner's wall-clock noise.
+const MAX_SLOWDOWN: u32 = 10;
 
 /// The fastest of a few runs, so that one run slowed by other work on the machine does not decide the
 /// comparison, with the call's execution points. The charge for decoding `args` is taken off the native
@@ -68,7 +71,7 @@ fn state_write_validation_is_linear_in_references() {
 
     assert_eq!(kept_points.native, replaced_points.native);
     assert!(
-        replaced_elapsed < kept_elapsed * 3,
+        replaced_elapsed < kept_elapsed * MAX_SLOWDOWN,
         "rewriting {N} references {TIMES} times took {replaced_elapsed:.2?} when every reference was new, against \
          {kept_elapsed:.2?} when none was, for the same charge"
     );
@@ -92,7 +95,7 @@ fn state_write_validation_is_linear_in_vaults() {
 
     assert_eq!(kept_points.native, reversed_points.native);
     assert!(
-        reversed_elapsed < kept_elapsed * 3,
+        reversed_elapsed < kept_elapsed * MAX_SLOWDOWN,
         "rewriting {N} vaults {TIMES} times took {reversed_elapsed:.2?}, against {kept_elapsed:.2?} for {N} resource \
          references"
     );

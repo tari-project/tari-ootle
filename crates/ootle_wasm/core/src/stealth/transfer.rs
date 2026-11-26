@@ -34,9 +34,9 @@ use crate::{
 /// independent.
 pub fn build_stealth_transfer_statement(
     input_witnesses_json: &str,
-    revealed_input_amount_microtari: u64,
+    revealed_input_amount_microtari: u128,
     output_witnesses_json: &str,
-    revealed_output_amount_microtari: u64,
+    revealed_output_amount_microtari: u128,
     revealed_receiver: &[u8],
 ) -> Result<String, OotleWasmError> {
     let inputs: Vec<StealthInputWitnessJson> = serde_json::from_str(input_witnesses_json)?;
@@ -55,13 +55,13 @@ pub fn build_stealth_transfer_statement(
         0 => None,
         amount => {
             let receiver = public_key_bytes_from_bytes(revealed_receiver)?;
-            Some(RevealedOutput::new(Amount::from_u64(amount), receiver))
+            Some(RevealedOutput::new(Amount::new(amount), receiver))
         },
     };
 
     let statement = crypto_create_transfer_statement(
         inputs,
-        Amount::from_u64(revealed_input_amount_microtari),
+        Amount::new(revealed_input_amount_microtari),
         outputs.iter(),
         revealed_output,
     )
@@ -262,6 +262,19 @@ mod tests {
         );
         let err = build_stealth_transfer_statement(&inputs_json, 0, "[]", 500, &[0u8; 32]).unwrap_err();
         assert!(matches!(err, OotleWasmError::Stealth(_)));
+    }
+
+    #[test]
+    fn revealed_only_transfer_above_u64_max_balances() {
+        let revealed = u128::from(u64::MAX) + 7;
+        let receiver = RistrettoPublicKey::from_secret_key(&RistrettoSecretKey::from(5u64)).to_byte_type();
+        let json = build_stealth_transfer_statement("[]", revealed, "[]", revealed, receiver.as_bytes()).unwrap();
+        let statement: StealthTransferStatement = serde_json::from_str(&json).unwrap();
+        assert_eq!(statement.inputs_statement.revealed_amount, Amount::new(revealed));
+        assert_eq!(
+            statement.outputs_statement.revealed_output_amount(),
+            Amount::new(revealed)
+        );
     }
 
     #[test]

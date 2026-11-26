@@ -35,17 +35,17 @@ use tari_engine_types::{
 };
 use tari_template_lib_types::Hash32;
 
-use crate::{BlobHashes, v1::signature::TransactionSignatureFields};
+use crate::{BlobHashes, SchemaVersion, v1::signature::TransactionSignatureFields};
 
 /// Computes the intent commitment from the signing projection. Shared by the full and pruned
 /// forms so both produce the same commitment.
 pub(crate) fn calculate_intent_commitment_v1(
-    schema_version: u16,
+    schema: SchemaVersion,
     fields: &TransactionSignatureFields<'_>,
     blob_hashes: &BlobHashes,
 ) -> Hash32 {
     hasher32(EngineHashDomainLabel::TransactionIntent)
-        .chain(&schema_version)
+        .chain(&schema.as_u16())
         .chain(fields)
         .chain(blob_hashes)
         .result()
@@ -106,7 +106,6 @@ mod tests {
         MainSigner,
         PrunedTransactionV1,
         TransactionSealSignature,
-        TransactionSignature,
         TransactionV1,
         UnsealedTransactionV1,
         UnsignedTransactionV1,
@@ -139,19 +138,16 @@ mod tests {
     fn seal(unsigned: UnsignedTransactionV1, num_signers: usize) -> TransactionV1 {
         let sealer = RistrettoSecretKey::random(&mut rand::rng());
         let seal_signer = RistrettoPublicKey::from_secret_key(&sealer).to_byte_type();
-        let sigs = (0..num_signers)
-            .map(|_| {
-                let sk = RistrettoSecretKey::random(&mut rand::rng());
-                TransactionSignature::sign_v1(&sk, &seal_signer, &unsigned)
-            })
+        let secrets: Vec<_> = (0..num_signers)
+            .map(|_| RistrettoSecretKey::random(&mut rand::rng()))
             .collect();
-        let unsealed = UnsealedTransactionV1::new(unsigned, sigs);
-        let seal = TransactionSealSignature::sign_v1(&sealer, &unsealed);
+        let unsealed = UnsealedTransactionV1::authorize(unsigned, &seal_signer, &secrets);
+        let seal = TransactionSealSignature::sign(&sealer, &unsealed);
         TransactionV1::new(unsealed, seal)
     }
 
     fn commitment_of(unsigned: UnsignedTransactionV1) -> Hash32 {
-        seal(unsigned, 1).calculate_intent_commitment()
+        seal(unsigned, 1).calculate_intent_commitment(SchemaVersion::CURRENT)
     }
 
     fn receipt_committing_to(commitment: Hash32) -> TransactionReceipt {
@@ -169,7 +165,10 @@ mod tests {
     #[test]
     fn commitment_is_deterministic() {
         let tx = seal(sample_unsigned(), 1);
-        assert_eq!(tx.calculate_intent_commitment(), tx.calculate_intent_commitment());
+        assert_eq!(
+            tx.calculate_intent_commitment(SchemaVersion::CURRENT),
+            tx.calculate_intent_commitment(SchemaVersion::CURRENT)
+        );
     }
 
     /// The pruned form drops blob payloads but must commit to the same intent, so an archive
@@ -183,9 +182,9 @@ mod tests {
             let mut unsigned = sample_unsigned();
             unsigned.blobs = blobs;
             let full = seal(unsigned, 1);
-            let expected = full.calculate_intent_commitment();
+            let expected = full.calculate_intent_commitment(SchemaVersion::CURRENT);
             let pruned = PrunedTransactionV1::from(full);
-            assert_eq!(pruned.calculate_intent_commitment(), expected);
+            assert_eq!(pruned.calculate_intent_commitment(SchemaVersion::CURRENT), expected);
         }
     }
 
@@ -289,8 +288,14 @@ mod tests {
         let a = seal(unsigned.clone(), 1);
         let b = seal(unsigned.clone(), 3);
 
-        assert_eq!(a.calculate_intent_commitment(), b.calculate_intent_commitment());
-        assert_ne!(a.calculate_id(), b.calculate_id());
+        assert_eq!(
+            a.calculate_intent_commitment(SchemaVersion::CURRENT),
+            b.calculate_intent_commitment(SchemaVersion::CURRENT)
+        );
+        assert_ne!(
+            a.calculate_id(SchemaVersion::CURRENT),
+            b.calculate_id(SchemaVersion::CURRENT)
+        );
     }
 
     /// The paired derivation exists only to hash the blobs once. It must produce exactly what the
@@ -303,19 +308,23 @@ mod tests {
         let tx = seal(unsigned, 2);
 
         assert_eq!(
-            tx.calculate_id_and_intent_commitment(),
-            (tx.calculate_id(), tx.calculate_intent_commitment())
+            tx.calculate_id_and_intent_commitment(SchemaVersion::CURRENT),
+            (
+                tx.calculate_id(SchemaVersion::CURRENT),
+                tx.calculate_intent_commitment(SchemaVersion::CURRENT)
+            )
         );
     }
 
     #[test]
     fn verify_receipt_intent_accepts_matching_receipt() {
         let tx = seal(sample_unsigned(), 2);
-        let receipt = receipt_committing_to(tx.calculate_intent_commitment());
+        let receipt = receipt_committing_to(tx.calculate_intent_commitment(SchemaVersion::CURRENT));
+        let tx = crate::Transaction::from_body(SchemaVersion::CURRENT, tx);
 
         assert_eq!(tx.verify_receipt_intent(&receipt), Ok(()));
         assert_eq!(
-            PrunedTransactionV1::from(tx).verify_receipt_intent(&receipt),
+            crate::PrunedTransaction::from(tx).verify_receipt_intent(&receipt),
             Ok(()),
             "the pruned form checks against the same receipt",
         );
@@ -328,9 +337,11 @@ mod tests {
         other.instructions.push(Instruction::DropAllProofsInWorkspace);
         let other = seal(other, 1);
 
-        let receipt = receipt_committing_to(other.calculate_intent_commitment());
-        let err = tx.verify_receipt_intent(&receipt).unwrap_err();
-        assert_eq!(err.expected, tx.calculate_intent_commitment());
-        assert_eq!(err.actual, other.calculate_intent_commitment());
+        let receipt = receipt_committing_to(other.calculate_intent_commitment(SchemaVersion::CURRENT));
+        let err = crate::Transaction::from_body(SchemaVersion::CURRENT, tx.clone())
+            .verify_receipt_intent(&receipt)
+            .unwrap_err();
+        assert_eq!(err.expected, tx.calculate_intent_commitment(SchemaVersion::CURRENT));
+        assert_eq!(err.actual, other.calculate_intent_commitment(SchemaVersion::CURRENT));
     }
 }

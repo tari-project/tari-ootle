@@ -12,6 +12,7 @@ use tari_crypto::{
 use tari_ootle_address::OotleAddress;
 use tari_ootle_common_types::Network;
 use tari_ootle_transaction::{
+    AuthorizationContext,
     Signable,
     TransactionSealSignature,
     TransactionSignature,
@@ -70,10 +71,10 @@ where C: PrehashSigner<(RistrettoSchnorr, RistrettoPublicKey)> + Send + Sync
 
     async fn sign_authorization(
         &self,
-        seal_signer: &RistrettoPublicKeyBytes,
+        context: AuthorizationContext<'_>,
         tx: &UnsignedTransaction,
     ) -> signer::Result<TransactionAuthorization> {
-        let message = tx.to_signing_message(seal_signer);
+        let message = tx.to_signing_message(context);
         let (signature, public_key) = self.credentials.sign_prehash(&message)?;
         let sig = TransactionSignature::new(public_key.to_byte_type(), signature.to_byte_type());
         Ok(sig.into())

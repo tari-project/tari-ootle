@@ -350,6 +350,62 @@ async fn an_input_shard_group_aborting_at_local_accept_aborts_the_output_only_sh
     test.assert_clean_shutdown().await;
 }
 
+/// As [`an_input_shard_group_aborting_at_local_accept_aborts_the_output_only_shard_group`], with one validator's
+/// oracle reporting that the next epoch changes the number of committees once the transaction is prepared. The
+/// transaction is ready for LocalAccept, so that validator executes it like the rest of its committee and records the
+/// same abort.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_ready_transaction_aborting_at_local_accept_before_a_layout_change_records_one_abort() {
+    setup_logger();
+    let mut test = Test::builder()
+        .modify_config(|config| {
+            config.epoch_end_grace_period = std::time::Duration::from_secs(30);
+            config.epoch_end_drain_period = std::time::Duration::from_secs(30);
+        })
+        .add_committee(0, vec!["1", "2"])
+        .add_committee(1, vec!["3", "4"])
+        .start()
+        .await;
+    let vaults = test.create_substates_on_vns(TestVnDestination::Committee(0), 2);
+    let output = test.build_outputs_for_committee(0, 1).remove(0);
+    let foreign_output = test.build_outputs_for_committee(1, 1).remove(0);
+    let creator = creating(&test, 1, &vaults[0], std::slice::from_ref(&output));
+    let duplicate = creating_with_fee_intent(&test, 2, &vaults[1], &[output, foreign_output], None);
+
+    test.send_transaction_to_destination(TestVnDestination::All, creator.clone())
+        .await;
+    test.start_epoch(Epoch(1)).await;
+    wait_for_finalized_at(&mut test, TestVnDestination::Committee(0), &[&creator]).await;
+
+    let observer = TestAddress::new("1");
+    test.get_validator(&observer)
+        .epoch_manager
+        .set_epoch_num_committees(Epoch(2), 4)
+        .await;
+    test.send_transaction_to_destination(TestVnDestination::All, duplicate.clone())
+        .await;
+    loop {
+        test.on_block_committed().await;
+        let is_prepared = test
+            .get_validator(&observer)
+            .state_store
+            .with_read_tx(|tx| tx.transaction_pool_get_all(usize::MAX))
+            .unwrap()
+            .into_iter()
+            .any(|rec| rec.id() == duplicate.id() && rec.current_stage().is_local_prepared());
+        if is_prepared {
+            break;
+        }
+    }
+    test.start_epoch(Epoch(2)).await;
+    wait_for_finalized(&mut test, &[&duplicate]).await;
+    test.stop();
+
+    test.assert_all_validators_have_decision(duplicate.id(), Decision::Abort(AbortReason::LockOutputsFailed))
+        .await;
+    test.assert_all_validators_did_not_commit(duplicate.id());
+}
+
 /// The number of shard groups in the evidence, and the leader fee, of the command with which the validator at
 /// `address` committed `transaction_id`.
 fn committed_involvement(test: &Test, address: &'static str, transaction_id: &TransactionId) -> (usize, u64) {

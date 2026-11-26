@@ -99,8 +99,8 @@
 //! - **[`stealth`]** — confidential transfer support. [`stealth::StealthTransfer`] builds stealth transfer statements
 //!   with input/output commitments, encrypted memos, and change handling.
 //!
-//! - **[`claim_burn`]** — claim Layer 1 (minotari) burns. [`claim_burn::ClaimBurn`] mints burned funds into a
-//!   confidential UTXO and spends it into a stealth output owned by the claiming account.
+//! - **[`claim_burn`]** — claim Layer 1 (minotari) burns. [`claim_burn::ClaimBurn`] claims burned funds as a revealed
+//!   bucket and pays it into a stealth output owned by the claiming account.
 //!
 //! - **[`transaction`]** — transaction signing traits ([`transaction::TransactionSigner`],
 //!   [`transaction::TransactionSealSigner`]) and the `TransactionRequest` builder for constructing signed transactions

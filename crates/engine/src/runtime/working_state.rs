@@ -2415,11 +2415,12 @@ impl<TStore: StateReader> WorkingState<TStore> {
         })
     }
 
-    /// Whether the current frame is a resource auth hook frame and `address` is a vault of the component whose
-    /// action triggered the hook. The hook frame is pushed directly on the acting component's frame, which holds
-    /// that component's lock, so the frame below is the acting frame exactly when its lock is on the acting
-    /// component. That frame's component-owned scope holds the vaults of the component's state and was paid for when
-    /// the frame was pushed, so the check is a lookup.
+    /// Whether the current frame is a resource auth hook frame and `address` is a vault the acting frame's component
+    /// state, or the state of a component that frame created, holds. The hook frame is pushed directly on the acting
+    /// component's frame, which holds that component's lock, so the frame below is the acting frame exactly when its
+    /// lock is on the acting component. That frame's component-owned scope was indexed when the frame was pushed,
+    /// which its load paid for, and is extended as states written in the frame attach vaults, so the check is a
+    /// lookup. See [`CallScope::is_component_owned`].
     fn is_acting_component_vault(&self, address: &SubstateId) -> bool {
         if !address.is_vault() {
             return false;

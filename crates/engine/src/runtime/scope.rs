@@ -188,10 +188,11 @@ impl CallScope {
         self.acting_component = acting_component;
     }
 
-    /// Whether `address` is reachable from the state of the component this frame executes on. For a vault this is
-    /// exact for the life of the frame: the frame holds the component's lock, every vault a state update adds is
-    /// attached here, and a vault never leaves a component's state. A vault the frame created stays in `orphans`
-    /// until it is attached.
+    /// Whether `address` belongs to a component's state rather than to this frame. For vaults this is the vaults of
+    /// the state of the component this frame executes on, plus those of components this frame created: a state
+    /// written in this frame, whether a state update or a new component, attaches the vaults it holds here. The set
+    /// stays complete for the life of the frame, as the frame holds its component's lock and a vault never leaves a
+    /// component's state. A vault the frame created stays in `orphans` until it is attached.
     pub fn is_component_owned(&self, address: &SubstateId) -> bool {
         self.component_owned.contains(address)
     }

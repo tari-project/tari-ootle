@@ -6145,6 +6145,52 @@ mod tests {
         push_hook_frame(&f, f.other_component, f.owner_component);
 
         assert_hook_reads_rejected(&f, unattached_vault);
+        // The frames are left on the stack: the acting frame cannot be popped while it holds an orphan vault.
+    }
+
+    /// A component the acting frame creates is created on that frame's authority, and the vaults its state holds are
+    /// attached to the acting frame's component-owned scope, so the hook may read them as it reads the acting
+    /// component's own.
+    #[test]
+    fn hook_frame_reads_vaults_of_components_the_acting_frame_created() {
+        use tari_engine_types::vault::Vault;
+
+        let f = setup_vault_scope_fixture();
+        let created_vault = tari_template_lib::types::VaultId::new([15u8; 32].into());
+        push_acting_frame(&f, f.owner_component, LockFlag::Read);
+        f.runtime.tracker.write_with(|state| {
+            state
+                .new_substate(
+                    created_vault,
+                    Vault::new(ResourceContainer::public_fungible(f.resource_address, Amount::new(7))),
+                )
+                .unwrap();
+        });
+        f.runtime
+            .tracker
+            .new_component(
+                tari_bor::to_value(&created_vault).unwrap(),
+                SubstateOwnerRule::None,
+                ComponentAccessRules::new(),
+                None,
+                UpdateRule::Locked,
+                RulesUpdater::Locked,
+            )
+            .unwrap();
+        push_hook_frame(&f, f.other_component, f.owner_component);
+
+        let balance: Amount = f
+            .runtime
+            .vault_invoke(
+                VaultRef::Ref(created_vault),
+                VaultAction::GetBalance,
+                EngineArgs::default(),
+            )
+            .unwrap()
+            .decode()
+            .unwrap();
+        assert_eq!(balance, Amount::new(7));
+        f.runtime.pop_call_frame(&IndexedWellKnownTypes::new()).unwrap();
     }
 
     #[test]

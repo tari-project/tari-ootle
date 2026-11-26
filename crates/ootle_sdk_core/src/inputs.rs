@@ -1448,7 +1448,10 @@ mod tests {
                 component_substate_json(&[from_vault_id()]),
             )];
             let (partial, _w) = unwrap_need_more(apply_fetched_substates(partial, &r1).unwrap());
-            let r2 = vec![fetched(SubstateId::Vault(from_vault_id()), component_substate_json(&[]))];
+            let r2 = vec![fetched(
+                SubstateId::Vault(from_vault_id()),
+                component_substate_json(&[]),
+            )];
             let err = apply_fetched_substates(partial, &r2).unwrap_err();
             assert_eq!(err.code(), "RESOLUTION");
             assert!(

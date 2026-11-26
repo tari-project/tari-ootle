@@ -2,6 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use axum_extra::headers::authorization::Bearer;
+use futures::stream::{self, StreamExt};
 use log::warn;
 use tari_engine_types::substate::SubstateId;
 use tari_ootle_common_types::optional::IsNotFoundError;
@@ -36,6 +37,9 @@ const FILTERED_WATCHED_PAGE_SIZE: u64 = 200;
 /// indexer's 10,000 offset limit so a single JSON-RPC call cannot make an unbounded number of round trips or fail
 /// past the indexer's offset cap.
 const MAX_FILTERED_WATCHED_POOLS_SCANNED: u64 = 400;
+
+/// Maximum number of concurrent `fetch_pool_info` requests when scanning a page of watched liquidity pools.
+const MAX_CONCURRENT_POOL_FETCHES: usize = 16;
 
 pub async fn handle_get_exchange_rate(
     context: &HandlerContext,
@@ -118,9 +122,6 @@ pub async fn handle_list(
     let mut pools = Vec::with_capacity(limit);
 
     loop {
-        if req.resource_pair.is_some() && watched_offset >= MAX_FILTERED_WATCHED_POOLS_SCANNED {
-            break;
-        }
         let page_limit = if req.resource_pair.is_some() {
             fetch_limit.min(MAX_FILTERED_WATCHED_POOLS_SCANNED - watched_offset)
         } else {
@@ -139,20 +140,20 @@ pub async fn handle_list(
             break;
         }
 
-        for item in watched {
-            if pools.len() >= limit {
-                break;
-            }
+        let pool_addresses = watched.into_iter().filter_map(|item| match item.component_address {
+            SubstateId::Component(addr) => Some(addr),
+            other => {
+                warn!(target: LOG_TARGET, "Unexpected substate type in watched substates: {other}");
+                None
+            },
+        });
 
-            let pool_address = match item.component_address {
-                SubstateId::Component(addr) => addr,
-                other => {
-                    warn!(target: LOG_TARGET, "Unexpected substate type in watched substates: {other}");
-                    continue;
-                },
-            };
+        let mut fetched = stream::iter(pool_addresses)
+            .map(|pool_address| async move { (pool_address, fetch_pool_info(context, pool_address).await) })
+            .buffered(MAX_CONCURRENT_POOL_FETCHES);
 
-            match fetch_pool_info(context, pool_address).await {
+        while let Some((pool_address, result)) = fetched.next().await {
+            match result {
                 Ok(info) => {
                     // If a resource pair filter is set, only include pools that contain both resources
                     if let Some((ref r1, ref r2)) = req.resource_pair {
@@ -167,6 +168,9 @@ pub async fn handle_list(
                         }
                     }
                     pools.push(info);
+                    if pools.len() >= limit {
+                        break;
+                    }
                 },
                 Err(e) => {
                     warn!(target: LOG_TARGET, "Failed to fetch pool info for {pool_address}: {e}");
@@ -174,12 +178,11 @@ pub async fn handle_list(
             }
         }
 
+        if req.resource_pair.is_none() || pools.len() >= limit || (batch_len as u64) < page_limit {
+            break;
+        }
         watched_offset += batch_len as u64;
-        if req.resource_pair.is_none() ||
-            pools.len() >= limit ||
-            (batch_len as u64) < page_limit ||
-            watched_offset >= MAX_FILTERED_WATCHED_POOLS_SCANNED
-        {
+        if watched_offset >= MAX_FILTERED_WATCHED_POOLS_SCANNED {
             break;
         }
     }

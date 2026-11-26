@@ -41,37 +41,49 @@ use crate::proto;
 pub const HOTSTUFF_MAX_DECODE_ITEMS: usize =
     (ConsensusConstants::MAINNET.max_commands_in_block * 6 + tari_sidechain::MAX_QC_SIGNATURES * 3 + 512) * 3;
 
-/// Maximum embedded items permitted per block (and optional leaf) in a `CatchUpPage`, scaled to the number of blocks
-/// present on the wire and capped at `MAX_CATCH_UP_PAGE_BLOCKS + 1` blocks.
+/// Wire-bytes divisor for the byte-proportional item allowance (`contents.len() / 8`) added on top of
+/// [`HOTSTUFF_MAX_DECODE_ITEMS`] when walking a `CatchUpPage`.
 ///
 /// An honest `CatchUpPage` is bounded by `DEFAULT_CATCH_UP_PAGE_BYTES = 3 MiB` and `MAX_CATCH_UP_PAGE_BLOCKS = 1,000`
 /// blocks, plus up to `MAX_REQUESTED_TRANSACTIONS = 1,000` transactions. Because even a small certified block with one
 /// `LocalOnly` command and a 7-signature QC carries ~16 items in ~600 bytes (about 1 item per 20–35 wire bytes),
-/// `HotStuffMessage` grants `CatchUpPage` an additional byte-proportional allowance of `buf.len() / 8` items above
-/// [`HOTSTUFF_MAX_DECODE_ITEMS`], admitting every honest page up to 3 MiB while still rejecting 2-byte empty-element
-/// floods (> 12x reduction in worst-case item amplification).
+/// `HotStuffMessage` grants `CatchUpPage` an additional byte-proportional allowance of `contents.len() / 8` items above
+/// [`HOTSTUFF_MAX_DECODE_ITEMS`], while the `CatchUpPage` and `Block` walkers enforce per-field element caps.
 const CATCH_UP_PAGE_BYTES_PER_EXTRA_ITEM: usize = 8;
+
+/// Maximum `commands` entries permitted in a single `Block` on the wire.
+const MAX_BLOCK_COMMANDS: usize = ConsensusConstants::MAINNET.max_commands_in_block;
 
 /// Deepest message nesting the walk follows. Schema walks only reach this on recursive types; exceeding it is treated
 /// as over budget.
 const MAX_DEPTH: usize = 128;
 
-/// The payload would make `prost` allocate more embedded items than allowed, or nests deeper than [`MAX_DEPTH`].
+/// The payload would make `prost` allocate more embedded items than allowed, exceeds a per-field repeated element
+/// limit, or nests deeper than [`MAX_DEPTH`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DecodeBudgetExceeded {
-    /// Items counted when the walk stopped.
+    /// Items (or repeated field entries) counted when the walk stopped.
     pub items: usize,
-    /// Configured budget.
+    /// Configured item budget (or per-field limit).
     pub max: usize,
+    /// Named repeated field when stopped by a per-field element cap rather than the total item budget.
+    pub field: Option<&'static str>,
 }
 
 impl fmt::Display for DecodeBudgetExceeded {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "message exceeds the decode budget ({} embedded items, at most {} allowed)",
-            self.items, self.max
-        )
+        match self.field {
+            Some(field) => write!(
+                f,
+                "message exceeds the decode budget ({field} has {} entries, at most {} allowed)",
+                self.items, self.max
+            ),
+            None => write!(
+                f,
+                "message exceeds the decode budget ({} embedded items, at most {} allowed)",
+                self.items, self.max
+            ),
+        }
     }
 }
 
@@ -136,6 +148,15 @@ impl Budget {
         DecodeBudgetExceeded {
             items: self.items,
             max: self.max,
+            field: None,
+        }
+    }
+
+    fn field_exceeded(field: &'static str, count: usize, max: usize) -> DecodeBudgetExceeded {
+        DecodeBudgetExceeded {
+            items: count,
+            max,
+            field: Some(field),
         }
     }
 
@@ -374,7 +395,11 @@ impl DecodeBudget for proto::consensus::CatchUpPage {
             3 => {
                 blocks = blocks.saturating_add(1);
                 if blocks > MAX_CATCH_UP_PAGE_BLOCKS {
-                    return Err(budget.exceeded());
+                    return Err(Budget::field_exceeded(
+                        "CatchUpPage.blocks",
+                        blocks,
+                        MAX_CATCH_UP_PAGE_BLOCKS,
+                    ));
                 }
                 budget.charge_message::<proto::consensus::ProposalMessage>(contents)
             },
@@ -382,7 +407,11 @@ impl DecodeBudget for proto::consensus::CatchUpPage {
             5 => {
                 transactions = transactions.saturating_add(1);
                 if transactions > MAX_REQUESTED_TRANSACTIONS {
-                    return Err(budget.exceeded());
+                    return Err(Budget::field_exceeded(
+                        "CatchUpPage.transactions",
+                        transactions,
+                        MAX_REQUESTED_TRANSACTIONS,
+                    ));
                 }
                 budget.charge_message::<proto::transaction::Transaction>(contents)
             },
@@ -470,10 +499,17 @@ impl DecodeBudget for proto::consensus::BlockHeader {
 
 impl DecodeBudget for proto::consensus::Block {
     fn count_messages(buf: &[u8], budget: &mut Budget) -> Result<(), DecodeBudgetExceeded> {
+        let mut commands = 0usize;
         walk_len_fields(buf, budget, |tag, contents, budget| match tag {
             1 => budget.charge_message::<proto::consensus::BlockHeader>(contents),
             2 => budget.charge_message::<proto::consensus::QuorumCertificate>(contents),
-            3 => budget.charge_message::<proto::consensus::Command>(contents),
+            3 => {
+                commands = commands.saturating_add(1);
+                if commands > MAX_BLOCK_COMMANDS {
+                    return Err(Budget::field_exceeded("Block.commands", commands, MAX_BLOCK_COMMANDS));
+                }
+                budget.charge_message::<proto::consensus::Command>(contents)
+            },
             4 => budget.charge_message::<proto::consensus::TimeoutCertificate>(contents),
             _ => Ok(()),
         })
@@ -1356,6 +1392,7 @@ mod tests {
         assert_eq!(err, DecodeBudgetExceeded {
             items: HOTSTUFF_MAX_DECODE_ITEMS + 1,
             max: HOTSTUFF_MAX_DECODE_ITEMS,
+            field: None,
         });
 
         // MissingTransactionsResponse (tag 8) -> repeated Transaction (tag 4)
@@ -1365,7 +1402,7 @@ mod tests {
         );
 
         // CatchUpPage (tag 11) -> repeated ProposalMessage blocks (tag 3) and repeated Transaction (tag 5),
-        // including 8-byte padded entries matching CATCH_UP_PAGE_BYTES_PER_EXTRA_ITEM (e.g. 1a 06 + three 18 00 varints).
+        // including 8-byte padded entries matching CATCH_UP_PAGE_BYTES_PER_EXTRA_ITEM (1a 06 + three 18 00 varints).
         let padded_entry_body = [0x18, 0x00, 0x18, 0x00, 0x18, 0x00];
         let padded_block_entry = len_field(3, &padded_entry_body);
         assert_eq!(padded_block_entry.len(), CATCH_UP_PAGE_BYTES_PER_EXTRA_ITEM);
@@ -1375,17 +1412,30 @@ mod tests {
                 .is_ok()
         );
         let padded_blocks_flood = len_field(11, &padded_block_entry.repeat(MAX_CATCH_UP_PAGE_BLOCKS + 1));
-        assert!(
+        let err =
             check_decode_budget::<proto::consensus::HotStuffMessage>(&padded_blocks_flood, HOTSTUFF_MAX_DECODE_ITEMS)
-                .is_err()
-        );
+                .unwrap_err();
+        assert_eq!(err.field, Some("CatchUpPage.blocks"));
         let padded_tx_entry = len_field(5, &padded_entry_body);
         assert_eq!(padded_tx_entry.len(), CATCH_UP_PAGE_BYTES_PER_EXTRA_ITEM);
         let padded_tx_flood = len_field(11, &padded_tx_entry.repeat(MAX_REQUESTED_TRANSACTIONS + 1));
-        assert!(
-            check_decode_budget::<proto::consensus::HotStuffMessage>(&padded_tx_flood, HOTSTUFF_MAX_DECODE_ITEMS)
-                .is_err()
+        let err = check_decode_budget::<proto::consensus::HotStuffMessage>(&padded_tx_flood, HOTSTUFF_MAX_DECODE_ITEMS)
+            .unwrap_err();
+        assert_eq!(err.field, Some("CatchUpPage.transactions"));
+        let padded_cmd_entry = len_field(3, &padded_entry_body);
+        let overfull_block_in_page = len_field(
+            11,
+            &len_field(
+                3,
+                &len_field(1, &padded_cmd_entry.repeat(MAX_BLOCK_COMMANDS + 1)),
+            ),
         );
+        let err = check_decode_budget::<proto::consensus::HotStuffMessage>(
+            &overfull_block_in_page,
+            HOTSTUFF_MAX_DECODE_ITEMS,
+        )
+        .unwrap_err();
+        assert_eq!(err.field, Some("Block.commands"));
 
         // NewView (tag 1) -> QuorumCertificate (tag 1) -> QcSignatures (tag 9) -> Schnorr (tag 1) -> Signature (tag 2)
         let qc_sig_flood = len_field(

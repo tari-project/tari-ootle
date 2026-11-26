@@ -507,7 +507,7 @@ mod tests {
         );
 
         let leaf = SpendCondition::single(AtomicCondition::AccessRule(AccessRule::AllowAll));
-        let (witness, root) = script_path_witness(&[leaf.clone()], &leaf).unwrap();
+        let (witness, root) = script_path_witness(std::slice::from_ref(&leaf), &leaf).unwrap();
         let cov_in1 = StealthInputWitness {
             mask_and_value: MaskAndValue {
                 mask: mask1,

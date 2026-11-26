@@ -144,7 +144,8 @@ mod tests {
         let non_canonical_address = OotleAddress::new(
             Network::LocalNet,
             view_key.to_public_key().to_byte_type(),
-            RistrettoPublicKeyBytes::from([2u8; 32]),
+            // Above the field modulus with the sign bit set, so it has no Ristretto decoding
+            RistrettoPublicKeyBytes::from([0xff; 32]),
         )
         .to_bech32_string();
 

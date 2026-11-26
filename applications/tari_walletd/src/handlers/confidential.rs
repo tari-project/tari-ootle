@@ -629,35 +629,16 @@ mod tests {
         assert_eq!(decrypted.memo, Some(memo));
     }
 
-    #[tokio::test]
-    async fn confidential_proofs_reject_invalid_amounts_and_destination_addresses_before_advancing_keys() {
-        let daemon = TestDaemon::start().await;
+    /// Adds an account with one vault of `resource_address` holding a single unspent output of 100.
+    fn seed_confidential_vault(
+        daemon: &TestDaemon,
+        resource_address: ResourceAddress,
+        view_key_id: KeyId,
+        owner_key_id: KeyId,
+    ) -> VaultId {
         let sdk = daemon.context.wallet_sdk();
-        let view_key = sdk.key_manager_api().next_key(KeyBranch::ViewOnlyKey).unwrap();
-        let account_key = sdk.key_manager_api().next_key(KeyBranch::Account).unwrap();
-        let valid_address = OotleAddress::new(
-            Network::LocalNet,
-            view_key.to_public_key().to_byte_type(),
-            account_key.to_public_key().to_byte_type(),
-        );
-        let wrong_network_address = OotleAddress::new(
-            Network::MainNet,
-            view_key.to_public_key().to_byte_type(),
-            account_key.to_public_key().to_byte_type(),
-        );
-        let invalid_account_key_address = OotleAddress::new(
-            Network::LocalNet,
-            view_key.to_public_key().to_byte_type(),
-            RistrettoPublicKeyBytes::from([2u8; 32]),
-        );
-        let resource_address: ResourceAddress =
-            "resource_0000000000000000000000000000000000000000000000000000000000000001"
-                .parse()
-                .unwrap();
         let account_address = ComponentAddress::from_array([0x11; 32]);
-        let vault_id = VaultId::new([0x22; 32]);
-        let view_key_id = KeyId::derived(KeyBranch::ViewOnlyKey, view_key.key_index());
-        let owner_key_id = KeyId::derived(KeyBranch::Account, account_key.key_index());
+        let vault_id = VaultId::from_array([0x22; 32]);
         sdk.accounts_api()
             .add_account(
                 Some("default"),
@@ -696,6 +677,38 @@ mod tests {
                 lock_id: None,
             })
             .unwrap();
+        vault_id
+    }
+
+    #[tokio::test]
+    async fn confidential_proofs_reject_invalid_amounts_and_destination_addresses_before_advancing_keys() {
+        let daemon = TestDaemon::start().await;
+        let sdk = daemon.context.wallet_sdk();
+        let view_key = sdk.key_manager_api().next_key(KeyBranch::ViewOnlyKey).unwrap();
+        let account_key = sdk.key_manager_api().next_key(KeyBranch::Account).unwrap();
+        let valid_address = OotleAddress::new(
+            Network::LocalNet,
+            view_key.to_public_key().to_byte_type(),
+            account_key.to_public_key().to_byte_type(),
+        );
+        let wrong_network_address = OotleAddress::new(
+            Network::MainNet,
+            view_key.to_public_key().to_byte_type(),
+            account_key.to_public_key().to_byte_type(),
+        );
+        let invalid_account_key_address = OotleAddress::new(
+            Network::LocalNet,
+            view_key.to_public_key().to_byte_type(),
+            // Above the field modulus with the sign bit set, so it has no Ristretto decoding
+            RistrettoPublicKeyBytes::from([0xff; 32]),
+        );
+        let resource_address: ResourceAddress =
+            "resource_0000000000000000000000000000000000000000000000000000000000000001"
+                .parse()
+                .unwrap();
+        let view_key_id = KeyId::derived(KeyBranch::ViewOnlyKey, view_key.key_index());
+        let owner_key_id = KeyId::derived(KeyBranch::Account, account_key.key_index());
+        let vault_id = seed_confidential_vault(&daemon, resource_address, view_key_id, owner_key_id);
 
         for bad_address in [wrong_network_address.clone(), invalid_account_key_address.clone()] {
             let err = handle_create_output_proof(

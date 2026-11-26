@@ -101,13 +101,19 @@ where
 
 pub fn handle_apdu_request<const N: usize>(state_mut: &mut State, command: Command<'_, N>) {
     match command.decode::<Request>() {
-        Ok(request) => match request.instruction {
-            Instruction::GetVersion => handle(state_mut, command, handlers::get_version),
-            Instruction::GetAppName => handle(state_mut, command, handlers::get_app_name),
-            Instruction::GetPublicKey => handle(state_mut, command, handlers::get_public_key),
-            Instruction::SignTransaction => handle_sign(state_mut, command, &request),
+        Ok(request) => {
+            if !matches!(request.instruction, Instruction::SignTransaction) {
+                state_mut.reset();
+            }
+            match request.instruction {
+                Instruction::GetVersion => handle(state_mut, command, handlers::get_version),
+                Instruction::GetAppName => handle(state_mut, command, handlers::get_app_name),
+                Instruction::GetPublicKey => handle(state_mut, command, handlers::get_public_key),
+                Instruction::SignTransaction => handle_sign(state_mut, command, &request),
+            }
         },
         Err(e) => {
+            state_mut.reset();
             command.into_response().send(e).unwrap();
         },
     }

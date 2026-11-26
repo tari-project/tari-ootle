@@ -86,6 +86,9 @@ where
 }
 
 pub fn handle_apdu_request(state_mut: &mut State, (comm, req): (&mut Comm, Request)) {
+    if !matches!(req.instruction, Instruction::SignTransaction) {
+        state_mut.reset();
+    }
     let res = match req.instruction {
         Instruction::GetVersion => handle(state_mut, comm, handlers::get_version),
         Instruction::GetAppName => handle(state_mut, comm, handlers::get_app_name),

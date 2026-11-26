@@ -35,7 +35,7 @@ const FILTERED_WATCHED_PAGE_SIZE: u64 = 200;
 
 /// Maximum number of watched liquidity pools inspected per filtered `swap_pools.list` call. Bounded below the
 /// indexer's 10,000 offset limit so a single JSON-RPC call cannot make an unbounded number of round trips or fail
-/// past the indexer's offset cap.
+/// past the indexer's offset cap. Keep in sync with the doc comment on `SwapPoolsListRequest::resource_pair`.
 const MAX_FILTERED_WATCHED_POOLS_SCANNED: u64 = 400;
 
 /// Maximum number of concurrent `fetch_pool_info` requests when scanning a page of watched liquidity pools.

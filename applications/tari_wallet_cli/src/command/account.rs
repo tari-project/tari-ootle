@@ -68,7 +68,7 @@ pub struct SetDefaultArgs {
 #[derive(Debug, Args, Clone)]
 pub struct GetBalancesArgs {
     pub account_name: Option<ComponentAddressOrName>,
-    #[clap(long, short = 'a', alias = "account", conflicts_with = "account_name")]
+    #[clap(long, short = 'a', alias = "account", conflicts_with = "account-name")]
     pub account: Option<ComponentAddressOrName>,
 }
 
@@ -80,7 +80,7 @@ pub struct GetArgs {
 #[derive(Debug, Args, Clone)]
 pub struct CreateFreeTestCoinsArgs {
     pub account_name: Option<ComponentAddressOrName>,
-    #[clap(long, short = 'a', alias = "account", conflicts_with = "account_name")]
+    #[clap(long, short = 'a', alias = "account", conflicts_with = "account-name")]
     pub account: Option<ComponentAddressOrName>,
     #[clap(long, short, alias = "fee")]
     pub fee: Option<u64>,
@@ -252,6 +252,11 @@ mod tests {
         command: AccountsSubcommand,
     }
 
+    fn assert_account_conflict(argv: &[&str]) {
+        let err = CliTest::try_parse_from(argv).expect_err("positional account and --account must conflict");
+        assert_eq!(err.kind(), clap::ErrorKind::ArgumentConflict);
+    }
+
     #[test]
     fn test_get_balances_args_parsing() {
         let cli_pos = CliTest::try_parse_from(["wallet", "get-balances", "my_positional_acc"])
@@ -263,7 +268,7 @@ mod tests {
                     args.account_name,
                     Some(ComponentAddressOrName::Name(ref n)) if n == "my_positional_acc"
                 ));
-                assert_eq!(args.account, None);
+                assert!(args.account.is_none());
             },
             _ => panic!("Expected AccountsSubcommand::GetBalances"),
         }
@@ -273,7 +278,7 @@ mod tests {
 
         match cli_named.command {
             AccountsSubcommand::GetBalances(args) => {
-                assert_eq!(args.account_name, None);
+                assert!(args.account_name.is_none());
                 assert!(matches!(
                     args.account,
                     Some(ComponentAddressOrName::Name(ref n)) if n == "my_special_acc"
@@ -287,7 +292,7 @@ mod tests {
 
         match cli_short.command {
             AccountsSubcommand::GetBalances(args) => {
-                assert_eq!(args.account_name, None);
+                assert!(args.account_name.is_none());
                 assert!(matches!(
                     args.account,
                     Some(ComponentAddressOrName::Name(ref n)) if n == "another_acc"
@@ -301,11 +306,14 @@ mod tests {
 
         match cli_default.command {
             AccountsSubcommand::GetBalances(args) => {
-                assert_eq!(args.account_name, None);
-                assert_eq!(args.account, None);
+                assert!(args.account_name.is_none());
+                assert!(args.account.is_none());
             },
             _ => panic!("Expected AccountsSubcommand::GetBalances"),
         }
+
+        assert_account_conflict(&["wallet", "get-balances", "foo", "--account", "bar"]);
+        assert_account_conflict(&["wallet", "get-balances", "foo", "-a", "bar"]);
     }
 
     #[test]
@@ -319,7 +327,7 @@ mod tests {
                     args.account_name,
                     Some(ComponentAddressOrName::Name(ref n)) if n == "my_positional_acc"
                 ));
-                assert_eq!(args.account, None);
+                assert!(args.account.is_none());
             },
             _ => panic!("Expected AccountsSubcommand::CreateFreeTestCoins"),
         }
@@ -338,7 +346,7 @@ mod tests {
 
         match cli_flags.command {
             AccountsSubcommand::CreateFreeTestCoins(args) => {
-                assert_eq!(args.account_name, None);
+                assert!(args.account_name.is_none());
                 assert!(matches!(
                     args.account,
                     Some(ComponentAddressOrName::Name(ref n)) if n == "my_special_acc"
@@ -363,7 +371,7 @@ mod tests {
 
         match cli_short.command {
             AccountsSubcommand::CreateFreeTestCoins(args) => {
-                assert_eq!(args.account_name, None);
+                assert!(args.account_name.is_none());
                 assert!(matches!(
                     args.account,
                     Some(ComponentAddressOrName::Name(ref n)) if n == "another_acc"
@@ -373,5 +381,8 @@ mod tests {
             },
             _ => panic!("Expected AccountsSubcommand::CreateFreeTestCoins"),
         }
+
+        assert_account_conflict(&["wallet", "create-free-test-coins", "foo", "--account", "bar"]);
+        assert_account_conflict(&["wallet", "create-free-test-coins", "foo", "-a", "bar"]);
     }
 }

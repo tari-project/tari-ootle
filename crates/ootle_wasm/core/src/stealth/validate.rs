@@ -44,6 +44,7 @@ mod tests {
         keys::{PublicKey, SecretKey},
         ristretto::{RistrettoPublicKey, RistrettoSecretKey},
     };
+    use tari_engine_types::stealth::ConditionStructureError;
     use tari_ootle_wallet_crypto::{
         MaskAndValue,
         OutputWitness,
@@ -140,6 +141,10 @@ mod tests {
         )];
         let json = serde_json::to_string(&transfer).unwrap();
         let err = validate_stealth_transfer(&json, None).unwrap_err();
-        assert!(matches!(err, OotleWasmError::StealthValidation(_)));
+        let expected = ConditionStructureError::EmptyConjunction.to_string();
+        assert!(
+            matches!(&err, OotleWasmError::StealthValidation(msg) if *msg == expected),
+            "unexpected error: {err}"
+        );
     }
 }

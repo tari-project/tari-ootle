@@ -23,7 +23,10 @@
 
 use std::fmt;
 
-use tari_consensus::consensus_constants::ConsensusConstants;
+use tari_consensus::{
+    consensus_constants::ConsensusConstants,
+    messages::{MAX_CATCH_UP_PAGE_BLOCKS, MAX_REQUESTED_TRANSACTIONS},
+};
 
 use crate::proto;
 
@@ -365,9 +368,24 @@ impl DecodeBudget for proto::consensus::HotStuffMessage {
 
 impl DecodeBudget for proto::consensus::CatchUpPage {
     fn count_messages(buf: &[u8], budget: &mut Budget) -> Result<(), DecodeBudgetExceeded> {
+        let mut blocks = 0usize;
+        let mut transactions = 0usize;
         walk_len_fields(buf, budget, |tag, contents, budget| match tag {
-            3 | 4 => budget.charge_message::<proto::consensus::ProposalMessage>(contents),
-            5 => budget.charge_message::<proto::transaction::Transaction>(contents),
+            3 => {
+                blocks = blocks.saturating_add(1);
+                if blocks > MAX_CATCH_UP_PAGE_BLOCKS {
+                    return Err(budget.exceeded());
+                }
+                budget.charge_message::<proto::consensus::ProposalMessage>(contents)
+            },
+            4 => budget.charge_message::<proto::consensus::ProposalMessage>(contents),
+            5 => {
+                transactions = transactions.saturating_add(1);
+                if transactions > MAX_REQUESTED_TRANSACTIONS {
+                    return Err(budget.exceeded());
+                }
+                budget.charge_message::<proto::transaction::Transaction>(contents)
+            },
             _ => Ok(()),
         })
     }
@@ -910,10 +928,7 @@ fn witness_proposal(proposal: proto::consensus::ProposalMessage) {
 #[cfg(test)]
 mod tests {
     use prost::Message;
-    use tari_consensus::{
-        hotstuff::DEFAULT_CATCH_UP_PAGE_BYTES,
-        messages::{MAX_CATCH_UP_PAGE_BLOCKS, MAX_REQUESTED_TRANSACTIONS},
-    };
+    use tari_consensus::hotstuff::DEFAULT_CATCH_UP_PAGE_BYTES;
     use tari_ootle_common_types::{ShardGroup, shard::Shard};
     use tari_swarm::messaging::MAX_MESSAGE_SIZE;
 
@@ -1349,15 +1364,26 @@ mod tests {
             check_decode_budget::<proto::consensus::HotStuffMessage>(&tx_flood, HOTSTUFF_MAX_DECODE_ITEMS).is_err()
         );
 
-        // CatchUpPage (tag 11) -> repeated empty ProposalMessage blocks (tag 3) and repeated empty Transaction (tag 5)
-        let page_blocks_flood = len_field(11, &empty_elements(3, flood_count));
+        // CatchUpPage (tag 11) -> repeated ProposalMessage blocks (tag 3) and repeated Transaction (tag 5),
+        // including 8-byte padded entries matching CATCH_UP_PAGE_BYTES_PER_EXTRA_ITEM (e.g. 1a 06 + three 18 00 varints).
+        let padded_entry_body = [0x18, 0x00, 0x18, 0x00, 0x18, 0x00];
+        let padded_block_entry = len_field(3, &padded_entry_body);
+        assert_eq!(padded_block_entry.len(), CATCH_UP_PAGE_BYTES_PER_EXTRA_ITEM);
+        let max_padded_blocks = len_field(11, &padded_block_entry.repeat(MAX_CATCH_UP_PAGE_BLOCKS));
         assert!(
-            check_decode_budget::<proto::consensus::HotStuffMessage>(&page_blocks_flood, HOTSTUFF_MAX_DECODE_ITEMS)
+            check_decode_budget::<proto::consensus::HotStuffMessage>(&max_padded_blocks, HOTSTUFF_MAX_DECODE_ITEMS)
+                .is_ok()
+        );
+        let padded_blocks_flood = len_field(11, &padded_block_entry.repeat(MAX_CATCH_UP_PAGE_BLOCKS + 1));
+        assert!(
+            check_decode_budget::<proto::consensus::HotStuffMessage>(&padded_blocks_flood, HOTSTUFF_MAX_DECODE_ITEMS)
                 .is_err()
         );
-        let page_tx_flood = len_field(11, &empty_elements(5, flood_count));
+        let padded_tx_entry = len_field(5, &padded_entry_body);
+        assert_eq!(padded_tx_entry.len(), CATCH_UP_PAGE_BYTES_PER_EXTRA_ITEM);
+        let padded_tx_flood = len_field(11, &padded_tx_entry.repeat(MAX_REQUESTED_TRANSACTIONS + 1));
         assert!(
-            check_decode_budget::<proto::consensus::HotStuffMessage>(&page_tx_flood, HOTSTUFF_MAX_DECODE_ITEMS)
+            check_decode_budget::<proto::consensus::HotStuffMessage>(&padded_tx_flood, HOTSTUFF_MAX_DECODE_ITEMS)
                 .is_err()
         );
 

@@ -927,7 +927,11 @@ mod tests {
         assert!(matches!(result.result, SubstateResult::Down { .. }));
         assert_eq!(result.result.version(), Some(SubstateVersion::new(3)));
         assert!(!result.verified);
-        assert_eq!(started.load(Ordering::SeqCst), 3, "settled as soon as f + 1 Down(3) arrived");
+        assert_eq!(
+            started.load(Ordering::SeqCst),
+            3,
+            "settled as soon as f + 1 Down(3) arrived"
+        );
 
         // Same-version precedence in conclude (e.g., when f = 0):
         let result = race(2, 1, true, None, vec![(0, Ok((up(3), None))), (1, Ok((down(3), None)))])

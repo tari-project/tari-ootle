@@ -285,6 +285,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
 
     /// Locks the inputs `spec` selects and builds its statement, returning the statement, the key that signs it, the
     /// inputs it spends, and the change amount (if any).
+    #[allow(clippy::too_many_lines)]
     fn build_transfer_statement(
         &self,
         lock_id: WalletLockId,

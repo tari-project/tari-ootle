@@ -227,16 +227,16 @@ impl NetworkWallet for OotleWallet {
     }
 
     async fn sign_transaction(&self, unsigned: UnsignedTransaction) -> WalletResult<Transaction> {
-        let authorizers: AuthorizerSet = self
-            .additional_signers()
-            .map(|address| *address.account_public_key())
-            .collect();
-        let mut signatures = vec![];
-        if !unsigned.is_seal_signer_authorized() {
-            let sig = self.authorize_transaction(&self.default, &unsigned).await?;
-            signatures.push(sig.into_signature());
-        }
-        for signer in self.additional_signers() {
+        // The seal signature authorizes the default signer under `MainSigner::SealSigner`; otherwise the default
+        // signer adds its own authorization alongside the additional signers.
+        let default_signer = (!unsigned.main_signer().is_seal_signer_authorized()).then_some(&self.default);
+        let signers = default_signer
+            .into_iter()
+            .chain(self.additional_signers())
+            .collect::<Vec<_>>();
+        let authorizers: AuthorizerSet = signers.iter().map(|address| *address.account_public_key()).collect();
+        let mut signatures = Vec::with_capacity(signers.len());
+        for signer in signers {
             let sig = self.authorize_transaction(signer, &authorizers, &unsigned).await?;
             signatures.push(sig.into_signature());
         }
@@ -284,11 +284,24 @@ impl From<TransactionSignature> for TransactionAuthorization {
 
 #[cfg(test)]
 mod tests {
-    use tari_ootle_common_types::{Epoch, Network};
-    use tari_ootle_transaction::Transaction;
+    use tari_ootle_transaction::{Epoch, MainSigner, Transaction, is_canonical_authorization_list};
 
     use super::*;
-    use crate::key_provider::local::PrivateKeyProvider;
+    use crate::{Network, key_provider::PrivateKeyProvider, transaction::TransactionSigner};
+
+    fn two_signer_wallet() -> (OotleWallet, Address, Address) {
+        let signer_a = PrivateKeyProvider::random(Network::LocalNet);
+        let addr_a = signer_a.address().clone();
+        let signer_b = PrivateKeyProvider::random(Network::LocalNet);
+        let addr_b = signer_b.address().clone();
+        let mut wallet = OotleWallet::new(signer_a);
+        wallet.register_key_provider(signer_b);
+        (wallet, addr_a, addr_b)
+    }
+
+    fn signature_keys(tx: &Transaction) -> Vec<RistrettoPublicKeyBytes> {
+        tx.signatures().iter().map(|sig| *sig.public_key()).collect()
+    }
 
     #[tokio::test]
     async fn default_signer_is_not_duplicated_in_additional_signers() {
@@ -303,11 +316,41 @@ mod tests {
         let unsigned = Transaction::builder_localnet(Epoch(100)).build_unsigned();
         let signed = wallet.sign_transaction(unsigned).await.unwrap();
         assert!(signed.signatures().is_empty());
+        assert!(signed.verify_all_signatures());
 
         wallet.register_key_provider(signer_b);
         assert_eq!(wallet.additional_signers().collect::<Vec<_>>(), vec![&addr_b]);
 
         wallet.set_default_signer(&addr_b).unwrap();
         assert_eq!(wallet.additional_signers().collect::<Vec<_>>(), vec![&addr_a]);
+    }
+
+    #[tokio::test]
+    async fn seal_signer_main_signer_authorizes_only_additional_signers() {
+        let (wallet, _addr_a, addr_b) = two_signer_wallet();
+
+        let unsigned = Transaction::builder_localnet(Epoch(100)).build_unsigned();
+        let signed = wallet.sign_transaction(unsigned).await.unwrap();
+
+        assert_eq!(signature_keys(&signed), vec![*addr_b.account_public_key()]);
+        assert!(signed.verify_all_signatures());
+    }
+
+    #[tokio::test]
+    async fn unauthorized_seal_signer_adds_default_authorization_in_canonical_order() {
+        let (wallet, addr_a, addr_b) = two_signer_wallet();
+        let mut expected = vec![*addr_a.account_public_key(), *addr_b.account_public_key()];
+        expected.sort();
+
+        for main_signer in [MainSigner::None, MainSigner::Authorizer(*addr_a.account_public_key())] {
+            let unsigned = Transaction::builder_localnet(Epoch(100))
+                .with_main_signer(main_signer)
+                .build_unsigned();
+            let signed = wallet.sign_transaction(unsigned).await.unwrap();
+
+            assert_eq!(signature_keys(&signed), expected);
+            assert!(is_canonical_authorization_list(signed.signatures()));
+            assert!(signed.verify_all_signatures());
+        }
     }
 }

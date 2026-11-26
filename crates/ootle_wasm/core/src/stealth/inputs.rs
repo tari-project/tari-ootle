@@ -82,7 +82,7 @@ pub fn build_stealth_inputs_statement_from_inputs(
 fn ensure_canonical_unique_input_commitments(inputs: &[StealthInput]) -> Result<(), OotleWasmError> {
     let mut seen = BTreeSet::new();
     for input in inputs {
-        let _ = public_key_from_bytes(input.commitment.as_bytes())
+        public_key_from_bytes(input.commitment.as_bytes())
             .map_err(|e| OotleWasmError::InvalidCommitment(e.to_string()))?;
         if !seen.insert(input.commitment) {
             return Err(OotleWasmError::Stealth(format!(

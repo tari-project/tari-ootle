@@ -65,7 +65,7 @@ pub fn seal_transaction_json(tx_json: &str, seal_signer_secret_key: &[u8]) -> Re
     let unsealed = parse_transaction_json(tx_json)?.into_unsealed();
     let secret = secret_key_from_bytes(seal_signer_secret_key)?;
     let seal_signer = RistrettoPublicKey::from_secret_key(&secret).to_byte_type();
-    if !unsealed.verify_all_signatures(&seal_signer) {
+    if !unsealed.verify_all_signatures(SchemaVersion::CURRENT, &seal_signer) {
         return Err(OotleWasmError::AuthorizationSignatureInvalid);
     }
     let sealed = unsealed.seal(&secret);

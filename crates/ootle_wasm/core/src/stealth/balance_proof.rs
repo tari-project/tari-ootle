@@ -66,13 +66,13 @@ pub fn validate_balance_proof_signature(
             expected: RistrettoPublicKeyBytes::length(),
             got: e.actual_size(),
         })?;
-    let _ = public_key_from_bytes(public_nonce.as_bytes())?;
+    public_key_from_bytes(public_nonce.as_bytes())?;
     let signature_scalar = Scalar32Bytes::from_bytes(signature).map_err(|e| OotleWasmError::InvalidByteLength {
         field: "signature",
         expected: Scalar32Bytes::length(),
         got: e.actual_size(),
     })?;
-    let _ = secret_key_from_bytes(signature_scalar.as_bytes())?;
+    secret_key_from_bytes(signature_scalar.as_bytes())?;
     let sig_bytes: BalanceProofSignature = SchnorrSignatureBytes::new(public_nonce, signature_scalar);
     let inputs_statement: StealthInputsStatement = serde_json::from_str(inputs_statement_json)?;
     let outputs_statement: StealthOutputsStatement = serde_json::from_str(outputs_statement_json)?;
@@ -198,5 +198,34 @@ mod tests {
         let err = validate_balance_proof_signature(&[0u8; 31], &[0u8; 32], &inputs_json, &outputs_json, NO_CLAIMS)
             .unwrap_err();
         assert!(matches!(err, OotleWasmError::InvalidByteLength { .. }));
+    }
+
+    #[test]
+    fn validate_rejects_non_canonical_nonce_and_scalar() {
+        let (_, _, transfer) = build_simple_transfer();
+        let inputs_json = serde_json::to_string(&transfer.inputs_statement).unwrap();
+        let outputs_json = serde_json::to_string(&transfer.outputs_statement).unwrap();
+        let proof = transfer.balance_proof.unwrap();
+
+        // 0xff..ff is neither a canonical Ristretto point nor a reduced scalar.
+        let err = validate_balance_proof_signature(
+            &[0xffu8; 32],
+            proof.signature().as_bytes(),
+            &inputs_json,
+            &outputs_json,
+            NO_CLAIMS,
+        )
+        .unwrap_err();
+        assert!(matches!(err, OotleWasmError::InvalidPublicKey(_)));
+
+        let err = validate_balance_proof_signature(
+            proof.public_nonce().as_bytes(),
+            &[0xffu8; 32],
+            &inputs_json,
+            &outputs_json,
+            NO_CLAIMS,
+        )
+        .unwrap_err();
+        assert!(matches!(err, OotleWasmError::InvalidSecretKey(_)));
     }
 }

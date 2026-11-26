@@ -23,7 +23,10 @@ use tari_ootle_wallet_sdk::{
     NetworkInterfaceError,
     WalletSdk,
     WalletSdkSpec,
-    apis::{substate::SubstateApiError, validator_set::ValidatorSetApiError},
+    apis::{
+        substate::{ReadSubstate, SubstateApiError},
+        validator_set::ValidatorSetApiError,
+    },
     models::{
         AccountWithAddress,
         CheckpointStateVersion,
@@ -607,8 +610,14 @@ where TSpec: WalletSdkSpec
                         burnt.version,
                         read.substate.version()
                     );
-                    if let Some(proven_up) = read.proven_up {
-                        self.sdk.stealth_outputs_api().record_proven_up(&address, proven_up)?;
+                    if let Some(proven_up) = read.proven_up &&
+                        let Some(utxo) = read.substate.substate_value().as_utxo()
+                    {
+                        self.sdk.stealth_outputs_api().record_proven_up_and_frozen(
+                            &address,
+                            proven_up,
+                            utxo.is_frozen(),
+                        )?;
                     }
                 },
                 Err(err) if is_refusal(&err) => {
@@ -731,11 +740,7 @@ where TSpec: WalletSdkSpec
                     continue;
                 },
                 Ok(read) => {
-                    // An output a freeze or unfreeze took to a later version is live at it, and later checks prove
-                    // that version gone.
-                    if let Some(proven_up) = read.proven_up {
-                        self.sdk.stealth_outputs_api().record_proven_up(&address, proven_up)?;
-                    }
+                    self.record_live_held_output(&address, &read)?;
                     continue;
                 },
                 Err(SubstateApiError::SubstateDoesNotExist { .. }) => {},
@@ -783,6 +788,28 @@ where TSpec: WalletSdkSpec
                 },
                 Err(err) => return Err(err.into()),
             }
+        }
+        Ok(())
+    }
+
+    /// Records the frozen flag, and any proven version, of the held output at `address` that `read` serves live. An
+    /// output a freeze or unfreeze took to a later version is live at it, and later checks prove that version gone.
+    fn record_live_held_output(
+        &self,
+        address: &UtxoAddress,
+        read: &ReadSubstate,
+    ) -> Result<(), StealthScannerApiError> {
+        let Some(utxo) = read.substate.substate_value().as_utxo() else {
+            return Ok(());
+        };
+        let stealth_outputs_api = self.sdk.stealth_outputs_api();
+        match read.proven_up {
+            Some(proven_up) => {
+                stealth_outputs_api.record_proven_up_and_frozen(address, proven_up, utxo.is_frozen())?;
+            },
+            None => {
+                stealth_outputs_api.set_utxo_frozen(address, utxo.is_frozen())?;
+            },
         }
         Ok(())
     }

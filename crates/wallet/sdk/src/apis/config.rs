@@ -32,9 +32,7 @@ impl<'a, TStore: WalletStore> ConfigApi<'a, TStore> {
             string: network,
             details: e.to_string(),
         })?;
-        self.cached_network
-            .set(network)
-            .expect("Network should only be set once");
+        let _ignore = self.cached_network.set(network);
         Ok(network)
     }
 

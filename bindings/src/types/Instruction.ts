@@ -2,7 +2,6 @@
 import type { AllocatableAddressType } from "./AllocatableAddressType";
 import type { Amount } from "./Amount";
 import type { Assertion } from "./Assertion";
-import type { ClaimBurnOutputData } from "./ClaimBurnOutputData";
 import type { ComponentAccessRules } from "./ComponentAccessRules";
 import type { ComponentReference } from "./ComponentReference";
 import type { Hash32 } from "./Hash32";
@@ -28,7 +27,7 @@ export type Instruction =
   | { CallFunction: { address: Hash32; function: string; args: Array<InstructionArg> } }
   | { CallMethod: { call: ComponentReference; method: string; args: Array<InstructionArg> } }
   | { PutLastInstructionOutputOnWorkspace: { key: number } }
-  | { ClaimBurn: { claim: MinotariBurnClaimProof; output_data: ClaimBurnOutputData } }
+  | { ClaimBurn: { claim: MinotariBurnClaimProof } }
   | { ClaimValidatorFees: { address: ValidatorFeePoolAddress; max_amount: Amount | null } }
   | "DropAllProofsInWorkspace"
   | { Assert: { key: WorkspaceOffsetId; assertion: Assertion } }
@@ -61,4 +60,6 @@ export type Instruction =
     }
   | { PutIntoBucket: { src: WorkspaceOffsetId; dest: WorkspaceOffsetId } }
   | { AuthorizeProof: { proof: WorkspaceOffsetId } }
-  | { DropProofAuthorization: { proof: WorkspaceOffsetId } };
+  | { DropProofAuthorization: { proof: WorkspaceOffsetId } }
+  | { SetComponentAccessRules: { component: ComponentReference; access_rules: ComponentAccessRules } }
+  | { SetComponentOwnerRule: { component: ComponentReference; owner_rule: OwnerRule } };

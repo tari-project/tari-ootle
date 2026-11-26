@@ -20,13 +20,20 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{fmt, fmt::Formatter, sync::Arc};
+use std::{collections::HashMap, fmt, fmt::Formatter, sync::Arc};
 
 use tari_engine_types::limits::{self, ModuleShape};
-use tari_template_abi::{FunctionDef, FunctionKind, TEMPLATE_DEF_CUSTOM_SECTION, TemplateDef, Type, WASM_PTR_SIZE};
+use tari_template_abi::{
+    FunctionDef,
+    FunctionKind,
+    TEMPLATE_DEF_CUSTOM_SECTION,
+    TemplateDef,
+    Type,
+    WASM_PTR_SIZE,
+    func_hasher::hash_function_name,
+};
 use wasmer::{
     Engine,
-    ExternType,
     Function,
     FunctionType,
     Instance,
@@ -34,7 +41,17 @@ use wasmer::{
     TypedFunction,
     WasmPtr,
     imports,
-    wasmparser::{Parser, Payload},
+    wasmparser::{
+        Export,
+        ExportSectionReader,
+        ExternalKind,
+        FuncType,
+        Parser,
+        Payload,
+        TypeRef,
+        TypeSectionReader,
+        ValType,
+    },
 };
 
 use crate::{
@@ -45,11 +62,12 @@ use crate::{
         WasmProcess,
         WasmValidationError,
         engine,
-        module_shape::{ModuleStructure, validate_module_structure},
+        module_shape::{ModuleStructure, measure_module_structure, validate_module_structure},
     },
 };
 
 pub type MainFunction = TypedFunction<(WasmPtr<u8>, u32), WasmPtr<u8>>;
+
 #[derive(Debug, Clone)]
 pub struct WasmModule {
     code: Box<[u8]>,
@@ -60,38 +78,44 @@ impl WasmModule {
         Self { code: code.into() }
     }
 
-    /// Every admission rule a published module must pass that the module bytes alone can answer.
+    /// Checks a module against the template consensus rules, reading only its bytes.
     ///
-    /// Split out from [`Self::validate_code`] so a publisher can be charged for the compile between
-    /// this and [`Self::compile_prevalidated`]: cranelift is the expensive half, and a module
-    /// refused by a rule here never reaches it, so it must not be billed as though it had.
-    pub fn prevalidate_code(code: &[u8]) -> Result<ModuleStructure, TemplateLoaderError> {
-        // Reject custom sections the engine does not consume. Only the registration path runs this;
-        // already-stored templates (and built-ins) load via `load_template_from_code` without it.
+    /// The rules are the custom sections a module may carry, the structure limits, and the rules
+    /// its `TemplateDef` and exports must follow. The check reads the bytes ahead of any compile,
+    /// and the structure it returns carries the counts that price the compile.
+    ///
+    /// A template is held to these rules once, when it is published. [`Self::load`] leaves them to
+    /// that check, so a rule added later refuses new templates while published ones keep loading.
+    pub fn validate(code: &[u8]) -> Result<ModuleStructure, TemplateLoaderError> {
         reject_disallowed_custom_sections(code).map_err(WasmExecutionError::from)?;
         let structure = validate_module_structure(code).map_err(WasmExecutionError::from)?;
+        // Bytes that do not parse are refused by the compile, which reports the canonical error.
+        if let Some(interface) = read_module_interface(code) {
+            let template = decode_template_def(&interface.template_defs)?;
+            validate_functions(&template)?;
+            validate_module_exports(&interface, &format!("{}_main", template.template_name()))?;
+        }
         Ok(structure)
     }
 
-    /// Compiles a module whose [`Self::prevalidate_code`] pass has already run, so neither of that
-    /// pass's two walks over the binary is repeated.
-    pub fn compile_prevalidated(code: &[u8], shape: ModuleShape) -> Result<TemplateDef, TemplateLoaderError> {
-        // TODO: evaluate if there are acceptable cheaper ways to fully validate
-        let loaded = Self::compile(code, shape)?;
-        Ok(loaded.into_template_def())
+    /// [`Self::validate`], then [`Self::load`].
+    pub fn validate_and_load(code: &[u8]) -> Result<LoadedTemplate, TemplateLoaderError> {
+        let structure = Self::validate(code)?;
+        Self::load_with_shape(code, structure.shape)
     }
 
-    pub fn validate_code(code: &[u8]) -> Result<TemplateDef, TemplateLoaderError> {
-        let structure = Self::prevalidate_code(code)?;
-        Self::compile_prevalidated(code, structure.shape)
+    /// Compiles and instantiates a module.
+    ///
+    /// It applies what any module needs to run: the compile with its instrumentation, the ABI
+    /// version this engine supports, and the memory and table limits that instantiation enforces.
+    /// The template consensus rules belong to [`Self::validate`].
+    pub fn load(code: &[u8]) -> Result<LoadedTemplate, TemplateLoaderError> {
+        let structure = measure_module_structure(code);
+        Self::load_with_shape(code, structure.shape)
     }
 
-    pub fn load_template_from_code(code: &[u8]) -> Result<LoadedTemplate, TemplateLoaderError> {
-        let structure = validate_module_structure(code).map_err(WasmExecutionError::from)?;
-        Self::compile(code, structure.shape)
-    }
-
-    fn compile(code: &[u8], shape: ModuleShape) -> Result<LoadedTemplate, TemplateLoaderError> {
+    /// [`Self::load`] for a module whose shape [`Self::validate`] has already measured.
+    pub(crate) fn load_with_shape(code: &[u8], shape: ModuleShape) -> Result<LoadedTemplate, TemplateLoaderError> {
         let engine = Self::create_engine();
         let module = wasmer::Module::new(&engine, code)?;
         Self::finalize_loaded_module(engine, module, code.len(), shape)
@@ -119,7 +143,7 @@ impl WasmModule {
     /// this behind a node-local cache directory whose contents only this process
     /// writes.
     #[cfg(feature = "wasm-cache")]
-    pub unsafe fn load_template_from_serialized(
+    pub unsafe fn load_serialized(
         serialized: bytes::Bytes,
         code_size: usize,
         shape: ModuleShape,
@@ -130,23 +154,18 @@ impl WasmModule {
         Self::finalize_loaded_module(engine, module, code_size, shape)
     }
 
-    /// Validates a compiled module and turns it into a [`LoadedTemplate`].
+    /// Turns a compiled module into a [`LoadedTemplate`] once the engine supports its ABI version.
     ///
-    /// Every check the module itself can answer runs before the module is instantiated.
-    /// Instantiating creates the guest's linear memory and tables, sized by values the module
-    /// declares, so a module reaches it only once the engine has accepted its ABI and its exports.
+    /// The version is checked before the module is instantiated. Instantiating creates the guest's
+    /// linear memory and tables, sized by values the module declares.
     fn finalize_loaded_module(
         engine: Engine,
         module: wasmer::Module,
         code_size: usize,
         shape: ModuleShape,
     ) -> Result<LoadedTemplate, TemplateLoaderError> {
-        let template = load_template_def_from_custom_section(&module)?;
-        let main_fn = format!("{}_main", template.template_name());
-
+        let template = decode_template_def(module.custom_sections(TEMPLATE_DEF_CUSTOM_SECTION))?;
         WasmProcess::validate_template_abi_version(&template)?;
-        validate_functions(&template)?;
-        validate_module_exports(&module, &main_fn)?;
 
         let mut store = Store::new(engine);
         let imports = imports! {
@@ -185,7 +204,7 @@ impl WasmModule {
 
 impl TemplateModuleLoader for WasmModule {
     fn load_template(&self) -> Result<LoadedTemplate, TemplateLoaderError> {
-        Self::load_template_from_code(&self.code)
+        Self::load(&self.code)
     }
 }
 
@@ -277,15 +296,21 @@ impl fmt::Debug for LoadedWasmTemplate {
     }
 }
 
-/// Recovers the `TemplateDef` from the `tari_tdef` custom section, which every template must
-/// carry. The section is part of the module, so reading it needs no instance and no access to guest
-/// memory.
+/// Recovers the `TemplateDef` from the contents of a module's `tari_tdef` custom sections, of which
+/// every template must carry exactly one. The section is part of the module, so reading it needs no
+/// instance and no access to guest memory.
 ///
-/// Wasmer preserves custom sections through compile and `serialize` /
-/// `deserialize`, so this works on both freshly compiled modules and modules
-/// loaded from the disk cache.
-fn load_template_def_from_custom_section(module: &wasmer::Module) -> Result<TemplateDef, WasmExecutionError> {
-    let mut sections = module.custom_sections(TEMPLATE_DEF_CUSTOM_SECTION);
+/// Publishing reads the sections from the module bytes. Loading reads them from the compiled
+/// module: wasmer preserves custom sections through compile and `serialize` / `deserialize`, so
+/// that works on both freshly compiled modules and modules loaded from the disk cache.
+///
+/// Wasmer keeps one section per name, the last, so a load always sees a single section. Publishing
+/// sees every copy in the bytes and refuses a module with more than one, which is what makes the
+/// definition a load decodes the one publishing verified.
+fn decode_template_def<S: AsRef<[u8]>>(
+    sections: impl IntoIterator<Item = S>,
+) -> Result<TemplateDef, WasmExecutionError> {
+    let mut sections = sections.into_iter();
     let Some(section) = sections.next() else {
         return Err(WasmExecutionError::AbiTemplateDefSectionMissing);
     };
@@ -300,6 +325,7 @@ fn load_template_def_from_custom_section(module: &wasmer::Module) -> Result<Temp
             ),
         });
     }
+    let section = section.as_ref();
     if section.len() < WASM_PTR_SIZE {
         return Err(WasmExecutionError::AbiTemplateDefSectionMalformed {
             reason: format!(
@@ -341,14 +367,14 @@ const ALLOWED_CUSTOM_SECTIONS: &[&str] = &[TEMPLATE_DEF_CUSTOM_SECTION];
 /// in [`ALLOWED_CUSTOM_SECTIONS`].
 ///
 /// The scan defers to the cranelift compile in
-/// [`WasmModule::load_template_from_code`] for malformed input: a binary that
+/// [`WasmModule::load`] for malformed input: a binary that
 /// `wasmparser` cannot parse will also fail wasmer's validation, so stopping at
 /// the first parse error lets that path report the canonical `CompileError`
 /// rather than a less precise one here.
 fn reject_disallowed_custom_sections(code: &[u8]) -> Result<(), WasmValidationError> {
     for payload in Parser::new(0).parse_all(code) {
         // Malformed wasm: stop and let the cranelift compile in
-        // `load_template_from_code` report the canonical CompileError.
+        // `WasmModule::load` report the canonical CompileError.
         let Ok(payload) = payload else { break };
         if let Payload::CustomSection(reader) = payload &&
             !ALLOWED_CUSTOM_SECTIONS.contains(&reader.name())
@@ -361,10 +387,96 @@ fn reject_disallowed_custom_sections(code: &[u8]) -> Result<(), WasmValidationEr
     Ok(())
 }
 
-/// Checks a module's exports against the template ABI, reading them off the module rather than an
-/// instance: the memory the engine reads and writes, the three functions it calls and their
-/// signatures, and that the module exports no other function.
-fn validate_module_exports(module: &wasmer::Module, main_fn: &str) -> Result<(), WasmExecutionError> {
+/// What a module's bytes declare at its boundary with the engine.
+///
+/// The type and export sections stay as readers over the module bytes, so reading the interface
+/// allocates nothing in proportion to how many exports or how large a signature the module
+/// declares. Only the signatures of the ABI exports are ever converted.
+struct ModuleInterface<'a> {
+    /// The contents of each `tari_tdef` custom section, in module order.
+    template_defs: Vec<&'a [u8]>,
+    types: Option<TypeSectionReader<'a>>,
+    /// The type index of each function, imported functions first as their indexes are the lowest.
+    /// The structure limits bound its length by `max_module_functions`.
+    function_types: Vec<u32>,
+    /// Every entry has been read once, so each one parses.
+    exports: Option<ExportSectionReader<'a>>,
+}
+
+impl<'a> ModuleInterface<'a> {
+    fn exports(&self) -> impl Iterator<Item = Export<'a>> + '_ {
+        self.exports
+            .iter()
+            .flat_map(|reader| reader.clone().into_iter().flatten())
+    }
+
+    /// The signature of function `function`, or `None` when the module declares none the engine
+    /// can represent.
+    fn signature(&self, function: u32) -> Option<FunctionType> {
+        let ty = *self.function_types.get(function as usize)?;
+        let ty = self.types.clone()?.into_iter_err_on_gc_types().nth(ty as usize)?.ok()?;
+        to_function_type(&ty)
+    }
+}
+
+/// Reads a module's [`ModuleInterface`] from its bytes, or `None` for bytes that do not parse.
+fn read_module_interface(code: &[u8]) -> Option<ModuleInterface<'_>> {
+    let mut interface = ModuleInterface {
+        template_defs: Vec::new(),
+        types: None,
+        function_types: Vec::new(),
+        exports: None,
+    };
+    for payload in Parser::new(0).parse_all(code) {
+        match payload.ok()? {
+            Payload::TypeSection(reader) => interface.types = Some(reader),
+            Payload::ImportSection(reader) => {
+                for import in reader.into_imports() {
+                    if let TypeRef::Func(ty) | TypeRef::FuncExact(ty) = import.ok()?.ty {
+                        interface.function_types.push(ty);
+                    }
+                }
+            },
+            Payload::FunctionSection(reader) => {
+                for ty in reader {
+                    interface.function_types.push(ty.ok()?);
+                }
+            },
+            Payload::ExportSection(reader) => {
+                for export in reader.clone() {
+                    export.ok()?;
+                }
+                interface.exports = Some(reader);
+            },
+            Payload::CustomSection(reader) if reader.name() == TEMPLATE_DEF_CUSTOM_SECTION => {
+                interface.template_defs.push(reader.data());
+            },
+            _ => {},
+        }
+    }
+    Some(interface)
+}
+
+/// `ty` as the engine's [`FunctionType`], or `None` for a signature with a type it cannot represent.
+fn to_function_type(ty: &FuncType) -> Option<FunctionType> {
+    let convert = |ty: &ValType| match ty {
+        ValType::I32 => Some(wasmer::Type::I32),
+        ValType::I64 => Some(wasmer::Type::I64),
+        ValType::F32 => Some(wasmer::Type::F32),
+        ValType::F64 => Some(wasmer::Type::F64),
+        ValType::V128 => Some(wasmer::Type::V128),
+        ValType::Ref(ty) if ty.is_func_ref() => Some(wasmer::Type::FuncRef),
+        ValType::Ref(ty) if ty.is_extern_ref() => Some(wasmer::Type::ExternRef),
+        ValType::Ref(_) => None,
+    };
+    let params = ty.params().iter().map(convert).collect::<Option<Vec<_>>>()?;
+    let results = ty.results().iter().map(convert).collect::<Option<Vec<_>>>()?;
+    Some(FunctionType::new(params, results))
+}
+
+/// Checks a module's exports against the template ABI: the memory the engine reads and writes, the
+/// three functions it calls and their signatures, and that the module exports no other function.
+fn validate_module_exports(interface: &ModuleInterface<'_>, main_fn: &str) -> Result<(), WasmExecutionError> {
     // `(call_info_ptr: i32, call_info_len: i32) -> i32`, matching [`MainFunction`].
     let expected_main = FunctionType::new([wasmer::Type::I32, wasmer::Type::I32], [wasmer::Type::I32]);
     // `(len: i32) -> i32` and `(ptr: i32)`, matching `WasmAllocFn` and `WasmFreeFn`.
@@ -372,24 +484,24 @@ fn validate_module_exports(module: &wasmer::Module, main_fn: &str) -> Result<(),
     let expected_free = FunctionType::new([wasmer::Type::I32], []);
 
     let mut memory_export = false;
-    let mut main_signature = None;
-    let mut alloc_signature = None;
-    let mut free_signature = None;
+    let mut main_function = None;
+    let mut alloc_function = None;
+    let mut free_function = None;
 
-    for export in module.exports() {
-        match export.ty() {
-            ExternType::Function(signature) => match export.name() {
-                name if name == main_fn => main_signature = Some(signature.clone()),
-                "tari_alloc" => alloc_signature = Some(signature.clone()),
-                "tari_free" => free_signature = Some(signature.clone()),
+    for export in interface.exports() {
+        match export.kind {
+            ExternalKind::Func | ExternalKind::FuncExact => match export.name {
+                name if name == main_fn => main_function = Some(export.index),
+                "tari_alloc" => alloc_function = Some(export.index),
+                "tari_free" => free_function = Some(export.index),
                 name => {
                     return Err(WasmExecutionError::UnexpectedAbiFunction { name: name.to_string() });
                 },
             },
-            ExternType::Memory(_) => {
-                memory_export |= export.name() == "memory";
+            ExternalKind::Memory => {
+                memory_export |= export.name == "memory";
             },
-            ExternType::Global(_) | ExternType::Table(_) | ExternType::Tag(_) => {},
+            ExternalKind::Table | ExternalKind::Global | ExternalKind::Tag => {},
         }
     }
 
@@ -400,34 +512,68 @@ fn validate_module_exports(module: &wasmer::Module, main_fn: &str) -> Result<(),
         .into());
     }
 
-    validate_export_signature(main_fn, main_signature.as_ref(), &expected_main)?;
-    validate_export_signature("tari_alloc", alloc_signature.as_ref(), &expected_alloc)?;
-    validate_export_signature("tari_free", free_signature.as_ref(), &expected_free)?;
+    let signature = |function: Option<u32>| function.map(|function| interface.signature(function));
+    validate_export_signature(
+        main_fn,
+        signature(main_function).as_ref().map(Option::as_ref),
+        &expected_main,
+    )?;
+    validate_export_signature(
+        "tari_alloc",
+        signature(alloc_function).as_ref().map(Option::as_ref),
+        &expected_alloc,
+    )?;
+    validate_export_signature(
+        "tari_free",
+        signature(free_function).as_ref().map(Option::as_ref),
+        &expected_free,
+    )?;
 
     Ok(())
 }
 
 /// The engine calls each ABI function by name and by type, so a module that exports one under
 /// another signature — or not at all — is refused at admission rather than on its first call.
+///
+/// `signature` is `None` when the module does not export `name`, and `Some(None)` when it exports a
+/// function under a signature the engine cannot represent.
 fn validate_export_signature(
     name: &str,
-    signature: Option<&FunctionType>,
+    signature: Option<Option<&FunctionType>>,
     expected: &FunctionType,
 ) -> Result<(), WasmValidationError> {
     match signature {
-        Some(signature) if signature == expected => Ok(()),
-        Some(signature) => Err(WasmValidationError::InvalidExportSignature {
+        Some(Some(signature)) if signature == expected => Ok(()),
+        Some(Some(signature)) => Err(WasmValidationError::InvalidExportSignature {
             name: name.to_string(),
             signature: signature.to_string(),
+            expected: expected.to_string(),
+        }),
+        Some(None) => Err(WasmValidationError::InvalidExportSignature {
+            name: name.to_string(),
+            signature: "a signature with a type the engine cannot represent".to_string(),
             expected: expected.to_string(),
         }),
         None => Err(WasmValidationError::MissingExport { name: name.to_string() }),
     }
 }
 
+/// The admission rules for a template's [`TemplateDef`].
+///
+/// Every validator runs these when it executes `PublishTemplate`, so they are consensus rules: adding or loosening
+/// one changes which templates the network accepts. Each rule keeps the declared ABI consistent with how the engine
+/// dispatches, locks and evaluates access rules. Only publishing runs them, so a rule added later refuses new
+/// templates while every published one keeps loading.
 fn validate_functions(template_def: &TemplateDef) -> Result<(), WasmExecutionError> {
     match template_def {
         TemplateDef::V2(def) => {
+            if def.template_name.len() > limits::ENGINE_LIMITS.max_template_name_length {
+                return Err(WasmValidationError::TemplateNameTooLong {
+                    name: def.template_name.clone(),
+                    max_length: limits::ENGINE_LIMITS.max_template_name_length,
+                }
+                .into());
+            }
             let function_count = def.functions.len();
             if function_count > limits::WASM_LIMITS.max_functions {
                 return Err(WasmValidationError::TooManyFunctions {
@@ -435,6 +581,7 @@ fn validate_functions(template_def: &TemplateDef) -> Result<(), WasmExecutionErr
                 }
                 .into());
             }
+            validate_unique_dispatch_idents(&def.functions)?;
             for func in &def.functions {
                 if func.name.len() > limits::WASM_LIMITS.max_function_name_length {
                     return Err(WasmValidationError::FunctionNameTooLong {
@@ -491,6 +638,32 @@ fn validate_functions(template_def: &TemplateDef) -> Result<(), WasmExecutionErr
                 }
             }
         },
+    }
+    Ok(())
+}
+
+/// Requires every declared function to carry its own dispatch identifier.
+///
+/// Host-side lookup, receiver locking and method access rules key off `func.name`, whereas `CallInfo` dispatches into
+/// `{Template}_main` by `hash_function_name(&func.name)` alone. A duplicated name, or two names sharing an identifier,
+/// would advertise functions that dispatch can never tell apart. The `#[template]` macro enforces the same rule when a
+/// template is compiled.
+fn validate_unique_dispatch_idents(functions: &[FunctionDef]) -> Result<(), WasmValidationError> {
+    let mut seen_idents = HashMap::with_capacity(functions.len());
+    for func in functions {
+        let ident = hash_function_name(&func.name);
+        if let Some(first) = seen_idents.insert(ident, func.name.as_str()) {
+            if first == func.name {
+                return Err(WasmValidationError::DuplicateFunctionName {
+                    name: func.name.clone(),
+                });
+            }
+            return Err(WasmValidationError::FunctionIdentCollision {
+                first: first.to_string(),
+                second: func.name.clone(),
+                ident,
+            });
+        }
     }
     Ok(())
 }
@@ -725,6 +898,98 @@ mod tests {
                 assert_eq!(tuple_size, max + 1);
             },
             other => panic!("expected FunctionTooManyTupleReturn, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_oversized_template_name() {
+        let max_len = limits::ENGINE_LIMITS.max_template_name_length;
+        let long_name = "T".repeat(max_len + 1);
+        let def = TemplateDef::V2(tari_template_abi::TemplateDefV2 {
+            template_name: long_name.clone(),
+            abi_version: 0,
+            functions: vec![],
+        });
+        match validate_functions(&def) {
+            Err(WasmExecutionError::WasmValidationError(WasmValidationError::TemplateNameTooLong {
+                name,
+                max_length,
+            })) => {
+                assert_eq!(name, long_name);
+                assert_eq!(max_length, max_len);
+            },
+            other => panic!("expected TemplateNameTooLong, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_duplicate_function_names() {
+        use tari_template_abi::Receiver;
+
+        let def = TemplateDef::V2(tari_template_abi::TemplateDefV2 {
+            template_name: "Test".to_string(),
+            abi_version: 0,
+            functions: vec![
+                FunctionDef {
+                    name: "transfer".to_string(),
+                    kind: FunctionKind::Method(Receiver::RefMut),
+                    arguments: vec![],
+                    output: Type::Unit,
+                },
+                FunctionDef {
+                    name: "transfer".to_string(),
+                    kind: FunctionKind::Function,
+                    arguments: vec![],
+                    output: Type::U64,
+                },
+            ],
+        });
+
+        match validate_functions(&def) {
+            Err(WasmExecutionError::WasmValidationError(WasmValidationError::DuplicateFunctionName { name })) => {
+                assert_eq!(name, "transfer");
+            },
+            other => panic!("expected DuplicateFunctionName, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_colliding_function_idents() {
+        use tari_template_abi::Receiver;
+
+        let expected_ident = hash_function_name("admin_90260");
+        assert_eq!(expected_ident, hash_function_name("public_13865"));
+
+        let def = TemplateDef::V2(tari_template_abi::TemplateDefV2 {
+            template_name: "Test".to_string(),
+            abi_version: 0,
+            functions: vec![
+                FunctionDef {
+                    name: "admin_90260".to_string(),
+                    kind: FunctionKind::Method(Receiver::RefMut),
+                    arguments: vec![],
+                    output: Type::Unit,
+                },
+                FunctionDef {
+                    name: "public_13865".to_string(),
+                    kind: FunctionKind::Method(Receiver::Ref),
+                    arguments: vec![],
+                    output: Type::Unit,
+                },
+            ],
+        });
+
+        match validate_functions(&def) {
+            Err(WasmExecutionError::WasmValidationError(WasmValidationError::FunctionIdentCollision {
+                first,
+                second,
+                ident,
+            })) => {
+                assert_eq!(first, "admin_90260");
+                assert_eq!(second, "public_13865");
+                assert_eq!(ident, expected_ident);
+            },
+            other => panic!("expected FunctionIdentCollision, got {other:?}"),
         }
     }
 }

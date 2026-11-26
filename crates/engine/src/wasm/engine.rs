@@ -37,6 +37,7 @@ use wasmer::{
 };
 
 use crate::wasm::{
+    branch_table_limit::BranchTableLimit,
     bulk_metering::BulkMetering,
     instance_reset::ResettableState,
     limiting_tunable::LimitingTunables,
@@ -62,6 +63,9 @@ pub(crate) fn create_engine() -> Engine {
     compiler
         .opt_level(CraneliftOptLevel::SpeedAndSize)
         .canonicalize_nans(true);
+    compiler.push_middleware(Arc::new(BranchTableLimit::new(
+        limits::WASM_LIMITS.max_br_table_targets,
+    )));
     // Must precede the meters, so the globals it exports for restoring are exactly the module's own.
     compiler.push_middleware(Arc::new(ResettableState));
     // Per-call metering ceiling. `WasmProcess::invoke` lowers each call's allowance further to

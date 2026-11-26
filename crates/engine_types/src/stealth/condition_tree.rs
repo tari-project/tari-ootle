@@ -151,6 +151,7 @@ pub fn compute_root(proof: &MerkleProof, leaf: Hash32) -> Hash32 {
 }
 
 /// Verifies that `leaf` is committed in `root` under `proof`.
+#[must_use]
 pub fn verify_inclusion(leaf: Hash32, proof: &MerkleProof, root: Hash32) -> bool {
     compute_root(proof, leaf) == root
 }

@@ -48,7 +48,7 @@ use std::{
 
 use log::*;
 use rand::{CryptoRng, Rng};
-use serde::{Serialize, de::DeserializeOwned};
+use serde::Serialize;
 use tari_common::{
     configuration::bootstrap::prompt,
     exit_codes::{ExitCode, ExitError},
@@ -121,9 +121,31 @@ impl RistrettoKeypair {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(try_from = "KeyPairRaw")]
 struct KeyPairInner {
     secret_key: RistrettoSecretKey,
     public_key: RistrettoPublicKey,
+}
+
+#[derive(serde::Deserialize)]
+struct KeyPairRaw {
+    secret_key: RistrettoSecretKey,
+    public_key: RistrettoPublicKey,
+}
+
+impl TryFrom<KeyPairRaw> for KeyPairInner {
+    type Error = &'static str;
+
+    fn try_from(raw: KeyPairRaw) -> Result<Self, Self::Error> {
+        let expected_public_key = RistrettoPublicKey::from_secret_key(&raw.secret_key);
+        if raw.public_key != expected_public_key {
+            return Err("public_key does not match secret_key");
+        }
+        Ok(Self {
+            secret_key: raw.secret_key,
+            public_key: raw.public_key,
+        })
+    }
 }
 
 /// Loads the node identity, or creates a new one if create_id is true
@@ -255,8 +277,8 @@ fn setup_validator_keypair_inner(
         }
     }
 
-    let identity = match restored {
-        Some(identity) => identity,
+    let (identity, recovery_path) = match restored {
+        Some(identity) => (identity, None),
         None => {
             if !create_id && !prompt("Node identity does not exist.\nWould you like to create one (Y/n)?") {
                 return Err(IdentityError::NotFound);
@@ -270,11 +292,29 @@ fn setup_validator_keypair_inner(
             file.write_all(b"\n")?;
             file.as_file().sync_all()?;
             file.persist_noclobber(&recovery_path).map_err(|e| e.error)?;
-            info!(target: LOG_TARGET, "Back up the validator recovery phrase in {} to a safe location", recovery_path.display());
-            identity
+            (identity, Some(recovery_path))
         },
     };
-    save_identity(identity_file, &identity, overwrite)?;
+    if let Err(err) = save_identity(identity_file, &identity, overwrite) {
+        if let Some(ref recovery_path) = recovery_path &&
+            let Err(remove_err) = fs::remove_file(recovery_path)
+        {
+            warn!(
+                target: LOG_TARGET,
+                "Could not remove recovery phrase file {} for the unsaved identity: {}",
+                recovery_path.display(),
+                remove_err
+            );
+        }
+        return Err(err);
+    }
+    if let Some(recovery_path) = recovery_path {
+        info!(
+            target: LOG_TARGET,
+            "Back up the validator recovery phrase in {} to a safe location",
+            recovery_path.display()
+        );
+    }
     Ok(identity)
 }
 
@@ -284,7 +324,9 @@ fn recovery_seed_path(identity_file: &Path, public_key: &RistrettoPublicKey) -> 
     PathBuf::from(name)
 }
 
-fn private_tempfile(path: &Path) -> Result<tempfile::NamedTempFile, IdentityError> {
+/// An owner-only (0600 on Unix) temporary file in the directory `path` will be persisted to, creating that directory
+/// if needed. A bare file name resolves to the current directory.
+fn private_tempfile(path: &Path) -> io::Result<tempfile::NamedTempFile> {
     let parent = path
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
@@ -293,6 +335,16 @@ fn private_tempfile(path: &Path) -> Result<tempfile::NamedTempFile, IdentityErro
     let file = tempfile::NamedTempFile::new_in(parent)?;
     set_permissions(file.path(), REQUIRED_IDENTITY_PERMS)?;
     Ok(file)
+}
+
+/// Atomically replaces `path` with `contents`. The file is owner-only (0600 on Unix) from creation and fully synced
+/// before it takes the destination name.
+pub(crate) fn write_private_file(path: &Path, contents: &[u8]) -> io::Result<()> {
+    let mut file = private_tempfile(path)?;
+    file.write_all(contents)?;
+    file.as_file().sync_all()?;
+    file.persist(path).map_err(|e| e.error)?;
+    Ok(())
 }
 
 /// The replacement is fully serialized and synced before the destination changes. Creating an identity
@@ -342,23 +394,6 @@ pub fn create_new_keypair<P: AsRef<Path>>(path: P) -> Result<RistrettoKeypair, I
     Ok(node_identity)
 }
 
-/// Loads the node identity from json at the given path
-///
-/// ## Parameters
-/// `path` - Path to file from which to load the node identity
-///
-/// ## Returns
-/// Result containing an object on success, string will indicate reason on error
-pub fn load_from_json<P: AsRef<Path>, T: DeserializeOwned>(path: P) -> Result<Option<T>, IdentityError> {
-    if !path.as_ref().exists() {
-        return Ok(None);
-    }
-
-    let mut file = fs::File::open(path)?;
-    let object = serde_json5::from_reader(&mut file)?;
-    Ok(Some(object))
-}
-
 /// Saves the identity as json at a given path with restricted file permissions, creating it if it does not
 /// already exist.
 ///
@@ -372,18 +407,12 @@ pub fn load_from_json<P: AsRef<Path>, T: DeserializeOwned>(path: P) -> Result<Op
 /// ## Returns
 /// Result to check if successful or not, string will indicate reason on error
 pub fn save_as_json<P: AsRef<Path>, T: Serialize>(path: P, object: &T) -> Result<(), IdentityError> {
-    if let Some(p) = path.as_ref().parent() &&
-        !p.exists()
-    {
-        fs::create_dir_all(p)?;
-    }
     let json = serde_json5::to_string(object)?;
     let json_with_comment = format!(
         "// This file is generated by the Minotari base node. Any changes will be overwritten.\n{}",
         json
     );
-    fs::write(path.as_ref(), json_with_comment.as_bytes())?;
-    set_permissions(path, REQUIRED_IDENTITY_PERMS)?;
+    write_private_file(path.as_ref(), json_with_comment.as_bytes())?;
     Ok(())
 }
 
@@ -681,5 +710,35 @@ mod tests {
         assert!(save_identity(&path, &identity, true).is_err());
         assert_eq!(fs::read(path.join("keep")).unwrap(), b"original");
         assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn failed_identity_save_removes_generated_recovery_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("destination");
+        fs::create_dir_all(&path).unwrap();
+        fs::write(path.join("keep"), b"original").unwrap();
+        assert!(setup_validator_keypair(&path, None, None, true, true).is_err());
+        assert_eq!(fs::read(path.join("keep")).unwrap(), b"original");
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn deserializing_mismatched_public_key_is_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("identity.json");
+        let kp1 = RistrettoKeypair::random(&mut rand::rng());
+        let kp2 = RistrettoKeypair::random(&mut rand::rng());
+        #[derive(serde::Serialize)]
+        struct Mismatched<'a> {
+            secret_key: &'a RistrettoSecretKey,
+            public_key: &'a RistrettoPublicKey,
+        }
+        save_as_json(&path, &Mismatched {
+            secret_key: kp1.secret_key(),
+            public_key: kp2.public_key(),
+        })
+        .unwrap();
+        assert!(matches!(load_keypair(&path), Err(IdentityError::JsonError(_))));
     }
 }

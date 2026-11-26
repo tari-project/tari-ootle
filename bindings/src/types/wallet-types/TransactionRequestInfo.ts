@@ -2,6 +2,7 @@
 import type { RistrettoPublicKeyBytes } from "../RistrettoPublicKeyBytes";
 import type { TransactionId } from "../TransactionId";
 import type { UnsignedTransaction } from "../UnsignedTransaction";
+import type { ComponentRulesChange } from "./ComponentRulesChange";
 import type { ComponentUpgrade } from "./ComponentUpgrade";
 import type { EffectiveStatus } from "./EffectiveStatus";
 import type { KeyId } from "./KeyId";
@@ -35,6 +36,11 @@ export type TransactionRequestInfo = {
    * [`ComponentUpgrade`].
    */
   component_upgrades: Array<ComponentUpgrade>;
+  /**
+   * Every `SetComponentAccessRules` and `SetComponentOwnerRule` instruction in the transaction, fee instructions
+   * first. See [`ComponentRulesChange`].
+   */
+  component_rules_changes: Array<ComponentRulesChange>;
   /**
    * Who the transaction acts as wherever the engine needs a single signer.
    */

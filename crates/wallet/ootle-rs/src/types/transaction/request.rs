@@ -1,7 +1,7 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use tari_ootle_transaction::{Transaction, UnsealedTransaction, UnsignedTransaction};
+use tari_ootle_transaction::{AuthorizerSet, Transaction, UnsealedTransaction, UnsignedTransaction};
 
 use crate::{
     transaction::TransactionSealSigner,
@@ -72,7 +72,8 @@ impl TransactionRequest<WithTx> {
     pub async fn build(self, seal_signer: &dyn TransactionSealSigner) -> WalletResult<Transaction> {
         let unsigned = self.state.0;
         let mut authorizations = self.authorizations;
-        authorizations.extend(seal_signer.authorizations_for(&unsigned).await?);
+        let external_authorizers: AuthorizerSet = authorizations.iter().map(|a| *a.signature().public_key()).collect();
+        authorizations.extend(seal_signer.authorizations_for(&unsigned, &external_authorizers).await?);
 
         let unsealed = unsigned.with_signatures(authorizations.into_iter().map(|a| a.into_signature()).collect());
         let final_tx = seal_signer.seal_transaction(unsealed).await?;

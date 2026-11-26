@@ -67,31 +67,8 @@ const renderJson = (json: JSONRenderItem) => {
   return <span className="other">{json as ReactNode}</span>;
 };
 
-export interface Duration {
-  secs: number;
-  nanos: number;
-}
-
-export function displayDuration(duration: Duration) {
-  if (duration.secs === 0) {
-    if (duration.nanos > 1000000) {
-      return `${(duration.nanos / 1000000).toFixed(2)}ms`;
-    }
-    if (duration.nanos > 1000) {
-      return `${(duration.nanos / 1000).toFixed(2)}µs`;
-    }
-    return `${duration.nanos}ns`;
-  }
-  if (duration.secs >= 60 * 60) {
-    const minutes_secs = duration.secs - Math.floor(duration.secs / 60 / 60) * 60 * 60;
-    return `${(duration.secs / 60 / 60).toFixed(0)}h${Math.floor(minutes_secs / 60)}m`;
-  }
-  if (duration.secs >= 60) {
-    const secs = duration.secs - Math.floor(duration.secs / 60) * 60;
-    return `${(duration.secs / 60).toFixed(0)}m${secs.toFixed(0)}s`;
-  }
-  return `${duration.secs}s`;
-}
+export { displayDuration } from "./duration";
+export type { Duration } from "./duration";
 
 export function truncateText(text: string | null, length: number) {
   if (!length || !text || text.length <= length) {
@@ -111,11 +88,11 @@ const validateHash = (hash: string): boolean => {
   return hashRegex.test(hash);
 };
 
-// formatTimestamp.ts
-const formatTimestamp = (rawTimestamp: string | null | undefined): string => {
-  if (!rawTimestamp) return "";
+const parseTimestamp = (rawTimestamp: string | null | undefined): Date | null => {
+  if (!rawTimestamp) return null;
 
-  let formatted = rawTimestamp;
+  let formatted = rawTimestamp.trim();
+  if (!formatted) return null;
 
   // If it doesn't already have "T" between date and time, add it
   if (!formatted.includes("T")) {
@@ -128,13 +105,18 @@ const formatTimestamp = (rawTimestamp: string | null | undefined): string => {
   }
 
   // If it doesn't already end with "Z" or have a timezone offset, add Z for UTC
-  if (!/[Z+\-]\d{2}:?\d{2}$/.test(formatted)) {
+  if (!/(?:Z|[+\-]\d{2}:?\d{2})$/.test(formatted)) {
     formatted += "Z";
   }
 
   const date = new Date(formatted);
+  return isNaN(date.getTime()) ? null : date;
+};
 
-  if (isNaN(date.getTime())) return "";
+const formatTimestamp = (rawTimestamp: string | null | undefined): string => {
+  const date = parseTimestamp(rawTimestamp);
+
+  if (!date) return "";
 
   return date.toLocaleString(undefined, {
     year: "numeric",
@@ -144,27 +126,6 @@ const formatTimestamp = (rawTimestamp: string | null | undefined): string => {
     minute: "2-digit",
     second: "2-digit",
   });
-};
-
-const parseTimestamp = (rawTimestamp: string | null | undefined): Date | null => {
-  if (!rawTimestamp) return null;
-
-  let formatted = rawTimestamp;
-
-  if (!formatted.includes("T")) {
-    formatted = formatted.replace(" ", "T");
-  }
-
-  if (formatted.endsWith(".0")) {
-    formatted = formatted.slice(0, -2);
-  }
-
-  if (!/[Z+\-]\d{2}:?\d{2}$/.test(formatted)) {
-    formatted += "Z";
-  }
-
-  const date = new Date(formatted);
-  return isNaN(date.getTime()) ? null : date;
 };
 
 const isTimestampNew = (timestamp: string | null | undefined): boolean => {
@@ -178,14 +139,14 @@ const isTimestampNew = (timestamp: string | null | undefined): boolean => {
   return diffMinutes <= 10;
 };
 
-const formatXTM = (amount: number | bigint): string => {
+const formatTari = (amount: number | bigint): string => {
   if (typeof amount !== "number" || isNaN(amount)) {
     return `0 ${CURRENCY.SYMBOL}`;
   }
   return `${(amount / CURRENCY.DIVISOR).toFixed(CURRENCY.DECIMALS)} ${CURRENCY.SYMBOL}`;
 };
 
-export { formatTimestamp, formatXTM, isTimestampNew, parseTimestamp, renderJson, validateHash };
+export { formatTari, formatTimestamp, isTimestampNew, parseTimestamp, renderJson, validateHash };
 
 export function bigintToDecimalString(int: Amount, decimalPlaces: number, locale: string = "en-US"): string {
   const number = typeof int === "bigint" ? int : BigInt(int);

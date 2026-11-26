@@ -39,7 +39,7 @@ impl<C> minicbor::Encode<C> for PrecisionAmount {
 
 impl<'b, C> minicbor::Decode<'b, C> for PrecisionAmount {
     fn decode(d: &mut minicbor::Decoder<'b>, _ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
-        use minicbor::data::Type;
+        use minicbor::data::{IanaTag, Type};
         let ty = d.datatype()?;
         match ty {
             Type::Array | Type::ArrayIndef => {
@@ -83,8 +83,19 @@ impl<'b, C> minicbor::Decode<'b, C> for PrecisionAmount {
                 let v = d.i64()?;
                 Ok(PrecisionAmount::from(v))
             },
+            Type::Int => Ok(PrecisionAmount::from(d.i128()?)),
+            Type::Tag => match d.tag()?.try_into() {
+                Ok(IanaTag::PosBignum) => decode_cbor_bignum(d.bytes()?, false),
+                Ok(IanaTag::NegBignum) => decode_cbor_bignum(d.bytes()?, true),
+                _ => Err(minicbor::decode::Error::message("PrecisionAmount: unexpected CBOR tag")),
+            },
             Type::String => {
                 let s = d.str()?;
+                if s.len() > PrecisionAmount::MAX_DECIMAL_STR_LEN {
+                    return Err(minicbor::decode::Error::message(
+                        "PrecisionAmount: decimal string exceeds maximum length",
+                    ));
+                }
                 s.parse::<PrecisionAmount>().map_err(|e| {
                     minicbor::decode::Error::message(format!("PrecisionAmount: invalid string '{}': {}", s, e))
                 })
@@ -92,7 +103,13 @@ impl<'b, C> minicbor::Decode<'b, C> for PrecisionAmount {
             Type::StringIndef => {
                 let mut s = String::new();
                 for chunk in d.str_iter()? {
-                    s.push_str(chunk?);
+                    let chunk = chunk?;
+                    if s.len().saturating_add(chunk.len()) > PrecisionAmount::MAX_DECIMAL_STR_LEN {
+                        return Err(minicbor::decode::Error::message(
+                            "PrecisionAmount: decimal string exceeds maximum length",
+                        ));
+                    }
+                    s.push_str(chunk);
                 }
                 s.parse::<PrecisionAmount>().map_err(|e| {
                     minicbor::decode::Error::message(format!("PrecisionAmount: invalid string '{}': {}", s, e))
@@ -104,6 +121,24 @@ impl<'b, C> minicbor::Decode<'b, C> for PrecisionAmount {
             ))),
         }
     }
+}
+
+fn decode_cbor_bignum(bytes: &[u8], negative: bool) -> Result<PrecisionAmount, minicbor::decode::Error> {
+    let err_msg = if negative {
+        "PrecisionAmount: negative bignum overflow"
+    } else {
+        "PrecisionAmount: positive bignum overflow"
+    };
+    let trimmed = match bytes.iter().position(|&b| b != 0) {
+        Some(idx) => &bytes[idx..],
+        None => &[],
+    };
+    let bits = BUint::<3>::from_be_slice(trimmed).ok_or_else(|| minicbor::decode::Error::message(err_msg))?;
+    let n = I192::from_bits(if negative { !bits } else { bits });
+    if n.is_negative() != negative {
+        return Err(minicbor::decode::Error::message(err_msg));
+    }
+    Ok(PrecisionAmount(n))
 }
 
 impl<C> minicbor::CborLen<C> for PrecisionAmount {
@@ -121,6 +156,8 @@ impl PrecisionAmount {
     pub const BYTE_SIZE: usize = I192::BYTES as usize;
     /// The maximum value that an `Amount` can hold.
     pub const MAX: Self = Self(I192::MAX);
+    /// The longest decimal string the CBOR decoder parses: the 58 digits of `I192::MIN` plus `-`.
+    pub(crate) const MAX_DECIMAL_STR_LEN: usize = 59;
     /// The minimum value that an `Amount` can hold.
     pub const MIN: Self = Self(I192::MIN);
     /// The number of u64 digits used to represent a Amount i.e. 3
@@ -899,6 +936,36 @@ mod tests {
         // Indefinite-length CBOR array with fewer than 3 digits (`[_ 1, 2]`) must be rejected.
         let short_indef = [0x9f, 0x01, 0x02, 0xff];
         tari_bor::decode::<Amount>(&short_indef).unwrap_err();
+    }
+
+    #[test]
+    fn decodes_cbor_bignum_integers_from_amount_u128_and_i128() {
+        for v in [u128::from(u64::MAX) + 1, u128::MAX] {
+            let encoded = tari_bor::encode(&crate::Amount::new(v)).unwrap();
+            let decoded = tari_bor::decode::<Amount>(&encoded).unwrap();
+            assert_eq!(decoded, Amount::from(v));
+
+            let encoded_u128 = tari_bor::encode(&v).unwrap();
+            let decoded_u128 = tari_bor::decode::<Amount>(&encoded_u128).unwrap();
+            assert_eq!(decoded_u128, Amount::from(v));
+        }
+
+        for v in [i128::from(i64::MIN) - 1, i128::MIN] {
+            let encoded = tari_bor::encode(&v).unwrap();
+            let decoded = tari_bor::decode::<Amount>(&encoded).unwrap();
+            assert_eq!(decoded, Amount::from(v));
+        }
+
+        // Tag 3 (NegBignum) with 16-byte magnitude N = u128::MAX - 1 represents -1 - (u128::MAX - 1) = -u128::MAX
+        let mut neg_u128_max = vec![0xc3, 0x50];
+        neg_u128_max.extend_from_slice(&(u128::MAX - 1).to_be_bytes());
+        let decoded_neg = tari_bor::decode::<Amount>(&neg_u128_max).unwrap();
+        assert_eq!(decoded_neg, -Amount::from(u128::MAX));
+
+        // 24-byte PosBignum > I192::MAX (high bit set) must fail with overflow
+        let mut overflow_pos = vec![0xc2, 0x58, 0x18, 0x80];
+        overflow_pos.extend_from_slice(&[0u8; 23]);
+        tari_bor::decode::<Amount>(&overflow_pos).unwrap_err();
     }
 
     #[test]

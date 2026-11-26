@@ -9,6 +9,7 @@ import {
   useSubmitTransactionRequest,
 } from "@api/hooks/useTransactionRequests";
 import { Accordion, AccordionDetails, AccordionSummary } from "@components/Accordion";
+import ComponentRulesChangeWarning from "@components/ComponentRulesChangeWarning";
 import ComponentUpgradeWarning from "@components/ComponentUpgradeWarning";
 import FetchStatusCheck from "@components/FetchStatusCheck";
 import PageHeading from "@components/PageHeading";
@@ -27,12 +28,13 @@ import type {
   TransactionRequestInfo,
   TransactionRequestMainSigner,
 } from "@tari-project/ootle-ts-bindings";
-import { TARI_TOKEN } from "@tari-project/ootle-ts-bindings";
+import { TARI_TOKEN, transactionBody } from "@tari-project/ootle-ts-bindings";
 import { useEffect, useState } from "react";
 import type { AccountWithdrawal, InstructionsDescription, WithdrawalDestination } from "../SigningRequests/describe";
 import { describeInstructions } from "../SigningRequests/describe";
 import Inputs from "../Transactions/Inputs";
 import Instructions, { BlobContents } from "../Transactions/Instructions";
+import { formatCountdownLabel, getRemainingSeconds } from "./countdownHelpers";
 
 function formatKeyId(keyId: KeyId): string {
   if ("Derived" in keyId) {
@@ -75,17 +77,29 @@ function statusColor(status: EffectiveStatus): "default" | "warning" | "success"
   }
 }
 
-function Countdown({ expiresAt }: { expiresAt: bigint }) {
+function useNow(enabled: boolean): number {
   const [now, setNow] = useState(() => Date.now() / 1000);
   useEffect(() => {
+    if (!enabled) {
+      return;
+    }
     const t = setInterval(() => setNow(Date.now() / 1000), 1000);
     return () => clearInterval(t);
-  }, []);
+  }, [enabled]);
+  return now;
+}
 
-  const remaining = Math.max(0, Math.floor(Number(expiresAt) - now));
-  const mins = Math.floor(remaining / 60);
-  const secs = remaining % 60;
-  return <Chip label={`expires in ${mins}:${secs.toString().padStart(2, "0")}`} size="small" variant="outlined" />;
+function Countdown({ expiresAt, now }: { expiresAt: bigint; now: number }) {
+  const remaining = getRemainingSeconds(expiresAt, now);
+
+  return (
+    <Chip
+      label={formatCountdownLabel(remaining)}
+      size="small"
+      color={remaining === 0 ? "error" : "default"}
+      variant="outlined"
+    />
+  );
 }
 
 function ValueSummaries({ request }: { request: TransactionRequestInfo }) {
@@ -218,6 +232,8 @@ function RequestCard({ request }: { request: TransactionRequestInfo }) {
   // holding instructions this card cannot describe is open.
   const [expanded, setExpanded] = useState<string | null | undefined>(undefined);
   const isActionable = request.status === "Pending";
+  const now = useNow(isActionable);
+  const isExpired = isActionable && getRemainingSeconds(request.expires_at, now) === 0;
   // Approve and submit are separate permissions and separate RPCs, but this UI
   // holds both, so approving chains straight into submitting. If the submit
   // half fails (or another principal beat it), the request stays Approved and
@@ -232,7 +248,7 @@ function RequestCard({ request }: { request: TransactionRequestInfo }) {
 
   const params = { request_id: request.request_id };
 
-  const v1 = request.transaction.V1;
+  const v1 = transactionBody(request.transaction);
   const instructions = v1?.instructions ?? [];
   const feeInstructions = v1?.fee_instructions ?? [];
   const inputs = v1?.inputs ?? [];
@@ -261,12 +277,13 @@ function RequestCard({ request }: { request: TransactionRequestInfo }) {
           requests approval
         </Typography>
         <Stack direction="row" spacing={1} alignItems="center">
-          {isActionable && <Countdown expiresAt={request.expires_at} />}
+          {isActionable && <Countdown expiresAt={request.expires_at} now={now} />}
           <Chip label={request.status} size="small" color={statusColor(request.status)} />
         </Stack>
       </Stack>
 
       <ComponentUpgradeWarning upgrades={request.component_upgrades} />
+      <ComponentRulesChangeWarning changes={request.component_rules_changes} />
       <ValueSummaries request={request} />
       <InstructionSummary main={mainDescription} fee={feeDescription} />
 
@@ -366,7 +383,7 @@ function RequestCard({ request }: { request: TransactionRequestInfo }) {
                 <Button
                   variant="outlined"
                   color="error"
-                  disabled={busy}
+                  disabled={busy || isExpired}
                   startIcon={reject.isPending ? <CircularProgress size={16} color="inherit" /> : undefined}
                   onClick={() => reject.mutate(params)}
                 >
@@ -374,7 +391,7 @@ function RequestCard({ request }: { request: TransactionRequestInfo }) {
                 </Button>
                 <Button
                   variant="contained"
-                  disabled={busy}
+                  disabled={busy || isExpired}
                   startIcon={
                     approve.isPending || submit.isPending ? <CircularProgress size={16} color="inherit" /> : undefined
                   }

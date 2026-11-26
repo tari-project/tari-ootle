@@ -26,7 +26,10 @@
     "account_balances": [
       {
         "resource_address": "resource_3333333333333333333333333333333333333333333333333333333333333333",
-        "revealed_balance": 8713391381
+        "revealed_balance": {
+          "hi": 0,
+          "lo": 8713391381
+        }
       }
     ]
   }

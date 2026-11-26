@@ -21,7 +21,7 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use log::*;
-use tari_bor::{BorError, ByteCounter, decode_exact, encode_into_writer, encoded_len};
+use tari_bor::{decode_exact, encode_into_writer, encoded_len};
 use tari_engine_types::{indexed_value::IndexedValue, limits};
 use tari_template_abi::{
     CallInfo,
@@ -255,16 +255,14 @@ impl WasmProcess {
         &self,
         store: &mut Store,
         func: &MainFunction,
-        func_ident: u32,
-        args: &[tari_bor::Value],
-        call_info_size: usize,
+        encoded_call_info: &[u8],
     ) -> Result<InvocationOutcome, WasmExecutionError> {
         let span = abi_metrics::Span::start();
-        let call_info_ptr = self.with_alloc_and_mem_writer(store, call_info_size, |mem_writer| {
-            CallInfo::encode_v1_packed(mem_writer, func_ident, args)?;
+        let call_info_ptr = self.with_alloc_and_mem_writer(store, encoded_call_info.len(), |mem_writer| {
+            mem_writer.write_all_to_mem(encoded_call_info)?;
             Ok(())
         })?;
-        abi_metrics::record_call_info_encode(call_info_size, span.finish());
+        abi_metrics::record_call_info_encode(encoded_call_info.len(), span.finish());
 
         // Call the contract entrypoint. Engine calls are admitted for exactly this window: the
         // `tari_alloc` above and the `tari_free` below run template code too, but outside any
@@ -309,16 +307,20 @@ impl WasmProcess {
     /// cost that follows its CBOR item count, so the charge is drawn from the transaction's compute
     /// allowance first: a transaction that cannot cover it fails having decoded nothing.
     fn decode_return_value(&self, store: &Store, raw: &[u8]) -> Result<IndexedValue, WasmExecutionError> {
+        Self::decode_return_value_for(self.env(store).state()?.interface(), raw)
+    }
+
+    pub(crate) fn decode_return_value_for(
+        interface: &dyn crate::runtime::RuntimeInterface,
+        raw: &[u8],
+    ) -> Result<IndexedValue, WasmExecutionError> {
         // An empty return decodes to the empty value without any per-item work.
-        let items = if raw.is_empty() {
-            0
-        } else {
-            tari_bor::count_data_items(raw).map_err(BorError::from)?
-        };
-        self.env(store)
-            .state()?
-            .interface()
-            .charge_return_value(raw.len() as u64, items)?;
+        if !raw.is_empty() {
+            interface.charge_return_value_read(raw).map_err(|e| match e {
+                EngineArgChargeError::Unreadable(e) => WasmExecutionError::EncodingError(e),
+                EngineArgChargeError::Runtime(e) => WasmExecutionError::RuntimeError(e),
+            })?;
+        }
         let span = abi_metrics::Span::start();
         let value = IndexedValue::from_raw(raw)?;
         abi_metrics::record_return_decode(raw.len(), span.finish());
@@ -623,10 +625,13 @@ impl WasmProcess {
 
         let func_ident = hash_function_name(&func_def.name);
         let span = abi_metrics::Span::start();
-        let mut counter = ByteCounter::new();
-        CallInfo::encode_v1_packed(&mut counter, func_ident, args)?;
-        let call_info_size = counter.get();
-        abi_metrics::record_call_info_size_pass(call_info_size, span.finish());
+        let encoded_call_info =
+            CallInfo::encode_v1_packed_bounded(func_ident, args, limits::ENGINE_LIMITS.max_call_size)?.ok_or(
+                WasmExecutionError::CallSizeLimitExceeded {
+                    limit: limits::ENGINE_LIMITS.max_call_size,
+                },
+            )?;
+        abi_metrics::record_call_info_size_pass(encoded_call_info.len(), span.finish());
 
         let MeteringAllowance {
             points_before,
@@ -639,7 +644,7 @@ impl WasmProcess {
         self.env_mut(store)
             .begin_metered_invocation(self.instance.clone(), points_before, binding_allowance);
 
-        let outcome = self.run_metered(store, &func, func_ident, args, call_info_size);
+        let outcome = self.run_metered(store, &func, &encoded_call_info);
 
         // An out-of-gas trap leaves the meter at zero, and the invocation is charged its entire
         // budget: the host reports a runtime error and the partial work was already done.

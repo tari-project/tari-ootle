@@ -7,6 +7,7 @@ extern crate alloc;
 
 #[cfg(feature = "base64")]
 pub mod base64;
+pub mod bounded_seq;
 #[cfg(feature = "cbor")]
 pub mod cbor_value;
 pub mod duration;

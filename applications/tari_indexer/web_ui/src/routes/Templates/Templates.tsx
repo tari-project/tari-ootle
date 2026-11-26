@@ -74,6 +74,9 @@ function formatType(type: Type): string {
   if ("Other" in type) {
     return (type as { Other: { name: string } }).Other.name;
   }
+  if ("WellKnown" in type) {
+    return (type as { WellKnown: string }).WellKnown;
+  }
   return JSON.stringify(type);
 }
 
@@ -171,25 +174,40 @@ function TemplateDetails({ data }: { data: any }) {
   );
 }
 
+function parseAddressParam(raw: string | null): {
+  input: string;
+  fetchAddress: string | null;
+  error: string | null;
+} {
+  const trimmed = (raw || "").trim();
+  if (!trimmed) {
+    return { input: "", fetchAddress: null, error: null };
+  }
+  const error = validateTemplateAddress(trimmed);
+  if (error) {
+    return { input: trimmed, fetchAddress: null, error };
+  }
+  const hex = stripTemplatePrefix(trimmed);
+  return { input: hex, fetchAddress: hex, error: null };
+}
+
 function TemplatesLayout() {
   const [searchParams, setSearchParams] = useSearchParams();
   const queryClient = useQueryClient();
-  const initialAddress = searchParams.get("address") || "";
-  const [addressInput, setAddressInput] = useState(initialAddress);
-  const [fetchAddress, setFetchAddress] = useState<string | null>(initialAddress || null);
-  const [validationError, setValidationError] = useState<string | null>(null);
+  const initial = parseAddressParam(searchParams.get("address"));
+  const [addressInput, setAddressInput] = useState(initial.input);
+  const [fetchAddress, setFetchAddress] = useState<string | null>(initial.fetchAddress);
+  const [validationError, setValidationError] = useState<string | null>(initial.error);
 
   const { data, isLoading, isError, error } = useGetTemplateDefinition({
     address: fetchAddress,
   });
 
   useEffect(() => {
-    const addr = searchParams.get("address") || "";
-    if (addr && addr !== fetchAddress) {
-      setAddressInput(addr);
-      setValidationError(null);
-      setFetchAddress(addr);
-    }
+    const parsed = parseAddressParam(searchParams.get("address"));
+    setAddressInput(parsed.input);
+    setValidationError(parsed.error);
+    setFetchAddress(parsed.fetchAddress);
   }, [searchParams]);
 
   const handleFetch = useCallback(() => {

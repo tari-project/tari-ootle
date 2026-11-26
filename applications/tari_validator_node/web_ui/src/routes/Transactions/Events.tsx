@@ -54,19 +54,23 @@ function RowData({ substate_id, template_address, topic, payload }: Event) {
           </AccordionIconButton>
         </DataTableCell>
         <DataTableCell>{topic}</DataTableCell>
-        {substate_id && (
-          <DataTableCell>
-            {shortenSubstateId(substate_id)}
-            <CopyToClipboard copy={substateIdToString(substate_id)} />
-          </DataTableCell>
-        )}
+        <DataTableCell>
+          {substate_id ? (
+            <>
+              {shortenSubstateId(substate_id)}
+              <CopyToClipboard copy={substateIdToString(substate_id)} />
+            </>
+          ) : (
+            "--"
+          )}
+        </DataTableCell>
         <DataTableCell>
           {shortenString(template_address)}
           <CopyToClipboard copy={template_address} />
         </DataTableCell>
       </TableRow>
       <TableRow>
-        <DataTableCell style={{ paddingBottom: 0, paddingTop: 0 }} colSpan={5}>
+        <DataTableCell style={{ paddingBottom: 0, paddingTop: 0 }} colSpan={4}>
           <Collapse in={open} timeout="auto" unmountOnExit>
             <CodeBlockDialog title="Payload">{renderJson(convertCborValue(payload))}</CodeBlockDialog>
           </Collapse>

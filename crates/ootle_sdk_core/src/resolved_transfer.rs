@@ -71,7 +71,7 @@ pub(crate) fn resolved_unsigned(partial: PartialTransaction) -> Result<UnsignedT
 /// sorted set, so two resolutions of the same logical input set produce byte-identical instruction +
 /// input bytes.
 pub(crate) fn canonicalize_inputs(unsigned: &mut UnsignedTransaction) {
-    let UnsignedTransaction::V1(v1) = unsigned;
+    let v1 = unsigned.body_mut();
     let mut inputs: Vec<_> = std::mem::take(&mut v1.inputs).into_iter().collect();
     inputs.sort_by_key(|a| a.to_string());
     // The set we took out already had unique substate ids: `IndexSet` de-dups on `SubstateRequirement`'s
@@ -201,6 +201,7 @@ mod tests {
                 access_rules: ComponentAccessRules::new(),
                 entity_id: EntityId::from_array([0u8; EntityId::LENGTH]),
                 upgrade_rule: Default::default(),
+                rules_updater: None,
             },
             body: ComponentBody::from_cbor_value(state),
         };

@@ -32,9 +32,16 @@ interface CopyProps {
 
 const CopyToClipboard = ({ copy }: CopyProps) => {
   const [open, setOpen] = useState(false);
-  const handleClick = (copyThis: string) => {
+  const [message, setMessage] = useState("Copied to clipboard");
+
+  const handleClick = async (copyThis: string) => {
+    try {
+      await navigator.clipboard.writeText(copyThis);
+      setMessage("Copied to clipboard");
+    } catch {
+      setMessage("Copy failed: clipboard unavailable or permission denied");
+    }
     setOpen(true);
-    navigator.clipboard.writeText(copyThis);
   };
 
   return (
@@ -58,7 +65,7 @@ const CopyToClipboard = ({ copy }: CopyProps) => {
           />
         </Tooltip>
       </IconButton>
-      <Snackbar open={open} onClose={() => setOpen(false)} autoHideDuration={2000} message="Copied to clipboard" />
+      <Snackbar open={open} onClose={() => setOpen(false)} autoHideDuration={2000} message={message} />
     </>
   );
 };

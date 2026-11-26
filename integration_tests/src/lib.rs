@@ -42,7 +42,10 @@ use tari_common_types::{
 use tari_consensus::consensus_constants::ConsensusConstants;
 use tari_crypto::keys::SecretKey;
 use tari_engine_types::substate::SubstateId;
-use tari_ootle_app_utilities::consensus_constants_file::{ConsensusConstantsFile, load_consensus_constants};
+use tari_ootle_app_utilities::{
+    consensus_constants_file::{ConsensusConstantsFile, load_consensus_constants},
+    epoch_oracle_config::EpochOracleConfig,
+};
 use tari_ootle_common_types::SubstateRequirement;
 use tari_ootle_transaction::Network;
 use tari_ootle_wallet_sdk::models::AccountWithAddress;
@@ -93,6 +96,9 @@ pub struct TariWorld {
     /// have to agree across a network, so a scenario authors one file and hands it to each node it
     /// spawns rather than configuring them one by one.
     pub consensus_constants_file: Option<PathBuf>,
+    /// The epoch oracle every validator in this scenario runs, and every indexer unless one is started with its own.
+    /// `None` runs the default base layer oracle.
+    pub epoch_oracle: Option<EpochOracleConfig>,
     pub claim_proofs: HashMap<String, CucumberClaimProof>,
     /// The TARI balance each account had when a scenario last checked it, so a later step can
     /// assert how much a balance moved rather than where it landed.
@@ -130,6 +136,7 @@ impl TariWorld {
             outputs: IndexMap::new(),
             current_scenario_name: None,
             consensus_constants_file: None,
+            epoch_oracle: None,
             claim_proofs: HashMap::new(),
             last_checked_balances: HashMap::new(),
             substate_ids: IndexMap::new(),

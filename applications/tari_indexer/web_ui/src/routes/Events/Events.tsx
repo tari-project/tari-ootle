@@ -23,6 +23,7 @@
 import KeyboardArrowLeftIcon from "@mui/icons-material/KeyboardArrowLeft";
 import KeyboardArrowRightIcon from "@mui/icons-material/KeyboardArrowRight";
 import {
+  Alert,
   Box,
   Button,
   IconButton,
@@ -38,7 +39,7 @@ import {
 import Grid from "@mui/material/Grid";
 import { Event, TransactionId } from "@tari-project/ootle-ts-bindings";
 import saveAs from "file-saver";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import CopyToClipboard from "../../Components/CopyToClipboard";
 import JsonDialog from "../../Components/JsonDialog";
@@ -52,6 +53,11 @@ const PAGE_SIZE = 10;
 
 type Cursor = number | bigint | string;
 
+interface EventFilter {
+  topic: string;
+  substate_id: string;
+}
+
 function EventsLayout() {
   const [encodedEvents, setEncodedEvents] = useState<Array<[string, string]>>([]);
   const { decodeEvent } = useDecoder();
@@ -63,42 +69,71 @@ function EventsLayout() {
   // cursors[n] is the before_id that loads page n; page 0 starts from the newest event.
   const [cursors, setCursors] = useState<Array<Cursor | null>>([null]);
   const [nextCursor, setNextCursor] = useState<Cursor | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const requestIdRef = useRef(0);
   const [jsonDialogOpen, setJsonDialogOpen] = React.useState(false);
   const [selectedPayload, setSelectedPayload] = useState({});
-  const [filter, setFilter] = useState({
+  const [filter, setFilter] = useState<EventFilter>({
     topic: "",
     substate_id: "",
   });
 
+  const loadPage = useCallback(
+    async (
+      beforeId: Cursor | null,
+      activeFilter: EventFilter,
+      targetPage: number,
+      nextCursors?: Array<Cursor | null>,
+    ) => {
+      const reqId = ++requestIdRef.current;
+      setLoading(true);
+      setError(null);
+      try {
+        const resp = await queryTransactionEvents({
+          topic: activeFilter.topic.trim() || null,
+          substate_id: activeFilter.substate_id.trim() || null,
+          limit: PAGE_SIZE,
+          offset: null,
+          before_id: beforeId,
+        });
+        if (reqId !== requestIdRef.current) return;
+        setEncodedEvents(resp.events);
+        setNextCursor(resp.next_before_id ?? null);
+        setPage(targetPage);
+        if (nextCursors) {
+          setCursors(nextCursors);
+        }
+      } catch (err: unknown) {
+        if (reqId !== requestIdRef.current) return;
+        setError(err instanceof Error && err.message ? err.message : "Failed to load events.");
+      } finally {
+        if (reqId === requestIdRef.current) {
+          setLoading(false);
+        }
+      }
+    },
+    [],
+  );
+
   useEffect(() => {
-    loadPage(null, filter);
-  }, []);
+    void loadPage(null, { topic: "", substate_id: "" }, 0, [null]);
+    return () => {
+      requestIdRef.current++;
+    };
+  }, [loadPage]);
 
-  async function loadPage(beforeId: Cursor | null, filter: any) {
-    const resp = await queryTransactionEvents({
-      topic: filter.topic,
-      substate_id: filter.substate_id || null,
-      limit: PAGE_SIZE,
-      offset: null,
-      before_id: beforeId,
-    });
-    setEncodedEvents(resp.events);
-    setNextCursor(resp.next_before_id ?? null);
-  }
-
-  async function handleChangePage(newPage: number) {
+  function handleChangePage(newPage: number) {
+    if (loading || newPage < 0 || newPage === page) return;
     if (newPage > page) {
       if (nextCursor === null) {
         return;
       }
-      setCursors([...cursors.slice(0, newPage), nextCursor]);
-      await loadPage(nextCursor, filter);
-    } else if (newPage < page) {
-      await loadPage(cursors[newPage], filter);
+      const updatedCursors = [...cursors.slice(0, newPage), nextCursor];
+      void loadPage(nextCursor, filter, newPage, updatedCursors);
     } else {
-      return;
+      void loadPage(cursors[newPage] ?? null, filter, newPage);
     }
-    setPage(newPage);
   }
 
   const handlePayloadDownload = (txId: TransactionId, event: Event) => {
@@ -118,17 +153,18 @@ function EventsLayout() {
     setJsonDialogOpen(false);
   };
 
-  const onFilterChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const newFilter = {
+  const onFilterChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newFilter: EventFilter = {
       ...filter,
       [e.target.name]: e.target.value,
     };
 
     setFilter(newFilter);
-
+    setEncodedEvents([]);
+    setNextCursor(null);
     setCursors([null]);
-    await loadPage(null, newFilter);
     setPage(0);
+    void loadPage(null, newFilter, 0, [null]);
   };
 
   return (
@@ -142,20 +178,25 @@ function EventsLayout() {
             name="topic"
             label="Topic"
             value={filter.topic}
-            onChange={async (e: React.ChangeEvent<HTMLInputElement>) => onFilterChange(e)}
+            onChange={onFilterChange}
             style={{ flexGrow: 1 }}
           />
           <TextField
             name="substate_id"
             label="Substate Id"
             value={filter.substate_id}
-            onChange={async (e: React.ChangeEvent<HTMLInputElement>) => onFilterChange(e)}
+            onChange={onFilterChange}
             style={{ flexGrow: 1 }}
           />
         </Box>
       </Grid>
       <Grid size={12}>
         <StyledPaper>
+          {error && (
+            <Alert severity="error" sx={{ marginBottom: 2 }}>
+              {error}
+            </Alert>
+          )}
           <Table sx={{ minWidth: 650 }} aria-label="simple table">
             <TableHead>
               <TableRow>
@@ -167,61 +208,89 @@ function EventsLayout() {
               </TableRow>
             </TableHead>
             <TableBody>
-              {events.map(({ txId, encoded, event }, i) =>
-                event ? (
-                  <TableRow key={i} sx={{ "&:last-child td, &:last-child th": { border: 0 } }}>
-                    <TableCell>{event.topic}</TableCell>
-                    <TableCell>
-                      {truncateText(txId, 20)}
-                      <CopyToClipboard copy={txId} />
-                    </TableCell>
-                    <TableCell>
-                      {event.substate_id ? (
-                        <Link to={`/substates?address=${encodeURIComponent(event.substate_id)}`}>
-                          {truncateText(event.substate_id, 20)}
-                        </Link>
-                      ) : (
-                        truncateText(event.substate_id, 20)
-                      )}
-                      <CopyToClipboard copy={event.substate_id || ""} />
-                    </TableCell>
-                    <TableCell>
-                      {event.template_address ? (
-                        <Link to={`/templates?address=${encodeURIComponent(event.template_address)}`}>
-                          {truncateText(event.template_address, 20)}
-                        </Link>
-                      ) : (
-                        truncateText(event.template_address, 20)
-                      )}
-                      <CopyToClipboard copy={event.template_address} />
-                    </TableCell>
-                    <TableCell>
-                      <Stack direction="row" spacing={2} alignItems="left">
-                        <Button variant="outlined" onClick={() => handlePayloadView(event)}>
-                          View
-                        </Button>
-                        <Button variant="outlined" onClick={() => handlePayloadDownload(txId, event)}>
-                          Download
-                        </Button>
-                      </Stack>
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  <TableRow key={i}>
+              {events.length === 0 ? (
+                loading ? (
+                  <TableRow>
                     <TableCell colSpan={5}>
-                      {truncateText(txId, 20)}: CBOR, {encodedByteLength(encoded)} bytes
+                      <Typography color="textSecondary">Loading...</Typography>
                     </TableCell>
                   </TableRow>
-                ),
+                ) : !error ? (
+                  <TableRow>
+                    <TableCell colSpan={5}>
+                      <Typography color="textSecondary">No events found.</Typography>
+                    </TableCell>
+                  </TableRow>
+                ) : null
+              ) : (
+                events.map(({ txId, encoded, event }, i) =>
+                  event ? (
+                    <TableRow key={i} sx={{ "&:last-child td, &:last-child th": { border: 0 } }}>
+                      <TableCell>{event.topic}</TableCell>
+                      <TableCell>
+                        {truncateText(txId, 20)}
+                        <CopyToClipboard copy={txId} />
+                      </TableCell>
+                      <TableCell>
+                        {event.substate_id ? (
+                          <>
+                            <Link to={`/substates?address=${encodeURIComponent(event.substate_id)}`}>
+                              {truncateText(event.substate_id, 20)}
+                            </Link>
+                            <CopyToClipboard copy={event.substate_id} />
+                          </>
+                        ) : (
+                          truncateText(event.substate_id, 20)
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {event.template_address ? (
+                          <>
+                            <Link to={`/templates?address=${encodeURIComponent(event.template_address)}`}>
+                              {truncateText(event.template_address, 20)}
+                            </Link>
+                            <CopyToClipboard copy={event.template_address} />
+                          </>
+                        ) : (
+                          truncateText(event.template_address, 20)
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <Stack direction="row" spacing={2} alignItems="left">
+                          <Button variant="outlined" onClick={() => handlePayloadView(event)}>
+                            View
+                          </Button>
+                          <Button variant="outlined" onClick={() => handlePayloadDownload(txId, event)}>
+                            Download
+                          </Button>
+                        </Stack>
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    <TableRow key={i}>
+                      <TableCell colSpan={5}>
+                        {truncateText(txId, 20)}: CBOR, {encodedByteLength(encoded)} bytes
+                      </TableCell>
+                    </TableRow>
+                  ),
+                )
               )}
             </TableBody>
           </Table>
           <Stack direction="row" justifyContent="right" spacing={2} alignItems="center">
-            <IconButton aria-label="copy" onClick={() => handleChangePage(Math.max(page - 1, 0))}>
+            <IconButton
+              aria-label="previous page"
+              disabled={loading || page === 0}
+              onClick={() => handleChangePage(page - 1)}
+            >
               <KeyboardArrowLeftIcon />
             </IconButton>
             <Typography sx={{}}>{page}</Typography>
-            <IconButton aria-label="copy" disabled={nextCursor === null} onClick={() => handleChangePage(page + 1)}>
+            <IconButton
+              aria-label="next page"
+              disabled={loading || nextCursor === null}
+              onClick={() => handleChangePage(page + 1)}
+            >
               <KeyboardArrowRightIcon />
             </IconButton>
           </Stack>

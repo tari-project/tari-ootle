@@ -4,7 +4,8 @@
 """Swarm smoke test: exercises the main transaction paths against a running local swarm.
 
 Stages (default order; select with --only / --skip):
-  flood         🚰 Faucet-claim flood via transaction_generator + transaction_submitter
+  flood         🚰 Transfer flood via transaction_generator + transaction_submitter from seed accounts
+                   that the faucet (swarm) or the smoketest account (--live) funds
   templates     📦 Publish freshly built templates through the wallet daemon
   stealth       🥷 tTARI stealth transfers between two wallet accounts
   token         🪙 Mint a stealth token from a new template, stealth-transfer it, dry-run vs real fee
@@ -27,6 +28,13 @@ the substates it wrote must be served by the indexer.
 
 Ports are discovered from the swarm daemon (default http://localhost:8080) unless --wallet-url /
 --indexer-url are given. The wallet daemon must use `None` auth.
+
+--live runs against a live network (e.g. esmeralda) through the given wallet daemon and indexer. The
+swarm daemon is never contacted, so the stages that need it (claim_burn, epoch, health) skip, and fees
+are compared with previous live runs only. A live faucet is usually empty, so the wallet's default
+account (or --funder-account) funds the smoketest account, which funds the flood accounts. A public
+indexer rate-limits submissions per IP; the flood retries rate-limited submissions, so it runs at the
+indexer's sustained rate.
 
     scripts/smoke_test.py
     scripts/smoke_test.py --only templates,token,swap
@@ -52,7 +60,15 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 TEMPLATE_DIR = REPO / "scripts" / "smoke_test_template"
 TEMPLATE_WASM = TEMPLATE_DIR / "target" / "wasm32-unknown-unknown" / "release" / "smoke_test_template.wasm"
-FEES_FILE = REPO / "data" / "smoke_test" / "fees.json"
+FEES_DIR = REPO / "data" / "smoke_test"
+FLOOD_SEED_FILE = FEES_DIR / "flood_seed"
+# A flood transfer moves 1,000 µT and locks a 50,000 µT fee allowance, so an account below this cannot send one.
+FLOOD_ACCOUNT_MIN = 60_000
+# What a wallet deposit brings a flood account up to; a transfer spends a few thousand µT of it.
+FLOOD_ACCOUNT_FUND = 200_000
+DEPOSIT_BATCH = 25
+# How long the indexer may take to serve flood accounts that a committed deposit funded.
+FLOOD_FUNDING_VISIBLE_TIMEOUT = 120
 TARI_TOKEN = "resource_" + "01" * 32
 LIQUIDITY_POOL_TEMPLATE = "template_" + "00" * 31 + "02"
 TARI = 1_000_000
@@ -66,10 +82,10 @@ HEIGHT_SPREAD_WARN = 5
 CHECKPOINT_LAG_GRACE = 150
 # The shard whose checkpoints wallets walk the validator set handover through.
 WALK_SHARD = 1
-# A stealth transfer's fee is not refunded, so this is what each one costs.
+# A stealth transfer's fee is not refunded, so this is what each one submitted without a dry run costs.
 STEALTH_MAX_FEE = 20_000
-# The recipient accumulates many small outputs across runs, and each input adds verification cost.
-SPEND_BACK_MAX_FEE = 100_000
+# The budget a dry run meters a transaction at; it pays nothing.
+DRY_RUN_MAX_FEE = TARI
 
 STAGES = [
     "flood", "templates", "stealth", "token", "component", "swap", "spend_back", "concurrent",
@@ -77,7 +93,7 @@ STAGES = [
 ]
 OPT_IN_STAGES = {"epoch"}
 STAGE_TITLES = {
-    "flood": "🚰 Faucet-claim flood",
+    "flood": "🚰 Transfer flood",
     "templates": "📦 Publish templates",
     "stealth": "🥷 Stealth transfers",
     "token": "🪙 Stealth token from new template",
@@ -220,8 +236,10 @@ class Wallet(JsonRpc):
 
 
 def http_get(url, timeout=30):
+    # Public indexers sit behind a proxy that refuses Python's default User-Agent with HTTP 403.
+    req = urllib.request.Request(url, headers={"User-Agent": "ootle-smoke-test"})
     try:
-        with urllib.request.urlopen(url, timeout=timeout) as resp:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
             return resp.status, json.load(resp)
     except urllib.error.HTTPError as e:
         return e.code, None
@@ -274,10 +292,12 @@ def find_strings(obj, pattern):
 
 
 class Swarm:
-    """What the swarm daemon reports is running. Empty when the daemon is unreachable."""
+    """What the swarm daemon reports is running. Empty when the daemon is unreachable or `url` is None."""
 
     def __init__(self, url):
         self.instances = []
+        if url is None:
+            return
         try:
             self.instances = JsonRpc(f"{url.rstrip('/')}/json_rpc", timeout=10).call("list_instances")["instances"]
         except StageFailed:
@@ -324,7 +344,9 @@ def build_template(nonce):
 
 
 def balances(wallet, account):
-    res = wallet.call("accounts.get_balances", {"account": {"Name": account}, "refresh": True})
+    """Balances of the wallet account named `account`, or of the one at that address when it is a component address."""
+    ref = {"ComponentAddress": account} if COMPONENT_ADDR_RE.match(account) else {"Name": account}
+    res = wallet.call("accounts.get_balances", {"account": ref, "refresh": True})
     return {b["resource_address"]: b for b in res["balances"]}
 
 
@@ -334,6 +356,10 @@ def revealed(entry):
 
 def total(entry):
     return int(entry["balance"]) + int(entry["confidential_balance"]) if entry else 0
+
+
+def account_label(account):
+    return account["account"].get("name") or short(account["account"]["component_address"])
 
 
 def fee_main(amount=TARI):
@@ -349,7 +375,9 @@ def fee_main(amount=TARI):
 class SmokeTest:
     def __init__(self, args):
         self.args = args
-        self.swarm = Swarm(args.swarm_url)
+        self.swarm = Swarm(None if args.live else args.swarm_url)
+        self.no_swarm = "--live does not use the swarm daemon" if args.live else "swarm daemon not reachable"
+        self.fees_file = FEES_DIR / ("fees-live.json" if args.live else "fees.json")
         self.wallet = None
         self.indexer_url = None
         self.smoke = None  # create_or_get response for the smoketest account
@@ -359,6 +387,9 @@ class SmokeTest:
         self.fees = {}  # operation -> [required fees, µT]
         self.overcharges = {}  # operation -> [fee paid above the required fee, µT]
         self.health_before = None
+        self.funder = None  # the account that funds the run on a live network
+        self._network = None
+        self.bins = REPO / "target" / "release"
 
     # ---- setup
 
@@ -377,6 +408,12 @@ class SmokeTest:
         info(f"🧪 account  {bold(SMOKE_ACCOUNT)} {verb} {dim(short(self.smoke['account']['component_address']))}")
         self.recv = self.wallet.call("accounts.create_or_get", {"account": {"Name": RECV_ACCOUNT}})
         info(f"📥 account  {bold(RECV_ACCOUNT)} {dim(short(self.recv['account']['component_address']))}")
+        if self.args.live:
+            self.funder = (self.wallet.call("accounts.get", {"name_or_address": {"Name": self.args.funder_account}})
+                           if self.args.funder_account else self.wallet.call("accounts.get_default"))
+            bal = total(balances(self.wallet, self.funder["account"]["component_address"]).get(TARI_TOKEN))
+            info(f"🏦 funder   {bold(account_label(self.funder))} {dim(short(self.funder['account']['component_address']))}"
+                 f" · {fmt_tari(bal)}")
         self.ensure_funds()
 
         if self.swarm.validators():
@@ -385,8 +422,30 @@ class SmokeTest:
             info(f"🩺 {len(self.health_before)} validators · heights {heights}")
 
     def ensure_funds(self):
+        self.ensure_balance(self.args.min_balance * TARI)
+
+    def ensure_balance(self, required):
+        """The smoketest account holds at least `required` revealed TARI: claimed from the faucet on the swarm, sent
+        by the funding account on a live network."""
         bal = revealed(balances(self.wallet, SMOKE_ACCOUNT).get(TARI_TOKEN))
-        if bal < self.args.min_balance * TARI:
+        if bal < required and self.args.live:
+            amount = required - bal
+            funder = self.funder["account"]["component_address"]
+            held = total(balances(self.wallet, funder).get(TARI_TOKEN))
+            if held < amount + TARI:
+                raise StageFailed(f"{account_label(self.funder)} holds {fmt_tari(held)}, but {SMOKE_ACCOUNT} needs "
+                                  f"{fmt_tari(amount)} more plus fees")
+            info(f"🏦 balance {fmt_tari(bal)} is low, {account_label(self.funder)} sends {fmt_tari(amount)}…")
+            tx_id = self.submit_stealth_transfer(funder, TARI_TOKEN, {
+                "destination_address": self.smoke["address"],
+                "blinded_output_amount": 0,
+                "revealed_output_amount": amount,
+            })
+            self.wallet.wait(tx_id)
+            paid, _ = self.indexer_check(tx_id, "funder_transfer")
+            detail(f"fee {paid} µT")
+            bal = revealed(balances(self.wallet, SMOKE_ACCOUNT).get(TARI_TOKEN))
+        elif bal < required:
             info(f"🚰 balance {fmt_tari(bal)} is low, claiming from the faucet…")
             res = self.wallet.call(
                 "accounts.create_free_test_coins",
@@ -396,6 +455,8 @@ class SmokeTest:
             self.indexer_check(res["transaction_id"], "faucet_claim")
             detail(f"+{fmt_tari(res['amount'])}")
             bal = revealed(balances(self.wallet, SMOKE_ACCOUNT).get(TARI_TOKEN))
+        if bal < required:
+            raise StageFailed(f"{SMOKE_ACCOUNT} holds {fmt_tari(bal)} revealed after funding, needs {fmt_tari(required)}")
         info(f"💰 balance  {fmt_tari(bal)}")
 
     # ---- transaction plumbing
@@ -412,6 +473,8 @@ class SmokeTest:
             finalized = (body or {}).get("result", {}).get("Finalized") if status == 200 else None
             if finalized:
                 break
+            if status not in (200, 404, 429):
+                raise StageFailed(f"indexer refuses the result of {short(tx_id)} (HTTP {status})")
             if time.monotonic() > deadline:
                 raise StageFailed(f"indexer has no finalized result for {short(tx_id)} after 60s (HTTP {status})")
             time.sleep(1)
@@ -454,24 +517,38 @@ class SmokeTest:
             return res
         return self.wait(res["transaction_id"], op)
 
-    def stealth_transfer(self, resource, amount, dest, label, sender=SMOKE_ACCOUNT, wallet=None,
-                         selection="PreferRevealed", max_fee=STEALTH_MAX_FEE, timeout_secs=120):
-        res = (wallet or self.wallet).call("accounts.stealth_transfer", {
-            "owner_account": {"Name": sender},
+    def submit_stealth_transfer(self, owner, resource, transfer, selection="PreferRevealed", max_fee=None,
+                                wallet=None):
+        """Submits one stealth transfer from `owner` (an account name or component address) and returns its id.
+
+        A fee paid from stealth inputs is not refunded, so without an explicit `max_fee` the transfer is dry-run
+        first and submitted at the fee the dry run requires; the transfer committing shows that fee suffices."""
+        wallet = wallet or self.wallet
+        owner_ref = {"ComponentAddress": owner} if COMPONENT_ADDR_RE.match(owner) else {"Name": owner}
+        params = {
+            "owner_account": owner_ref,
             "fee_params": {"input_selection": selection, "pay_fee_with_swap": None},
             "input_selection": selection,
             "resource_address": resource,
-            "transfers": [{
-                "destination_address": dest,
-                "blinded_output_amount": amount,
-                "revealed_output_amount": 0,
-                "pay_to": "StealthPublicKey",
-                "attach_sender_address": True,
-            }],
+            "transfers": [{"pay_to": "StealthPublicKey", "attach_sender_address": True, **transfer}],
             "max_fee": max_fee,
             "dry_run": False,
-        })
-        _, paid, _ = self.wait(res["transaction_id"], "stealth_transfer", timeout_secs)
+        }
+        if max_fee is None:
+            dry = wallet.call("accounts.stealth_transfer", {**params, "max_fee": DRY_RUN_MAX_FEE, "dry_run": True})
+            params["max_fee"] = int(dry.get("required_fees") or 0)
+            if not params["max_fee"]:
+                raise StageFailed(f"stealth transfer dry run reported no required fee: {dry}")
+        return wallet.call("accounts.stealth_transfer", params)["transaction_id"]
+
+    def stealth_transfer(self, resource, amount, dest, label, sender=SMOKE_ACCOUNT, wallet=None,
+                         selection="PreferRevealed", max_fee=None, timeout_secs=120):
+        tx_id = self.submit_stealth_transfer(
+            sender, resource,
+            {"destination_address": dest, "blinded_output_amount": amount, "revealed_output_amount": 0},
+            selection=selection, max_fee=max_fee, wallet=wallet,
+        )
+        _, paid, _ = self.wait(tx_id, "stealth_transfer", timeout_secs)
         detail(f"🥷 {label} → {short(dest)} · fee {paid} µT")
 
     def ensure_template(self):
@@ -492,17 +569,123 @@ class SmokeTest:
             run(["cargo", "build", "--release", "-p", "transaction_generator", "-p", "transaction_submitter"])
             self._built_tools = True
 
-    def flood(self, n, quiet=False):
-        bins = REPO / "target" / "release"
+    def network(self):
+        if not self._network:
+            status, body = http_get(f"{self.indexer_url}/network")
+            if status != 200:
+                raise StageFailed(f"indexer does not report its network (HTTP {status})")
+            self._network = body["network"]
+        return self._network
+
+    def flood_seed(self):
+        """The seed of the accounts the flood transfers from. Kept across runs so that funded accounts are reused,
+        and random per checkout so that two people flooding one network do not spend from the same accounts."""
+        try:
+            return int(FLOOD_SEED_FILE.read_text())
+        except (OSError, ValueError):
+            seed = secrets.randbits(63)
+            FLOOD_SEED_FILE.parent.mkdir(parents=True, exist_ok=True)
+            FLOOD_SEED_FILE.write_text(str(seed))
+            return seed
+
+    def flood_accounts(self, n):
+        """(index, owner public key, address, TARI balance or None when the account does not exist) per account."""
+        out = run([self.bins / "transaction_generator", "accounts", "--account-seed", str(self.flood_seed()),
+                   "-n", str(n), "--indexer-url", self.indexer_url])
+        accounts = []
+        for line in out.splitlines():
+            index, pk, address, balance = line.split()
+            accounts.append((int(index), pk, address, None if balance == "-" else int(balance)))
+        return accounts
+
+    def fund_flood_accounts(self, n):
+        """Every flood account holds enough for a transfer. On the swarm the faucet creates the missing accounts at the
+        end of the range; the smoketest account deposits into every other missing account, into accounts that have run
+        low, and on a live network into all of them."""
+        accounts = self.flood_accounts(n)
+        missing = [a for a in accounts if a[3] is None]
+        low = [a for a in accounts if a[3] is not None and a[3] < FLOOD_ACCOUNT_MIN]
+        if missing and not self.args.live:
+            # The seeded faucet flood claims into accounts 0..n, and the submitter can skip only a prefix of them.
+            first = n
+            while first > 0 and accounts[first - 1][3] is None:
+                first -= 1
+            if first < n:
+                info(f"🚰 claiming from the faucet into {bold(n - first)} new flood account(s)…")
+                self.submit_flood("faucet", n, skip=first)
+                # The transfers flood resolves each account's vault through the indexer, which the listing above has
+                # just told that the claimed accounts do not exist.
+                self.wait_flood_accounts_funded(n, range(first, n))
+                missing = [a for a in missing if a[0] < first]
+        to_fund = missing + low
+        if not to_fund:
+            return
+        topups = [(pk, address if balance is not None else None, FLOOD_ACCOUNT_FUND - (balance or 0))
+                  for _, pk, address, balance in to_fund]
+        info(f"💸 {SMOKE_ACCOUNT} funds {bold(len(missing))} new and tops up {bold(len(low))} flood account(s) "
+             f"({fmt_tari(sum(t[2] for t in topups))})…")
+        self.deposit(topups)
+        self.wait_flood_accounts_funded(n, [a[0] for a in to_fund])
+
+    def wait_flood_accounts_funded(self, n, indices):
+        """Waits until the indexer serves each of the flood accounts `indices` as funded.
+
+        Listing the flood accounts caches each missing one's nonexistence on the indexer, and a committed creation is
+        served only once the indexer has synced the account's shard group, so funded accounts appear shard group by
+        shard group."""
+        indices = set(indices)
+        deadline = time.monotonic() + FLOOD_FUNDING_VISIBLE_TIMEOUT
+        while True:
+            pending = [a[0] for a in self.flood_accounts(n)
+                       if a[0] in indices and (a[3] is None or a[3] < FLOOD_ACCOUNT_MIN)]
+            if not pending:
+                return
+            if time.monotonic() > deadline:
+                raise StageFailed(f"indexer still serves {len(pending)} funded flood account(s) as missing or unfunded "
+                                  f"after {FLOOD_FUNDING_VISIBLE_TIMEOUT}s (accounts {', '.join(map(str, pending[:5]))}…)")
+            time.sleep(3)
+
+    def deposit(self, deposits):
+        """Deposits revealed TARI from the smoketest account into each (owner public key, address or None when the
+        account does not exist yet, amount), in batches."""
+        account = self.smoke["account"]["component_address"]
+        self.ensure_balance(sum(amount for _, _, amount in deposits) + self.args.min_balance * TARI)
+        for i in range(0, len(deposits), DEPOSIT_BATCH):
+            lines = ["    let account = var![\"account\"];", "    let tari = var![\"tari\"];"]
+            variables = {"account": account, "tari": TARI_TOKEN}
+            for j, (pk, address, amount) in enumerate(deposits[i:i + DEPOSIT_BATCH]):
+                lines.append(f"    let b{j} = account.withdraw(tari, {amount});")
+                if address is None:
+                    lines.append(f"    let pk{j} = var![\"pk{j}\"];")
+                    lines.append(f"    create_account!(pk{j}, bucket = b{j});")
+                    variables[f"pk{j}"] = pk
+                else:
+                    lines.append(f"    let a{j} = var![\"a{j}\"];")
+                    lines.append(f"    a{j}.deposit(b{j});")
+                    variables[f"a{j}"] = address
+            manifest = fee_main() + "\nfn main() {\n" + "\n".join(lines) + "\n}\n"
+            res = self.wallet.call("transactions.submit_manifest", {
+                "manifest": manifest,
+                "variables": variables,
+                "seal_signer_key_id": self.smoke["account"]["owner_key_id"],
+                "signing_key_ids": [],
+                "max_fee": TARI,
+                "dry_run": False,
+                "blobs": {},
+            })
+            self.wallet.wait(res["transaction_id"])
+
+    def submit_flood(self, kind, n, skip=0):
+        """Generates `n` transactions of the generator's `kind` flood and submits all but the first `skip`. Returns
+        the submitter's counts and the submission time."""
         with tempfile.TemporaryDirectory(prefix="smoke-") as tmp:
-            out = Path(tmp) / "claims.bin"
-            if not quiet:
-                info(f"✍️  generating {bold(n)} faucet-claim transactions…")
-            run([bins / "transaction_generator", "write", "-n", str(n), "-o", out, "--indexer-url", self.indexer_url])
-            if not quiet:
-                info(f"🚀 submitting to {dim(self.indexer_url)}…")
+            out = Path(tmp) / f"{kind}.bin"
+            run([self.bins / "transaction_generator", "write", "-n", str(n), "-o", out, "--flood", kind,
+                 "--account-seed", str(self.flood_seed()), "--network", self.network(),
+                 "--indexer-url", self.indexer_url])
             started = time.monotonic()
-            output = run([bins / "transaction_submitter", "stress-test", "-f", out, "-a", self.indexer_url, "-y"])
+            output = run([self.bins / "transaction_submitter", "stress-test", "-f", out, "-a", self.indexer_url,
+                          "-k", str(skip), "-y"])
             elapsed = time.monotonic() - started
 
         stats = {}
@@ -517,34 +700,39 @@ class SmokeTest:
             stats[key] = int(m.group(1)) if m else None
         if stats["committed"] is None:
             raise StageFailed("could not parse submitter summary:\n" + "\n".join(output.splitlines()[-15:]))
-        breakdown = (
-            f"fee-only {stats['fee_only']} · rejected {stats['rejected']} · errored {stats['errored']}"
-        )
-        if stats["committed"] != n:
+        expected = n - skip
+        if stats["committed"] != expected:
+            breakdown = f"fee-only {stats['fee_only']} · rejected {stats['rejected']} · errored {stats['errored']}"
             reasons = sorted({l.strip() for l in output.splitlines() if re.search(r"reject|error|fail|abort", l, re.I)
                               and not re.match(r"\s*(Rejected|Errored|Fee charged)", l)})
-            raise StageFailed(f"only {stats['committed']}/{n} claims committed ({breakdown})"
+            raise StageFailed(f"only {stats['committed']}/{expected} {kind} transactions committed ({breakdown})"
                               + "".join(f"\n      {r[:200]}" for r in reasons[:5]))
-        if quiet:
-            return elapsed
-        detail(
-            f"submitted {stats['submitted']} · committed {stats['committed']} · fee-only {stats['fee_only']} · "
-            f"rejected {stats['rejected']} · errored {stats['errored']} · {elapsed:.1f}s "
-            f"(~{stats['committed'] / max(elapsed, 0.001):.1f} TPS)"
-        )
+        return stats, elapsed
+
+    def flood(self, n, quiet=False):
+        self.fund_flood_accounts(n)
+        if not quiet:
+            info(f"🚀 flooding {dim(self.indexer_url)} with {bold(n)} transfers…")
+        stats, elapsed = self.submit_flood("transfers", n)
+        if not quiet:
+            detail(
+                f"submitted {stats['submitted']} · committed {stats['committed']} · fee-only {stats['fee_only']} · "
+                f"rejected {stats['rejected']} · errored {stats['errored']} · {elapsed:.1f}s "
+                f"(~{stats['committed'] / max(elapsed, 0.001):.1f} TPS)"
+            )
         return elapsed
 
     def stage_flood(self):
         self.build_tx_tools()
         elapsed = self.flood(self.args.flood)
-        return f"{self.args.flood} claims committed in {elapsed:.1f}s"
+        return f"{self.args.flood} transfers committed in {elapsed:.1f}s"
 
     def consensus_epoch(self):
         """The lowest epoch any validator's consensus has reached. Consensus adopts a new epoch some
         time after the base layer mines into it, so the epoch manager's view is not used."""
         validators = self.swarm.validators()
         if not validators:
-            raise StageSkipped("swarm daemon not reachable; cannot read the validators' consensus epoch")
+            raise StageSkipped(f"{self.no_swarm}; cannot read the validators' consensus epoch")
         return min(JsonRpc(url, timeout=10).call("get_consensus_status")["epoch"] for _, url in validators)
 
     def stage_epoch(self):
@@ -752,7 +940,7 @@ fn main() {{
             self.stealth_transfer(TARI_TOKEN, 3 * TARI, self.recv["address"], fmt_tari(3 * TARI))
         before = total(balances(self.wallet, SMOKE_ACCOUNT).get(TARI_TOKEN))
         self.stealth_transfer(TARI_TOKEN, TARI // 2, self.smoke["address"], fmt_tari(TARI // 2),
-                              sender=RECV_ACCOUNT, selection="PreferConfidential", max_fee=SPEND_BACK_MAX_FEE)
+                              sender=RECV_ACCOUNT, selection="PreferConfidential")
         after = total(balances(self.wallet, SMOKE_ACCOUNT).get(TARI_TOKEN))
         if after - before != TARI // 2:
             raise StageFailed(f"{SMOKE_ACCOUNT} moved by {fmt_tari(after - before)}, expected 0.5 tTARI")
@@ -761,7 +949,7 @@ fn main() {{
             token, symbol = self.token
             before = total(balances(self.wallet, SMOKE_ACCOUNT).get(token))
             self.stealth_transfer(token, 500, self.smoke["address"], f"500 {symbol}",
-                                  sender=RECV_ACCOUNT, selection="PreferConfidential", max_fee=SPEND_BACK_MAX_FEE)
+                                  sender=RECV_ACCOUNT, selection="PreferConfidential")
             gained = total(balances(self.wallet, SMOKE_ACCOUNT).get(token)) - before
             if gained != 500:
                 raise StageFailed(f"{SMOKE_ACCOUNT} gained {gained} {symbol}, expected 500")
@@ -778,7 +966,9 @@ fn main() {{
 
         def send(i):
             try:
-                self.stealth_transfer(TARI_TOKEN, TARI, dest, f"#{i + 1} {fmt_tari(TARI)}")
+                # Concurrent dry runs would price the same unlocked inputs, so these pay a fixed fee.
+                self.stealth_transfer(TARI_TOKEN, TARI, dest, f"#{i + 1} {fmt_tari(TARI)}",
+                                      max_fee=STEALTH_MAX_FEE)
             except StageFailed as e:
                 errors.append(f"#{i + 1}: {e}")
 
@@ -860,11 +1050,15 @@ fn main() {{
         return body["checkpoint"]["epoch"]
 
     def ensure_on_chain(self, name, account):
-        """The account's component address, after claiming faucet coins into the account if the network does not
-        hold its component yet. Receiving stealth transfers leaves an account without one."""
+        """The account's component address, after creating its component if the network does not hold one yet: by a
+        faucet claim on the swarm, by a deposit from the smoketest account with --live. Receiving stealth transfers
+        leaves an account without one."""
         address = account["account"]["component_address"]
         code, _ = http_get(f"{self.indexer_url}/substates/{address}")
-        if code == 404:
+        if code == 404 and self.args.live:
+            info(f"💸 {bold(name)} has no component on the network yet, depositing into it…")
+            self.deposit([(account["account"]["owner_public_key"], None, 1_000)])
+        elif code == 404:
             info(f"🚰 {bold(name)} has no component on the network yet, claiming from the faucet…")
             res = self.wallet.call(
                 "accounts.create_free_test_coins",
@@ -994,7 +1188,7 @@ fn main() {{
     def stage_fees(self):
         previous = {}
         try:
-            previous = json.loads(FEES_FILE.read_text())
+            previous = json.loads(self.fees_file.read_text())
         except (OSError, ValueError):
             pass
         current = {op: int(statistics.median(v)) for op, v in self.fees.items() if op != "negative"}
@@ -1017,8 +1211,8 @@ fn main() {{
             over = self.overcharges.get(op)
             over = dim(f"  (+{int(statistics.median(over)):,} µT overcharged)") if over else ""
             detail(f"{op:<18} {fee:>9,} µT  {delta}{over}")
-        FEES_FILE.parent.mkdir(parents=True, exist_ok=True)
-        FEES_FILE.write_text(json.dumps({**previous, **current}, indent=2, sort_keys=True))
+        self.fees_file.parent.mkdir(parents=True, exist_ok=True)
+        self.fees_file.write_text(json.dumps({**previous, **current}, indent=2, sort_keys=True))
         if drifted:
             warn(f"fees moved more than {FEE_DRIFT_WARN:.0%}: {', '.join(drifted)}")
             return f"{len(current)} operations; {len(drifted)} drifted ({', '.join(drifted)})"
@@ -1032,7 +1226,7 @@ fn main() {{
             rpc = JsonRpc(url, timeout=10)
             cs = rpc.call("get_consensus_status")
             em = rpc.call("get_epoch_manager_stats")
-            group = em.get("committee_info", {}).get("shard_group") or {}
+            group = (em.get("committee_info") or {}).get("shard_group") or {}
             status[name] = {
                 "state": cs["state"],
                 "epoch": cs["epoch"],
@@ -1043,7 +1237,7 @@ fn main() {{
 
     def stage_health(self):
         if not self.swarm.validators():
-            raise StageSkipped("swarm daemon not reachable; cannot list validators")
+            raise StageSkipped(f"{self.no_swarm}; cannot list validators")
         now = self.validator_status()
         problems = []
         for name, s in now.items():
@@ -1096,15 +1290,21 @@ def main():
         epilog=__doc__,
     )
     p.add_argument("--swarm-url", default="http://localhost:8080")
+    p.add_argument("--live", action="store_true",
+                   help="run against a live network: never contact the swarm daemon; needs --wallet-url and --indexer-url")
+    p.add_argument("--funder-account",
+                   help="with --live, the wallet account that funds the run in place of the faucet (default: the "
+                        "wallet's default account)")
     p.add_argument("--wallet-url", help="walletd JSON-RPC URL, e.g. http://127.0.0.1:5100/json_rpc")
     p.add_argument("--peer-wallet-url", help="second walletd for the multi_wallet stage")
     p.add_argument("--indexer-url", help="indexer REST URL, e.g. http://127.0.0.1:12500")
-    p.add_argument("--flood", type=int, default=200, help="faucet claims per flood (default 200)")
+    p.add_argument("--flood", type=int, default=200, help="transfers per flood (default 200)")
     p.add_argument("--templates", type=int, default=3, help="templates to publish (default 3)")
     p.add_argument("--stealth", type=int, default=3, choices=[1, 2, 3], help="tTARI stealth transfers (default 3)")
     p.add_argument("--concurrent", type=int, default=3, help="concurrent stealth transfers (default 3)")
     p.add_argument("--nfts", type=int, default=3, help="faucet NFTs to mint (default 3)")
-    p.add_argument("--min-balance", type=int, default=100, help="claim faucet coins below this many tTARI")
+    p.add_argument("--min-balance", type=int, default=100, help="top up the smoketest account below this many tTARI, from the faucet or, with --live, the funder "
+                        "account")
     p.add_argument("--burn", type=int, default=10, help="tTARI to burn in the claim_burn stage (default 10)")
     p.add_argument("--burn-timeout", type=int, default=600, help="seconds to wait for a burn to be claimed")
     p.add_argument("--epoch", action="store_true", help="also run the epoch stage")
@@ -1118,6 +1318,8 @@ def main():
     p.add_argument("--no-build", action="store_true", help="use existing target/release generator/submitter")
     p.add_argument("--fail-fast", action="store_true", help="stop at the first failing stage")
     args = p.parse_args()
+    if args.live and not (args.wallet_url and args.indexer_url):
+        p.error("--live needs --wallet-url and --indexer-url")
 
     all_stages = STAGES
     if args.only:

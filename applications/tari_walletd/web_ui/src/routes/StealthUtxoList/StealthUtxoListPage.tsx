@@ -29,11 +29,17 @@ import Grid from "@mui/material/Grid";
 import ConfidentialBalanceDisplay from "@routes/AssetVault/Components/ConfidentialBalanceDisplay";
 import StealthUtxoList from "@routes/StealthUtxoList/StealthUtxoList";
 import useAccountStore, { setAccount, setOotleAddress } from "@store/accountStore";
+import { getDefaultAccountFetchState } from "@utils/accountFallback";
 import { useEffect } from "react";
 
 function StealthUtxoListPage() {
   const account = useAccountStore((state) => state.account);
-  const { data: defaultAccount, isLoading, isError, error } = useAccountsGetDefault();
+  const { data: defaultAccount, isLoading, isError, error } = useAccountsGetDefault(!account);
+  const { showLoading, showError } = getDefaultAccountFetchState({
+    hasAccount: Boolean(account),
+    isLoading,
+    isError,
+  });
 
   useEffect(() => {
     if (!isError && defaultAccount && !account) {
@@ -43,7 +49,11 @@ function StealthUtxoListPage() {
   }, [defaultAccount, isError, account]);
 
   return (
-    <FetchStatusCheck isLoading={isLoading} isError={isError} errorMessage={error?.message || "Error loading account"}>
+    <FetchStatusCheck
+      isLoading={showLoading}
+      isError={showError}
+      errorMessage={error?.message || "Error loading account"}
+    >
       {account ? (
         <>
           <PageHeader title="Stealth UTXOs" balanceComponent={<ConfidentialBalanceDisplay />} />

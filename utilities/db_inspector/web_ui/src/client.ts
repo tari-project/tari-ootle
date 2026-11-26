@@ -1,25 +1,23 @@
 //   Copyright 2025 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-const URL = import.meta.env.VITE_API_ADDRESS || "http://localhost:9090/api";
+const BASE_URL = (import.meta.env.VITE_API_ADDRESS || "http://localhost:9090/api").replace(/\/+$/, "");
 
 export type Params = { [key: string]: string | number | boolean | null };
 
 function getUrl(entity: string, params: Params = {}) {
   function toQueryString(params: Params): string {
-    return new URLSearchParams(
-      Object.entries(params).reduce(
-        (acc, [key, value]) => {
-          acc[key] = String(value);
-          return acc;
-        },
-        {} as Record<string, string>,
-      ),
-    ).toString();
+    const searchParams = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== null && value !== undefined) {
+        searchParams.append(key, String(value));
+      }
+    }
+    return searchParams.toString();
   }
 
   const queryString = toQueryString(params);
-  return `${URL}/${entity}${queryString ? `?${queryString}` : ""}`;
+  return `${BASE_URL}/${entity}${queryString ? `?${queryString}` : ""}`;
 }
 
 async function getRequest(path: string, params: Params = {}) {
@@ -32,12 +30,17 @@ async function getRequest(path: string, params: Params = {}) {
   });
 
   if (!response.ok) {
+    let errorBody: { status?: unknown; message?: unknown } | null = null;
     try {
-      const resp = await response.json();
-      throw new Error(`${resp.status}: ${resp.message}`);
-    } catch (e) {
-      throw new Error(`Error: ${response.status}: ${response.statusText} ${e}`);
+      errorBody = await response.json();
+    } catch {
+      errorBody = null;
     }
+    if (errorBody && typeof errorBody.message === "string" && errorBody.message) {
+      const status = errorBody.status ?? response.status;
+      throw new Error(`${status}: ${errorBody.message}`);
+    }
+    throw new Error(`Error: ${response.status}: ${response.statusText}`);
   }
 
   return await response.json();
@@ -49,11 +52,14 @@ export function RestClient() {
       return await getRequest("databases");
     },
     listColumnFamilies: async (dbName: string) => {
-      return await getRequest("databases/" + dbName + "/column-families");
+      return await getRequest(`databases/${encodeURIComponent(dbName)}/column-families`);
     },
 
     listCfItems: async (dbName: string, cfName: string, params: Params = {}) => {
-      return await getRequest(`databases/${dbName}/column-families/${cfName}`, params);
+      return await getRequest(
+        `databases/${encodeURIComponent(dbName)}/column-families/${encodeURIComponent(cfName)}`,
+        params,
+      );
     },
   };
 }

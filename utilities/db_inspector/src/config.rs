@@ -23,6 +23,12 @@ impl Config {
     }
 
     pub fn save<P: AsRef<Path>>(&self, path: P) -> anyhow::Result<()> {
+        let path = path.as_ref();
+        if let Some(parent) = path.parent() &&
+            !parent.as_os_str().is_empty()
+        {
+            std::fs::create_dir_all(parent).context("create_dir_all")?;
+        }
         let config_str = toml::to_string(self).context("serialize to toml")?;
         std::fs::write(path, config_str).context("write to file")
     }

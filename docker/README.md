@@ -116,7 +116,8 @@ with this password, so the same password must be given on every later start.
     gets `421` while the `127.0.0.1` health check stays green.
 - For a cold and a hot wallet in one task, give each its own `JRPC_LISTEN_ON` port (e.g.
   `127.0.0.1:5100` and `127.0.0.1:5101`) and its own health-check port. If the port is taken the
-  daemon silently binds a random port instead, so two wallets on 5100 conflict.
+  daemon logs a warning and binds an OS-assigned port on the same address, so two wallets on 5100
+  conflict and the image health check (which still calls port 5100) no longer matches the second wallet.
 - Cold and hot wallets must not share a data directory: two containers with the same
   `TARI_BASE_DIR` open the same `wallet.sqlite` and seed, and nothing locks it. Give each wallet
   its own volume, or its own `TARI_BASE_DIR` (e.g. `/data/cold`, `/data/hot`) and `XDG_DATA_HOME`
@@ -157,22 +158,38 @@ Both images get the same tags. Released tags follow `vX.Y.Z` semver. Pre-release
 
 ## Verifying signatures
 
-CI signs each pushed image by digest with cosign keyless signing (GitHub OIDC). Verify a release
-image against the release tag ref:
+CI pushes each image by digest, signs the digest with cosign keyless signing (GitHub OIDC), and
+only then points the tags at it. The signing certificate names the workflow ref the image was
+built from, so verify a release against the exact tag you mean to deploy, not a pattern: any
+release's signature would satisfy a pattern, so a tag moved to an older signed image would pass.
+
+Tags can be moved, so resolve the tag to a digest once, verify that digest, and deploy that same
+digest:
 
 ```bash
-cosign verify ghcr.io/tari-project/ootle-walletd:vX.Y.Z \
-  --certificate-identity-regexp '^https://github\.com/tari-project/tari-ootle/\.github/workflows/build_dockers\.yml@refs/tags/v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$' \
+VERSION=vX.Y.Z
+IMAGE=ghcr.io/tari-project/ootle-walletd
+DIGEST=$(docker buildx imagetools inspect "$IMAGE:$VERSION" --format '{{json .Manifest}}' | jq -r .digest)
+
+cosign verify "$IMAGE@$DIGEST" \
+  --certificate-identity "https://github.com/tari-project/tari-ootle/.github/workflows/build_dockers.yml@refs/tags/$VERSION" \
   --certificate-github-workflow-trigger push \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
+
+echo "$IMAGE@$DIGEST"   # deploy this reference
 ```
 
-and a `development` image against the branch:
+Verify a `development` image the same way, resolving the `development` tag and using the branch
+ref as the identity:
 
 ```bash
-cosign verify ghcr.io/tari-project/ootle-walletd:development \
+DIGEST=$(docker buildx imagetools inspect "$IMAGE:development" --format '{{json .Manifest}}' | jq -r .digest)
+cosign verify "$IMAGE@$DIGEST" \
   --certificate-identity https://github.com/tari-project/tari-ootle/.github/workflows/build_dockers.yml@refs/heads/development \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 
-Tags can be moved; in ECS, pin the image by the verified digest (`ootle-walletd@sha256:...`).
+In ECS, pin the image by the verified digest (`ootle-walletd@sha256:...`), never by tag alone. A
+`tag@sha256:...` reference is pulled by its digest, so verify the digest, not the tag. Where you
+need a particular source commit, also check the certificate's commit with
+`--certificate-github-workflow-sha <commit>`.

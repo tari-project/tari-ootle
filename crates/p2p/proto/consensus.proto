@@ -20,6 +20,7 @@ message HotStuffMessage {
     MissingTransactionsResponse requested_transaction = 8;
     SyncRequest sync_request = 9;
     ProposalMessage catch_up_sync_response = 10;
+    CatchUpPage catch_up_page = 11;
   }
 }
 
@@ -308,7 +309,19 @@ message SubstateDestroyedMetadata {
 
 message SyncRequest {
   uint64 epoch = 1;
-  uint64 block_height = 2;
+  uint64 from_height = 2;
+  uint32 request_id = 3;
+  uint32 skip = 4;
+}
+
+message CatchUpPage {
+  uint32 request_id = 1;
+  uint64 epoch = 2;
+  repeated ProposalMessage blocks = 3;
+  ProposalMessage leaf = 4; // optional
+  repeated tari.ootle.transaction.Transaction transactions = 5;
+  optional uint64 next_height = 6;
+  uint32 next_skip = 7;
 }
 
 message ShardGroupAccumulatedData {

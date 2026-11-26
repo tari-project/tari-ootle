@@ -64,8 +64,8 @@ export function shortenSubstateId(
     return "";
   }
   const string = substateIdToString(substateId);
-  const parts = string.split("_", 2);
-  if (parts.length < 2) {
+  const parts = splitOnce(string, "_");
+  if (!parts) {
     return string;
   }
   return parts[0] + "_" + shortenString(parts[1], start, end);
@@ -86,30 +86,11 @@ export function rejectReasonToString(reason: RejectReason | null): string {
   if (typeof reason === "string") {
     return reason;
   }
-  if ("ShardsNotPledged" in reason) {
-    return `ShardsNotPledged: ${reason.ShardsNotPledged}`;
-  }
   if ("ExecutionFailure" in reason) {
     return `ExecutionFailure (${reason.ExecutionFailure.code}): ${reason.ExecutionFailure.message}`;
   }
-  if ("ShardPledgedToAnotherPayload" in reason) {
-    return `ShardPledgedToAnotherPayload: ${reason.ShardPledgedToAnotherPayload}`;
-  }
-  if ("ShardRejected" in reason) {
-    return `ShardRejected: ${reason.ShardRejected}`;
-  }
-  if ("InsufficientFeesPaid" in reason) {
-    return `InsufficientFeesPaid: ${reason.InsufficientFeesPaid}`;
-  }
-  if ("ForeignShardGroupDecidedToAbort" in reason) {
-    const r = reason.ForeignShardGroupDecidedToAbort;
-    return `ForeignShardGroupDecidedToAbort: ${r.start_shard}-${r.end_shard}, ${r.abort_reason}`;
-  }
-  if ("InvalidTransaction" in reason) {
-    return `InvalidTransaction: ${reason.InvalidTransaction}`;
-  }
-  if ("OneOrMoreInputsNotFound" in reason) {
-    return `OneOrMoreInputsNotFound: ${reason.OneOrMoreInputsNotFound}`;
+  if ("SubstateNotFound" in reason) {
+    return `SubstateNotFound: ${reason.SubstateNotFound}`;
   }
   if ("FailedToLockInputs" in reason) {
     return `FailedToLockInputs: ${reason.FailedToLockInputs}`;
@@ -117,8 +98,19 @@ export function rejectReasonToString(reason: RejectReason | null): string {
   if ("FailedToLockOutputs" in reason) {
     return `FailedToLockOutputs: ${reason.FailedToLockOutputs}`;
   }
-  console.error("Unknown reason", reason);
-  return JSON.stringify(reason);
+  if ("ForeignShardGroupDecidedToAbort" in reason) {
+    const r = reason.ForeignShardGroupDecidedToAbort;
+    return `ForeignShardGroupDecidedToAbort: ${r.start_shard}-${r.end_shard}, ${r.abort_reason}`;
+  }
+  if ("InsufficientFeesPaid" in reason) {
+    return `InsufficientFeesPaid: ${reason.InsufficientFeesPaid}`;
+  }
+  if ("Abort" in reason) {
+    return `Abort: ${reason.Abort.reason}`;
+  }
+  const unhandled: never = reason;
+  console.error("Unknown reason", unhandled);
+  return JSON.stringify(unhandled);
 }
 
 export function getSubstateDiffFromTransactionResult(result: TransactionResult): SubstateDiff | null {
@@ -162,7 +154,6 @@ export function permissionToString(permission: Permission): string {
   if ("Keys" in permission) return `keys:${permission.Keys.toLowerCase()}`;
   if ("Templates" in permission) return `templates:${permission.Templates.toLowerCase()}`;
   if ("Transactions" in permission) return `transactions:${permission.Transactions.toLowerCase()}`;
-  if ("Validators" in permission) return `validators:${permission.Validators.toLowerCase()}`;
   if ("Settings" in permission) return `settings:${permission.Settings.toLowerCase()}`;
   if ("AddressBook" in permission) return `address_book:${permission.AddressBook.toLowerCase()}`;
   if ("TransactionRequests" in permission) {
@@ -178,6 +169,7 @@ export function permissionToString(permission: Permission): string {
   if ("Nfts" in permission) return scoped("nfts", permission.Nfts);
   if ("Confidential" in permission) return scoped("confidential", permission.Confidential);
   if ("StealthUtxos" in permission) return scoped("stealth_utxos", permission.StealthUtxos);
+  if ("VnFees" in permission) return scoped("vn_fees", permission.VnFees);
 
   console.error("Unknown permission", permission);
   return JSON.stringify(permission);

@@ -442,7 +442,11 @@ impl HandlerContext {
             return Ok(cached.epoch);
         }
 
-        let epoch = network.get_current_epoch().await?;
+        let epoch = if self.wallet_sdk.sdk_config().indexer_trust.is_verify() {
+            self.wallet_sdk.validator_set_api().sync().await?.epoch()
+        } else {
+            network.get_current_epoch().await?
+        };
         *self.cached_epoch.lock().unwrap() = Some(CachedEpoch {
             epoch,
             read_at: Instant::now(),
@@ -700,6 +704,37 @@ mod max_fee_limit_tests {
 }
 
 #[cfg(test)]
+mod current_epoch_tests {
+    use tari_ootle_light_client::test_fixtures::ValidatorSetFixture;
+    use tari_ootle_wallet_sdk::IndexerTrust;
+
+    use super::*;
+    use crate::handlers::test_support::{FakeIndexer, TestDaemon};
+
+    /// An indexer whose latest checkpoints end epoch 1, and that claims the network is in epoch 50.
+    async fn indexer_ahead_of_its_checkpoints() -> FakeIndexer {
+        let indexer = FakeIndexer::spawn().await;
+        indexer.end_epoch(&ValidatorSetFixture::new(1), &ValidatorSetFixture::new(2));
+        indexer.claim_current_epoch(Epoch(50));
+        indexer
+    }
+
+    #[tokio::test]
+    async fn a_verifying_wallet_reads_the_epoch_of_its_trusted_validator_set() {
+        let indexer = indexer_ahead_of_its_checkpoints().await;
+        let daemon = TestDaemon::start_with_indexer(&indexer, IndexerTrust::Verify).await;
+        assert_eq!(daemon.context.current_epoch().await.unwrap(), Epoch(2));
+    }
+
+    #[tokio::test]
+    async fn a_trusting_wallet_reads_the_epoch_the_indexer_claims() {
+        let indexer = indexer_ahead_of_its_checkpoints().await;
+        let daemon = TestDaemon::start_with_indexer(&indexer, IndexerTrust::Trust).await;
+        assert_eq!(daemon.context.current_epoch().await.unwrap(), Epoch(50));
+    }
+}
+
+#[cfg(test)]
 mod cookie_auth_tests {
     use axum_extra::headers::Authorization;
     use tari_ootle_walletd_client::{
@@ -719,9 +754,15 @@ mod cookie_auth_tests {
     use crate::handlers::{
         accounts::handle_export_view_key,
         auth::{handle_create_api_key, handle_list_api_keys, handle_revoke_api_key},
-        signing_requests::handle_approve as handle_approve_signing_request,
+        signing_requests::{
+            handle_approve as handle_approve_signing_request,
+            handle_reject as handle_reject_signing_request,
+        },
         test_support::TestDaemon,
-        transaction_requests::handle_approve as handle_approve_transaction_request,
+        transaction_requests::{
+            handle_approve as handle_approve_transaction_request,
+            handle_reject as handle_reject_transaction_request,
+        },
     };
 
     #[tokio::test]
@@ -814,8 +855,21 @@ mod cookie_auth_tests {
         .unwrap_err();
         assert!(matches!(err.downcast_ref::<AuthError>(), Some(AuthError::UserAuthOnly)));
 
+        let err = handle_reject_transaction_request(&daemon.context, cookie, TransactionRequestDecisionRequest {
+            request_id: 1,
+        })
+        .await
+        .unwrap_err();
+        assert!(matches!(err.downcast_ref::<AuthError>(), Some(AuthError::UserAuthOnly)));
+
         let err =
             handle_approve_signing_request(&daemon.context, cookie, SigningRequestDecisionRequest { request_id: 1 })
+                .await
+                .unwrap_err();
+        assert!(matches!(err.downcast_ref::<AuthError>(), Some(AuthError::UserAuthOnly)));
+
+        let err =
+            handle_reject_signing_request(&daemon.context, cookie, SigningRequestDecisionRequest { request_id: 1 })
                 .await
                 .unwrap_err();
         assert!(matches!(err.downcast_ref::<AuthError>(), Some(AuthError::UserAuthOnly)));

@@ -1,6 +1,8 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
+use std::collections::BTreeSet;
+
 use log::*;
 use ootle_byte_type::{ConvertFromByteType, ToByteType};
 use tari_crypto::ristretto::{RistrettoPublicKey, pedersen::PedersenCommitment};
@@ -227,6 +229,104 @@ where TSpec: WalletSdkSpec
         tx.commit()?;
 
         Ok(())
+    }
+
+    /// Returns the number of confidential outputs in `vault_id` whose `Unspent` / `Spent` status disagrees with
+    /// `live_commitments`: locally `Unspent` outputs absent from `live_commitments` plus locally `Spent` outputs
+    /// present in `live_commitments` (e.g. recalled commitments re-deposited into the vault).
+    pub fn count_out_of_sync_outputs(
+        &self,
+        account_address: &ComponentAddress,
+        vault_id: &VaultId,
+        resource_address: &ResourceAddress,
+        live_commitments: &BTreeSet<PedersenCommitmentBytes>,
+    ) -> Result<usize, ConfidentialOutputsApiError> {
+        self.store.with_read_tx(|tx| {
+            let (to_mark_spent, to_mark_unspent) =
+                Self::find_out_of_sync_commitments(tx, account_address, vault_id, resource_address, live_commitments)?;
+            Ok(to_mark_spent.len() + to_mark_unspent.len())
+        })
+    }
+
+    /// Reconciles confidential output statuses in `vault_id` against `live_commitments`, marking absent `Unspent`
+    /// outputs as `Spent` and present `Spent` outputs (e.g. re-deposited after recall) back to `Unspent`.
+    ///
+    /// Only `Unspent` and `Spent` outputs are transitioned; `LockedForSpend`, `LockedUnconfirmed`, and `Invalid`
+    /// outputs are left untouched so active wallet locks and pending unconfirmed change outputs are never clobbered.
+    pub fn reconcile_vault_outputs(
+        &self,
+        account_address: &ComponentAddress,
+        vault_id: &VaultId,
+        resource_address: &ResourceAddress,
+        live_commitments: &BTreeSet<PedersenCommitmentBytes>,
+    ) -> Result<usize, ConfidentialOutputsApiError> {
+        self.store.with_write_tx(|tx| {
+            let (to_mark_spent, to_mark_unspent) = Self::find_out_of_sync_commitments(
+                &mut **tx,
+                account_address,
+                vault_id,
+                resource_address,
+                live_commitments,
+            )?;
+            let mut total_updated = 0usize;
+            if !to_mark_spent.is_empty() {
+                let marked_spent = tx.confidential_outputs_set_status_by_commitments(
+                    vault_id,
+                    &to_mark_spent,
+                    OutputStatus::Unspent,
+                    OutputStatus::Spent,
+                )?;
+                info!(
+                    target: LOG_TARGET,
+                    "Marked {} absent unspent confidential output(s) in vault {} as spent",
+                    marked_spent,
+                    vault_id
+                );
+                total_updated += marked_spent;
+            }
+            if !to_mark_unspent.is_empty() {
+                let marked_unspent = tx.confidential_outputs_set_status_by_commitments(
+                    vault_id,
+                    &to_mark_unspent,
+                    OutputStatus::Spent,
+                    OutputStatus::Unspent,
+                )?;
+                info!(
+                    target: LOG_TARGET,
+                    "Restored {} returned confidential output(s) in vault {} to unspent",
+                    marked_unspent,
+                    vault_id
+                );
+                total_updated += marked_unspent;
+            }
+            Ok(total_updated)
+        })
+    }
+
+    fn find_out_of_sync_commitments<TTx: WalletStoreReader>(
+        tx: &mut TTx,
+        account_address: &ComponentAddress,
+        vault_id: &VaultId,
+        resource_address: &ResourceAddress,
+        live_commitments: &BTreeSet<PedersenCommitmentBytes>,
+    ) -> Result<(Vec<PedersenCommitmentBytes>, Vec<PedersenCommitmentBytes>), WalletStorageError> {
+        let mut to_mark_spent = Vec::new();
+        let mut to_mark_unspent = Vec::new();
+        for output in tx.confidential_outputs_get_many(resource_address, Some(account_address), None)? {
+            if output.vault_id != *vault_id {
+                continue;
+            }
+            match output.status {
+                OutputStatus::Unspent if !live_commitments.contains(&output.commitment) => {
+                    to_mark_spent.push(output.commitment);
+                },
+                OutputStatus::Spent if live_commitments.contains(&output.commitment) => {
+                    to_mark_unspent.push(output.commitment);
+                },
+                _ => {},
+            }
+        }
+        Ok((to_mark_spent, to_mark_unspent))
     }
 
     fn validate_output(

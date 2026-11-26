@@ -23,7 +23,7 @@
 import ContentCopyIcon from "@mui/icons-material/ContentCopy";
 import IconButton from "@mui/material/IconButton";
 import Tooltip from "@mui/material/Tooltip";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 interface CopyProps {
   copy: string;
@@ -32,24 +32,59 @@ interface CopyProps {
   iconHeight?: string;
 }
 
+const TOOLTIP_RESET_MS = 2000;
+
 const CopyToClipboard = ({ copy, title, iconWidth = "14px", iconHeight = "14px" }: CopyProps) => {
   const [tooltip, setTooltip] = useState<string | null>(null);
-  const handleClick = async (copyThis: string) => {
-    try {
-      await navigator.clipboard.writeText(copyThis);
-      setTooltip("Copied to clipboard");
-    } catch (err) {
-      setTooltip("Permission denied to copy");
-      console.log(err);
+  const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const copyIdRef = useRef(0);
+
+  const clearResetTimer = () => {
+    if (resetTimerRef.current !== null) {
+      clearTimeout(resetTimerRef.current);
+      resetTimerRef.current = null;
     }
-    setTimeout(() => {
+  };
+
+  useEffect(() => {
+    setTooltip(null);
+    return () => {
+      copyIdRef.current += 1;
+      clearResetTimer();
+    };
+  }, [copy]);
+
+  const handleClick = async (copyThis: string) => {
+    const requestId = ++copyIdRef.current;
+    clearResetTimer();
+
+    if (!navigator.clipboard?.writeText) {
+      setTooltip("Clipboard unavailable");
+    } else {
+      try {
+        await navigator.clipboard.writeText(copyThis);
+        if (copyIdRef.current !== requestId) {
+          return;
+        }
+        setTooltip("Copied to clipboard");
+      } catch (err) {
+        if (copyIdRef.current !== requestId) {
+          return;
+        }
+        setTooltip("Permission denied to copy");
+        console.error(err);
+      }
+    }
+
+    resetTimerRef.current = setTimeout(() => {
+      resetTimerRef.current = null;
       setTooltip(null);
-    }, 2000);
+    }, TOOLTIP_RESET_MS);
   };
 
   return (
-    <IconButton onClick={() => handleClick(copy)} size="small" aria-label="copy to clipboard">
-      <Tooltip title={tooltip ? tooltip : title || copy} arrow>
+    <Tooltip title={tooltip ?? (title || copy)} arrow>
+      <IconButton onClick={() => handleClick(copy)} size="small" aria-label="copy to clipboard">
         <ContentCopyIcon
           color="primary"
           style={{
@@ -57,8 +92,8 @@ const CopyToClipboard = ({ copy, title, iconWidth = "14px", iconHeight = "14px" 
             height: iconHeight,
           }}
         />
-      </Tooltip>
-    </IconButton>
+      </IconButton>
+    </Tooltip>
   );
 };
 

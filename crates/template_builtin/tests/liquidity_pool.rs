@@ -55,7 +55,7 @@ fn initial_contribution_and_redeem() {
             .call_method(user1, "deposit", args![Workspace("contribution.1")])
             .call_method(user1, "deposit", args![Workspace("contribution.2")])
             .finish()
-            .add_signer(&test.to_public_key_bytes(), &user1_secret)
+            .authorize(&test.to_public_key_bytes(), [&user1_secret])
             .seal(test.secret_key()),
         vec![],
     );
@@ -145,7 +145,7 @@ fn contribute_accepts_buckets_in_reverse_order() {
             .call_method(user1, "deposit", args![Workspace("contribution.1")])
             .call_method(user1, "deposit", args![Workspace("contribution.2")])
             .finish()
-            .add_signer(&test.to_public_key_bytes(), &user1_secret)
+            .authorize(&test.to_public_key_bytes(), [&user1_secret])
             .seal(test.secret_key()),
         vec![],
     );
@@ -324,7 +324,7 @@ fn second_contribution_and_partial_redeem() {
             .call_method(user1, "deposit", args![Workspace("contribution.1")])
             .call_method(user1, "deposit", args![Workspace("contribution.2")])
             .finish()
-            .add_signer(&test.to_public_key_bytes(), &user1_secret)
+            .authorize(&test.to_public_key_bytes(), [&user1_secret])
             .seal(test.secret_key()),
         vec![],
     );
@@ -474,7 +474,7 @@ fn contribute_to_thin_pool(tari: u64, other: u64) -> (PoolState, PoolState) {
             .call_method(user1, "deposit", args![Workspace("contribution.1")])
             .call_method(user1, "deposit", args![Workspace("contribution.2")])
             .finish()
-            .add_signer(&test.to_public_key_bytes(), &user1_secret)
+            .authorize(&test.to_public_key_bytes(), [&user1_secret])
             .seal(test.secret_key()),
         vec![],
     );
@@ -784,7 +784,7 @@ fn basic_constant_product_swap() {
             .put_last_instruction_output_on_workspace("user2_stablecoin")
             .call_method(user2, "deposit", args![Workspace("user2_stablecoin")])
             .finish()
-            .add_signer(&test.to_public_key_bytes(), &user1_secret)
+            .authorize(&test.to_public_key_bytes(), [&user1_secret])
             .seal(test.secret_key()),
         vec![],
     );

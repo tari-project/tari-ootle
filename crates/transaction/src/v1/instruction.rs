@@ -9,8 +9,10 @@ use tari_template_lib_types::{
     Amount,
     FunctionName,
     OwnerRule,
+    ResourceAddress,
     TemplateAddress,
     TemplateMetadataHash,
+    UtxoAddress,
     ValidatorFeePoolAddress,
     access_rules::ComponentAccessRules,
     crypto::RistrettoPublicKeyBytes,
@@ -51,6 +53,10 @@ pub enum Instruction {
         function: FunctionName,
         #[n(2)]
         #[cbor(decode_with = "decode_args")]
+        #[cfg_attr(
+            feature = "serde",
+            serde(deserialize_with = "ootle_serde::bounded_seq::deserialize::<{ crate::MAX_INSTRUCTION_ARGS }, _, _>")
+        )]
         args: Vec<InstructionArg>,
     },
     #[n(2)]
@@ -62,6 +68,10 @@ pub enum Instruction {
         method: FunctionName,
         #[n(2)]
         #[cbor(decode_with = "decode_args")]
+        #[cfg_attr(
+            feature = "serde",
+            serde(deserialize_with = "ootle_serde::bounded_seq::deserialize::<{ crate::MAX_INSTRUCTION_ARGS }, _, _>")
+        )]
         args: Vec<InstructionArg>,
     },
     #[n(3)]
@@ -164,6 +174,23 @@ pub enum Instruction {
         #[n(0)]
         proof: WorkspaceOffsetId,
     },
+    /// Replaces every method access rule of `component`. Permitted when the transaction satisfies the component's
+    /// rules updater (`Owner` or `AccessRule`); refused when it is `Locked` or `TemplateManaged`.
+    #[n(18)]
+    SetComponentAccessRules {
+        #[n(0)]
+        component: ComponentReference,
+        #[n(1)]
+        access_rules: ComponentAccessRules,
+    },
+    /// Replaces the owner rule of `component`, under the same rules updater as `SetComponentAccessRules`.
+    #[n(19)]
+    SetComponentOwnerRule {
+        #[n(0)]
+        component: ComponentReference,
+        #[n(1)]
+        owner_rule: OwnerRule,
+    },
 }
 
 impl Instruction {
@@ -225,7 +252,9 @@ impl Instruction {
             Self::StealthTransfer { .. } |
             Self::PayFeeFromBucket { .. } |
             Self::AuthorizeProof { .. } |
-            Self::DropProofAuthorization { .. } => {},
+            Self::DropProofAuthorization { .. } |
+            Self::SetComponentAccessRules { .. } |
+            Self::SetComponentOwnerRule { .. } => {},
         }
         out
     }
@@ -272,7 +301,9 @@ impl Instruction {
             Self::StealthTransfer { .. } |
             Self::PayFeeFromBucket { .. } |
             Self::AuthorizeProof { .. } |
-            Self::DropProofAuthorization { .. } => {},
+            Self::DropProofAuthorization { .. } |
+            Self::SetComponentAccessRules { .. } |
+            Self::SetComponentOwnerRule { .. } => {},
         }
     }
 
@@ -305,18 +336,23 @@ impl Instruction {
             Self::UpdateComponentTemplate { .. } |
             Self::PutIntoBucket { .. } |
             Self::AuthorizeProof { .. } |
-            Self::DropProofAuthorization { .. } => false,
+            Self::DropProofAuthorization { .. } |
+            Self::SetComponentAccessRules { .. } |
+            Self::SetComponentOwnerRule { .. } => false,
         }
     }
 
     /// Whether this instruction is permitted inside a transaction's fee instructions.
     ///
     /// The fee intent runs on a flat compute credit and its writes commit even when the main intent fails, so it
-    /// holds only the work of funding the fee. Publishing a template and changing a component's template are main
-    /// intent work, funded by the fee already paid.
+    /// holds only the work of funding the fee. Publishing a template and changing a component's template or rules are
+    /// main intent work, funded by the fee already paid.
     pub fn is_allowed_in_fee_intent(&self) -> bool {
         match self {
-            Self::PublishTemplate { .. } | Self::UpdateComponentTemplate { .. } => false,
+            Self::PublishTemplate { .. } |
+            Self::UpdateComponentTemplate { .. } |
+            Self::SetComponentAccessRules { .. } |
+            Self::SetComponentOwnerRule { .. } => false,
             Self::CreateAccount { .. } |
             Self::CallFunction { .. } |
             Self::CallMethod { .. } |
@@ -405,6 +441,9 @@ impl Instruction {
             Self::AuthorizeProof { proof } | Self::DropProofAuthorization { proof } => {
                 proof.remap_id(id_offset);
             },
+            Self::SetComponentAccessRules { component, .. } | Self::SetComponentOwnerRule { component, .. } => {
+                component.remap_workspace_id(id_offset);
+            },
             Self::UpdateComponentTemplate { component, migrate, .. } => {
                 component.remap_workspace_id(id_offset);
                 if let Some(migrate) = migrate {
@@ -427,6 +466,43 @@ impl Instruction {
             Self::PutLastInstructionOutputOnWorkspace { key } => Some(*key),
             Self::TakeFromBucket { output_bucket, .. } => Some(*output_bucket),
             Self::AllocateAddress { workspace_id, .. } => Some(*workspace_id),
+            _ => None,
+        }
+    }
+
+    /// The UTXOs a `StealthTransfer` of a resource given by address spends.
+    pub fn stealth_input_utxos(&self) -> impl Iterator<Item = UtxoAddress> + '_ {
+        self.addressed_stealth_transfer()
+            .into_iter()
+            .flat_map(|(resource_address, statement)| {
+                statement
+                    .inputs_statement
+                    .inputs
+                    .iter()
+                    .map(move |input| UtxoAddress::new(*resource_address, input.commitment.into()))
+            })
+    }
+
+    /// The UTXOs a `StealthTransfer` of a resource given by address creates.
+    pub fn stealth_output_utxos(&self) -> impl Iterator<Item = UtxoAddress> + '_ {
+        self.addressed_stealth_transfer()
+            .into_iter()
+            .flat_map(|(resource_address, statement)| {
+                statement
+                    .outputs_statement
+                    .outputs
+                    .iter()
+                    .map(move |output| UtxoAddress::new(*resource_address, output.commitment().into()))
+            })
+    }
+
+    fn addressed_stealth_transfer(&self) -> Option<(&ResourceAddress, &StealthTransferStatement)> {
+        match self {
+            Self::StealthTransfer {
+                resource_address_ref: ResourceAddressRef::Address(resource_address),
+                statement,
+                ..
+            } => Some((resource_address, statement)),
             _ => None,
         }
     }
@@ -562,6 +638,23 @@ impl Display for Instruction {
                     new_template
                 )
             },
+            Self::SetComponentAccessRules {
+                component,
+                access_rules,
+            } => {
+                write!(
+                    f,
+                    "SetComponentAccessRules {{ component: {}, access_rules: {:?} }}",
+                    component, access_rules
+                )
+            },
+            Self::SetComponentOwnerRule { component, owner_rule } => {
+                write!(
+                    f,
+                    "SetComponentOwnerRule {{ component: {}, owner_rule: {:?} }}",
+                    component, owner_rule
+                )
+            },
         }
     }
 }
@@ -583,6 +676,10 @@ pub struct MigrateFunction {
     pub name: FunctionName,
     #[n(1)]
     #[cbor(decode_with = "decode_args")]
+    #[cfg_attr(
+        feature = "serde",
+        serde(deserialize_with = "ootle_serde::bounded_seq::deserialize::<{ crate::MAX_INSTRUCTION_ARGS }, _, _>")
+    )]
     pub args: Vec<InstructionArg>,
 }
 
@@ -720,5 +817,20 @@ mod tests {
             metadata_hash: None,
         };
         assert_eq!(borsh::to_vec(&instruction).unwrap(), [9, 7, 0]);
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn serde_rejects_more_args_than_max_instruction_args() {
+        let with_args = |n: usize| Instruction::CallFunction {
+            address: Default::default(),
+            function: "test".try_into().unwrap(),
+            args: vec![InstructionArg::Blob(0); n],
+        };
+        let json = serde_json::to_string(&with_args(MAX_INSTRUCTION_ARGS)).unwrap();
+        serde_json::from_str::<Instruction>(&json).unwrap();
+
+        let json = serde_json::to_string(&with_args(MAX_INSTRUCTION_ARGS + 1)).unwrap();
+        serde_json::from_str::<Instruction>(&json).unwrap_err();
     }
 }

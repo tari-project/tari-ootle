@@ -22,6 +22,7 @@
 
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
+import Alert from "@mui/material/Alert";
 import Fade from "@mui/material/Fade";
 import Table from "@mui/material/Table";
 import TableBody from "@mui/material/TableBody";
@@ -53,6 +54,7 @@ function Blocks() {
   const [orderingIndex, setOrderingIndex] = useState(2);
   const [filter, setFilter] = useState<string | null>(null);
   const [filterIndex, setFilterIndex] = useState(0);
+  const [error, setError] = useState<string>();
 
   // Avoid a layout jump when reaching the last page with empty rows.
   const emptyRowsCnt = rowsPerPage - blocks.length;
@@ -71,22 +73,42 @@ function Blocks() {
   }, []);
 
   useEffect(() => {
-    getFilteredBlocksCount({ filter: filter, filter_index: filterIndex }).then((resp) => {
-      setBlocksCount(resp.count);
-      if (rowsPerPage * page > resp.count) {
-        setPage(Math.floor(Number(resp.count) / rowsPerPage));
-      }
-      getBlocks({
-        limit: rowsPerPage,
-        offset: page * rowsPerPage,
-        ordering_index: orderingIndex,
-        ordering: ordering,
-        filter_index: filterIndex,
-        filter: filter,
-      }).then((resp) => {
-        setBlocks(resp.blocks);
+    let cancelled = false;
+    setError(undefined);
+    getFilteredBlocksCount({ filter: filter, filter_index: filterIndex })
+      .then((resp) => {
+        if (cancelled) {
+          return;
+        }
+        const count = Number(resp.count);
+        setBlocksCount(resp.count);
+        const lastValidPage = count > 0 ? Math.ceil(count / rowsPerPage) - 1 : 0;
+        if (page > lastValidPage) {
+          setPage(lastValidPage);
+          return;
+        }
+        return getBlocks({
+          limit: rowsPerPage,
+          offset: page * rowsPerPage,
+          ordering_index: orderingIndex,
+          ordering: ordering,
+          filter_index: filterIndex,
+          filter: filter,
+        }).then((blocksResp) => {
+          if (!cancelled) {
+            setBlocks(blocksResp.blocks);
+          }
+        });
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setError(err && err.message ? err.message : `Unknown error: ${JSON.stringify(err)}`);
+        }
       });
-    });
+
+    return () => {
+      cancelled = true;
+    };
   }, [page, rowsPerPage, ordering, orderingIndex, filter, filterIndex]);
 
   const columnNameToId = (column: string) => {
@@ -151,12 +173,19 @@ function Blocks() {
           defaultSearch="id"
           setSearchValue={(value) => {
             setFilter(value);
+            setPage(0);
           }}
           setSearchColumn={(name) => {
             setFilterIndex(columnNameToId(name));
+            setPage(0);
           }}
         />
       </BoxHeading2>
+      {error && (
+        <Alert severity="error" sx={{ mb: 2 }}>
+          {error}
+        </Alert>
+      )}
       <TableContainer>
         <Table>
           <TableHead>
@@ -357,7 +386,7 @@ function Blocks() {
                       {block.header.total_leader_fee}
                     </div>
                   </DataTableCell>
-                  <DataTableCell>{block.block_time} secs</DataTableCell>
+                  <DataTableCell>{block.block_time !== null ? `${block.block_time} secs` : "--"}</DataTableCell>
                   <DataTableCell>{block.stored_at ? new Date(block.stored_at).toLocaleString() : "--"}</DataTableCell>
                   <DataTableCell>
                     <div className={block.header.proposed_by == identity?.public_key ? "my_money" : ""}>
@@ -369,7 +398,7 @@ function Blocks() {
             })}
             {blocks.length == 0 && (
               <TableRow>
-                <TableCell colSpan={4} style={{ textAlign: "center" }}>
+                <TableCell colSpan={9} style={{ textAlign: "center" }}>
                   <Fade in={blocks.length == 0} timeout={500}>
                     <Typography variant="h5">No results found</Typography>
                   </Fade>
@@ -382,7 +411,7 @@ function Blocks() {
                   height: 67 * emptyRowsCnt,
                 }}
               >
-                <TableCell colSpan={4} />
+                <TableCell colSpan={9} />
               </TableRow>
             )}
           </TableBody>

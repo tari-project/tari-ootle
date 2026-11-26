@@ -443,7 +443,7 @@ mod tests {
         ResourceType,
         SubstateOwnerRule,
         TemplateAddress,
-        access_rules::{ComponentAccessRules, ResourceAccessRules, UpdateRule},
+        access_rules::{ComponentAccessRules, ResourceAccessRules, RulesUpdater, UpdateRule},
         crypto::{RistrettoPublicKeyBytes, UtxoTag},
         stealth::SpendAuthorization,
     };
@@ -524,9 +524,18 @@ mod tests {
                 access_rules: ComponentAccessRules::new(),
                 entity_id: EntityId::default(),
                 upgrade_rule,
+                rules_updater: None,
             },
             body: ComponentBody { state },
         })
+    }
+
+    fn with_rules_updater(value: SubstateValue, rules_updater: RulesUpdater) -> SubstateValue {
+        let SubstateValue::Component(mut component) = value else {
+            unreachable!()
+        };
+        component.header.rules_updater = Some(rules_updater);
+        SubstateValue::Component(component)
     }
 
     fn template(binary: &[u8]) -> PublishedTemplate {
@@ -653,6 +662,49 @@ mod tests {
             )),
             "dcdc056ddfb314380df502d731c97f6d77c15fd0a1d3fe885c5e88fea529fdff"
         );
+    }
+
+    /// A component created before the rules updater existed has none. Its V0 preimage is the borsh encoding of the
+    /// five header fields it was hashed over, and its V1 hash is the pin above, so its hash is the same under either
+    /// version.
+    #[test]
+    fn a_component_without_a_rules_updater_keeps_its_hash() {
+        let SubstateValue::Component(component) = component(UpdateRule::Owner, tari_bor::Value::Null) else {
+            unreachable!()
+        };
+        let header = &component.header;
+        let mut legacy = Vec::new();
+        for field in [
+            borsh::to_vec(&header.template_address).unwrap(),
+            borsh::to_vec(&header.owner_rule).unwrap(),
+            borsh::to_vec(&header.access_rules).unwrap(),
+            borsh::to_vec(&header.entity_id).unwrap(),
+            borsh::to_vec(&header.upgrade_rule).unwrap(),
+        ] {
+            legacy.extend(field);
+        }
+        assert_eq!(borsh::to_vec(header).unwrap(), legacy);
+    }
+
+    #[test]
+    fn each_version_commits_to_the_rules_updater() {
+        let legacy = component(UpdateRule::Locked, tari_bor::Value::Null);
+        for version in [ProtocolVersion::V0, ProtocolVersion::V1] {
+            let hashes = [
+                hash_at(version, &legacy),
+                hash_at(
+                    version,
+                    &with_rules_updater(legacy.clone(), RulesUpdater::TemplateManaged),
+                ),
+                hash_at(version, &with_rules_updater(legacy.clone(), RulesUpdater::Locked)),
+                hash_at(version, &with_rules_updater(legacy.clone(), RulesUpdater::Owner)),
+            ];
+            for (i, a) in hashes.iter().enumerate() {
+                for b in &hashes[i + 1..] {
+                    assert_ne!(a, b, "{version:?}");
+                }
+            }
+        }
     }
 
     #[test]

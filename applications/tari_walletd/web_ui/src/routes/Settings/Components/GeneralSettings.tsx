@@ -20,13 +20,14 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { Chip, Divider } from "@mui/material";
+import { Alert, Button, Chip, Divider } from "@mui/material";
 import Box from "@mui/material/Box";
 import { useTheme } from "@mui/material/styles";
 import Typography from "@mui/material/Typography";
 import { SettingsGetResponse } from "@tari-project/ootle-ts-bindings";
 import { settingsGet } from "@utils/json_rpc";
 import React, { useCallback, useEffect, useState } from "react";
+import { createSettingsLoader } from "./generalSettingsHelpers";
 import IndexerSettings from "./IndexerSettings";
 
 const NETWORK_COLORS: Record<string, string> = {
@@ -41,14 +42,26 @@ const NETWORK_COLORS: Record<string, string> = {
 function GeneralSettings() {
   const theme = useTheme();
   const [settings, setSettings] = useState<SettingsGetResponse | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loader] = useState(() =>
+    createSettingsLoader({
+      fetchSettings: settingsGet,
+      onStart: () => setLoadError(null),
+      onSuccess: setSettings,
+      onError: setLoadError,
+    }),
+  );
 
   const loadSettings = useCallback(() => {
-    settingsGet().then(setSettings);
-  }, []);
+    void loader.load();
+  }, [loader]);
 
   useEffect(() => {
     loadSettings();
-  }, [loadSettings]);
+    return () => {
+      loader.invalidate();
+    };
+  }, [loadSettings, loader]);
 
   const items = [
     {
@@ -87,6 +100,18 @@ function GeneralSettings() {
         paddingTop: theme.spacing(3),
       }}
     >
+      {loadError && (
+        <Alert
+          severity="error"
+          action={
+            <Button color="inherit" size="small" onClick={loadSettings}>
+              Retry
+            </Button>
+          }
+        >
+          {loadError}
+        </Alert>
+      )}
       {renderedItems}
     </Box>
   );

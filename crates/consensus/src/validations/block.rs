@@ -82,6 +82,14 @@ fn check_proposal<TConsensusSpec: ConsensusSpec>(
 /// is on hand to anchor the liveness state that decides it.
 pub(super) fn check_block(block: &Block) -> Result<(), ProposalValidationError> {
     check_height(block)?;
+    for atom in block.all_foreign_proposals() {
+        if atom.shard_group == block.shard_group() {
+            return Err(ProposalValidationError::ForeignProposalFromLocalShardGroup {
+                block_id: atom.block_id,
+                shard_group: atom.shard_group,
+            });
+        }
+    }
     Ok(())
 }
 
@@ -113,4 +121,80 @@ fn check_header<TConsensusSpec: ConsensusSpec>(
     check_block_signature(header, signer_service)?;
     check_sidechain_id(header, config)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use tari_consensus_types::{BlockId, ProposalCertificate, ShardGroupAccumulatedData};
+    use tari_ootle_common_types::{ExtraData, NodeHeight, ProtocolVersion, ShardGroup};
+    use tari_ootle_storage::consensus_models::{BlockCommands, Command, ForeignProposalAtom};
+    use tari_ootle_transaction::Network;
+    use tari_sidechain::{FixedHash, QuorumDecision};
+    use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
+
+    use super::*;
+
+    fn block_in(shard_group: ShardGroup, commands: BlockCommands) -> Block {
+        let epoch = Epoch(1);
+        let justify = ProposalCertificate::new(
+            FixedHash::zero(),
+            BlockId::zero(),
+            NodeHeight(0),
+            epoch,
+            shard_group,
+            ProposalCertificate::genesis_signatures(),
+            QuorumDecision::Accept,
+        );
+        let header = BlockHeader::create_unsigned(
+            Network::LocalNet,
+            ProtocolVersion::V0,
+            BlockId::zero(),
+            justify.calculate_id(),
+            None,
+            NodeHeight(1),
+            epoch,
+            shard_group,
+            RistrettoPublicKeyBytes::default(),
+            FixedHash::zero(),
+            &commands,
+            0,
+            0,
+            FixedHash::zero(),
+            ShardGroupAccumulatedData::default(),
+            ExtraData::new(),
+        )
+        .unwrap();
+        Block::new(header, justify, commands, None)
+    }
+
+    #[test]
+    fn check_block_rejects_foreign_proposal_naming_local_shard_group() {
+        let local_sg = ShardGroup::new(0, 127);
+        let foreign_sg = ShardGroup::new(128, 255);
+        let foreign_block_id = BlockId::from([0xab; 32]);
+
+        let valid_commands = BlockCommands::init([Command::ForeignProposal(ForeignProposalAtom {
+            block_id: foreign_block_id,
+            shard_group: foreign_sg,
+        })])
+        .unwrap();
+        assert!(check_block(&block_in(local_sg, valid_commands)).is_ok());
+
+        let self_commands = BlockCommands::init([Command::ForeignProposal(ForeignProposalAtom {
+            block_id: foreign_block_id,
+            shard_group: local_sg,
+        })])
+        .unwrap();
+        let err = check_block(&block_in(local_sg, self_commands)).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                ProposalValidationError::ForeignProposalFromLocalShardGroup {
+                    block_id,
+                    shard_group,
+                } if block_id == foreign_block_id && shard_group == local_sg
+            ),
+            "{err:?}"
+        );
+    }
 }

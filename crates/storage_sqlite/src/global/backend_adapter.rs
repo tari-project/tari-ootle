@@ -465,7 +465,12 @@ impl<TAddr: NodeAddressable> GlobalDbAdapter for SqliteGlobalDbAdapter<TAddr> {
             .select(validator_nodes::id)
             .filter(validator_nodes::shard_key.eq(shard_key.as_bytes()))
             .filter(validator_nodes::start_epoch.le(epoch.as_u64() as i64))
-            .order_by(validator_nodes::id.desc())
+            .filter(
+                validator_nodes::end_epoch
+                    .is_null()
+                    .or(validator_nodes::end_epoch.gt(epoch.as_u64() as i64)),
+            )
+            .order_by((validator_nodes::start_epoch.desc(), validator_nodes::id.desc()))
             .first::<i32>(tx.connection())
             .map_err(|source| SqliteStorageError::DieselError {
                 source,
@@ -883,7 +888,12 @@ fn distinct_validators<TAddr: NodeAddressable>(
 ) -> Result<Vec<ValidatorNode<TAddr>>, SqliteStorageError> {
     // first, sort by registration block height so that we get newer registrations first
     let mut db_vns = Vec::with_capacity(sqlite_vns.len());
-    sqlite_vns.sort_by(|a, b| a.start_epoch.cmp(&b.start_epoch).reverse());
+    sqlite_vns.sort_by(|a, b| {
+        a.start_epoch
+            .cmp(&b.start_epoch)
+            .then_with(|| a.id.cmp(&b.id))
+            .reverse()
+    });
     let mut dedup_map = HashSet::<Vec<u8>>::with_capacity(sqlite_vns.len());
     for vn in sqlite_vns {
         if !dedup_map.contains(&vn.public_key) {

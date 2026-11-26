@@ -3,7 +3,11 @@
 
 use std::{
     collections::{HashMap, HashSet},
-    sync::{Arc, Mutex as StdMutex},
+    sync::{
+        Arc,
+        Mutex as StdMutex,
+        atomic::{AtomicBool, Ordering},
+    },
     time::Instant,
 };
 
@@ -78,6 +82,9 @@ pub struct TestEpochManager {
     /// its activation. `None` = registered from the start. Like the lag fields, a fresh `Arc` is allocated per
     /// validator by `clone_for`.
     activation_epoch: Arc<StdMutex<Option<Epoch>>>,
+    /// When set, the next `get_local_committee` call fails and clears it. Like the lag fields, a fresh `Arc` is
+    /// allocated per validator by `clone_for`.
+    fail_next_local_committee: Arc<AtomicBool>,
 }
 
 impl TestEpochManager {
@@ -93,7 +100,13 @@ impl TestEpochManager {
             oracle_observed_boundaries: Arc::new(StdMutex::new(HashSet::new())),
             validator_set_hash_override: Arc::new(StdMutex::new(None)),
             activation_epoch: Arc::new(StdMutex::new(None)),
+            fail_next_local_committee: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    /// Makes the next `get_local_committee` call fail, as a lookup against an oracle that has lost its data would.
+    pub fn fail_next_local_committee(&self) {
+        self.fail_next_local_committee.store(true, Ordering::SeqCst);
     }
 
     /// Makes this validator activate at `epoch`. See `activation_epoch`.
@@ -196,6 +209,7 @@ impl TestEpochManager {
             let mut lock = self.inner.lock().await;
             lock.current_epoch = current_epoch;
             lock.epoch_started = true;
+            lock.birthday_epoch.get_or_insert(current_epoch);
         }
 
         let _ = self.tx_epoch_events.send(EpochManagerEvent::EpochChanged {
@@ -205,6 +219,12 @@ impl TestEpochManager {
         });
 
         self
+    }
+
+    /// Makes `epoch` the first epoch any validator was active in, modelling a network whose validators come up
+    /// after their activation epoch.
+    pub async fn set_birthday_epoch(&self, epoch: Epoch) {
+        self.inner.lock().await.birthday_epoch = Some(epoch);
     }
 
     pub async fn state_lock(&self) -> MutexGuard<'_, TestEpochManagerState> {
@@ -227,6 +247,7 @@ impl TestEpochManager {
         copy.oracle_observed_boundaries = Arc::new(StdMutex::new(HashSet::new()));
         copy.validator_set_hash_override = Arc::new(StdMutex::new(None));
         copy.activation_epoch = Arc::new(StdMutex::new(None));
+        copy.fail_next_local_committee = Arc::new(AtomicBool::new(false));
         if let Some(our_validator_node) = self.our_validator_node.clone() {
             copy.our_validator_node = Some(ValidatorNode {
                 address,
@@ -365,6 +386,14 @@ impl EpochManagerReader for TestEpochManager {
         Ok(self.our_validator_node.clone().unwrap())
     }
 
+    async fn get_local_committee(&self, epoch: Epoch) -> Result<Arc<Committee<Self::Addr>>, EpochManagerError> {
+        let validator = self.get_our_validator_node(epoch).await?;
+        if self.fail_next_local_committee.swap(false, Ordering::SeqCst) {
+            return Err(EpochManagerError::NoCommitteeFound(validator.shard_key));
+        }
+        self.get_committee_for_substate(epoch, validator.shard_key).await
+    }
+
     async fn get_all_validator_nodes(
         &self,
         _epoch: Epoch,
@@ -428,8 +457,8 @@ impl EpochManagerReader for TestEpochManager {
     }
 
     async fn get_validator_set_hash(&self, epoch: Epoch) -> Result<ValidatorSetHash, EpochManagerError> {
-        // Committees are assigned when an epoch activates, so the set is unknown until the epoch is.
-        if epoch > self.current_epoch().await? {
+        // Committees belong to activated epochs, independently of a lagging current-epoch oracle.
+        if epoch > self.inner.lock().await.current_epoch {
             return Err(EpochManagerError::NoValidatorSet { epoch });
         }
         let Some(epoch_hash) = self.get_epoch_hash(epoch).await.optional()? else {
@@ -663,7 +692,8 @@ impl EpochManagerReader for TestEpochManager {
     }
 
     async fn get_birthday_epoch(&self) -> Result<Option<Epoch>, EpochManagerError> {
-        Ok(Some(Epoch(0)))
+        let state = self.inner.lock().await;
+        Ok(Some(state.birthday_epoch.unwrap_or(state.current_epoch)))
     }
 
     async fn get_pending_activation(&self) -> Result<Option<PendingActivation>, EpochManagerError> {
@@ -691,6 +721,8 @@ pub struct TestEpochManagerState {
     /// Validators must not leave the idle state until the test calls `set_current_epoch`, otherwise a
     /// validator spawned early runs its pacemaker against peers that do not exist yet.
     pub epoch_started: bool,
+    /// The first epoch a test started, which the network's validators are active from.
+    pub birthday_epoch: Option<Epoch>,
     pub last_epoch_hash: FixedHash,
     #[allow(clippy::type_complexity)]
     pub validator_nodes: HashMap<TestAddress, (ValidatorNode<TestAddress>, ShardGroup)>,
@@ -715,6 +747,7 @@ impl Default for TestEpochManagerState {
         Self {
             current_epoch: Epoch(1),
             epoch_started: false,
+            birthday_epoch: None,
             last_epoch_hash: FixedHash::default(),
             validator_nodes: HashMap::new(),
             committees: HashMap::new(),

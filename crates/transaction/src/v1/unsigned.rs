@@ -9,13 +9,16 @@ use tari_engine_types::{
     substate::SubstateId,
 };
 use tari_ootle_common_types::{Epoch, InputDeclaration, declare_input};
-use tari_template_lib_types::{ComponentAddress, UtxoAddress, crypto::RistrettoPublicKeyBytes};
+use tari_template_lib_types::{ComponentAddress, UtxoAddress, constants::TARI_TOKEN};
 
 use crate::{
+    Assertion,
+    AuthorizationContext,
     Blobs,
     ComponentReference,
     Instruction,
     InstructionLimitTracker,
+    MAX_TRANSACTION_INPUTS,
     MAX_TRANSACTION_INSTRUCTIONS,
     MainSigner,
     ResourceAddressRef,
@@ -37,6 +40,13 @@ pub(crate) fn decode_instructions<'b, C>(
     })
 }
 
+pub(crate) fn decode_inputs<'b, C>(
+    d: &mut minicbor::Decoder<'b>,
+    ctx: &mut C,
+) -> Result<IndexSet<InputDeclaration>, minicbor::decode::Error> {
+    tari_bor::adapters::indexset_codec::decode_bounded(d, ctx, MAX_TRANSACTION_INPUTS)
+}
+
 #[derive(Debug, Clone, borsh::BorshSerialize, minicbor::Encode, minicbor::Decode, minicbor::CborLen)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
@@ -45,14 +55,30 @@ pub struct UnsignedTransactionV1 {
     pub network: u8,
     #[n(1)]
     #[cbor(decode_with = "decode_instructions")]
+    #[cfg_attr(
+        feature = "serde",
+        serde(
+            deserialize_with = "ootle_serde::bounded_seq::deserialize::<{ crate::MAX_TRANSACTION_INSTRUCTIONS }, _, _>"
+        )
+    )]
     pub fee_instructions: Vec<Instruction>,
     #[n(2)]
     #[cbor(decode_with = "decode_instructions")]
+    #[cfg_attr(
+        feature = "serde",
+        serde(
+            deserialize_with = "ootle_serde::bounded_seq::deserialize::<{ crate::MAX_TRANSACTION_INSTRUCTIONS }, _, _>"
+        )
+    )]
     pub instructions: Vec<Instruction>,
 
     /// Input objects that may be read/write
     #[n(3)]
-    #[cbor(with = "tari_bor::adapters::indexset_codec")]
+    #[cbor(
+        encode_with = "tari_bor::adapters::indexset_codec::encode",
+        decode_with = "decode_inputs",
+        cbor_len = "tari_bor::adapters::indexset_codec::cbor_len"
+    )]
     #[cfg_attr(
         feature = "serde",
         serde(deserialize_with = "tari_ootle_common_types::deserialize_input_declarations")
@@ -125,10 +151,6 @@ impl UnsignedTransactionV1 {
             blobs: Blobs::empty(),
             nonce: 0,
         }
-    }
-
-    pub const fn schema_version(&self) -> u16 {
-        1
     }
 
     pub fn set_network<N: Into<u8>>(&mut self, network: N) -> &mut Self {
@@ -217,6 +239,14 @@ impl UnsignedTransactionV1 {
                 Instruction::UpdateComponentTemplate {
                     component: ComponentReference::Address(address),
                     ..
+                } |
+                Instruction::SetComponentAccessRules {
+                    component: ComponentReference::Address(address),
+                    ..
+                } |
+                Instruction::SetComponentOwnerRule {
+                    component: ComponentReference::Address(address),
+                    ..
                 } => Some(address),
                 _ => None,
             })
@@ -225,9 +255,14 @@ impl UnsignedTransactionV1 {
     /// Returns the substates this transaction references that it may declare as inputs (see
     /// [`SubstateId::is_declarable_input`]).
     pub fn to_referenced_substates(&self) -> Result<HashSet<SubstateId>, IndexedValueError> {
-        let all_instructions = self.instructions().iter().chain(self.fee_instructions());
+        // Execution order: fee instructions run before the main instructions.
+        let all_instructions = self.fee_instructions().iter().chain(self.instructions());
 
         let mut substates = HashSet::new();
+        // UTXOs that earlier `StealthTransfer` instructions of this transaction create. A later transfer spending one
+        // spends it within the transaction, so it is left out of the referenced substates. UTXOs that template calls
+        // create are invisible here, so an input spending one of them is still listed.
+        let mut created_utxos = HashSet::<UtxoAddress>::new();
         for instruction in all_instructions {
             match instruction {
                 Instruction::CallFunction { args, .. } => {
@@ -248,22 +283,33 @@ impl UnsignedTransactionV1 {
                 Instruction::ClaimValidatorFees { address, .. } => {
                     substates.insert(SubstateId::ValidatorFeePool(*address));
                 },
+                Instruction::Assert {
+                    assertion:
+                        Assertion::BucketAmount { resource_address, .. } |
+                        Assertion::BucketContainsNonFungibles { resource_address, .. },
+                    ..
+                } => {
+                    if *resource_address != TARI_TOKEN {
+                        substates.insert(SubstateId::Resource(*resource_address));
+                    }
+                },
                 Instruction::StealthTransfer {
                     resource_address_ref,
                     statement,
                     ..
                 } => {
-                    if let ResourceAddressRef::Address(addr) = resource_address_ref {
+                    if let ResourceAddressRef::Address(addr) = resource_address_ref &&
+                        *addr != TARI_TOKEN
+                    {
                         substates.insert(SubstateId::Resource(*addr));
-                        substates.extend(
-                            statement
-                                .inputs_statement
-                                .inputs
-                                .iter()
-                                .map(|i| UtxoAddress::new(*addr, i.commitment.into()))
-                                .map(SubstateId::Utxo),
-                        );
                     }
+                    substates.extend(
+                        instruction
+                            .stealth_input_utxos()
+                            .filter(|utxo| !created_utxos.contains(utxo))
+                            .map(SubstateId::Utxo),
+                    );
+                    created_utxos.extend(instruction.stealth_output_utxos());
                     for arg in statement.script_path_template_functions().flat_map(|tf| &tf.args) {
                         let value = IndexedValue::from_raw(arg)?;
                         substates.extend(value.referenced_substates().filter(|id| id.is_declarable_input()));
@@ -283,6 +329,12 @@ impl UnsignedTransactionV1 {
                         substates.extend(value.referenced_substates().filter(|id| id.is_declarable_input()));
                     }
                 },
+                Instruction::SetComponentAccessRules { component, .. } |
+                Instruction::SetComponentOwnerRule { component, .. } => {
+                    if let Some(component_address) = component.address() {
+                        substates.insert(SubstateId::Component(*component_address));
+                    }
+                },
                 _ => {},
             }
         }
@@ -294,10 +346,10 @@ impl UnsignedTransactionV1 {
     }
 }
 
-impl Signable<&RistrettoPublicKeyBytes> for UnsignedTransactionV1 {
+impl Signable<AuthorizationContext<'_>> for UnsignedTransactionV1 {
     type Signature = TransactionSignature;
 
-    fn to_signing_message(&self, seal_signer: &RistrettoPublicKeyBytes) -> crate::TransactionMessage {
-        TransactionSignature::create_message_v1(seal_signer, self)
+    fn to_signing_message(&self, context: AuthorizationContext<'_>) -> crate::TransactionMessage {
+        TransactionSignature::create_message(context, self)
     }
 }

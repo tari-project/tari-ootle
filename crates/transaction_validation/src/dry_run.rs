@@ -16,16 +16,11 @@ impl Validator<Transaction> for TransactionDryRunValidator {
     type Error = TransactionValidationError;
 
     fn validate(&self, _context: &Self::Context, input: &Transaction) -> Result<(), Self::Error> {
-        match input {
-            Transaction::V1(tx) => {
-                if tx.is_dry_run() {
-                    warn!(target: LOG_TARGET, "TransactionDryRunValidator - FAIL: dry run transactions are not allowed!");
-                    return Err(Self::Error::DryRunNotAllowed);
-                }
-
-                Ok(())
-            },
+        if input.is_dry_run() {
+            warn!(target: LOG_TARGET, "TransactionDryRunValidator - FAIL: dry run transactions are not allowed!");
+            return Err(Self::Error::DryRunNotAllowed);
         }
+        Ok(())
     }
 }
 

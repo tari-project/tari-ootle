@@ -45,7 +45,7 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
 
-            if let Some(parent) = config_path.parent() {
+            if let Some(parent) = config_path.parent().filter(|p| !p.as_os_str().is_empty()) {
                 fs::create_dir_all(parent).await.context("create_dir_all failed")?;
             }
             let config = get_initial_config(&cli, args)?;
@@ -174,9 +174,10 @@ fn get_base_config(cli: &Cli) -> anyhow::Result<Config> {
         .clone()
         .or_else(|| {
             cli.get_config_path()
-                .canonicalize()
-                .ok()
-                .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+                .parent()
+                .filter(|p| !p.as_os_str().is_empty())
+                .and_then(|p| p.canonicalize().ok())
+                .map(|p| p.join("data").join("swarm"))
         })
         .unwrap_or_else(|| std::env::current_dir().unwrap().join("data").join("swarm"));
 
@@ -212,6 +213,8 @@ async fn start(cli: &Cli) -> anyhow::Result<()> {
     if let Some(ref overrides) = cli_overrides {
         overrides.apply(&mut config).context("cli overrides")?;
     }
+    create_paths(&config).await?;
+
     let lock_file = config.base_dir.join("tari_swarm.pid");
     let _pid = lockfile::Lockfile::create(&lock_file).with_context(|| {
         anyhow!(
@@ -220,8 +223,6 @@ async fn start(cli: &Cli) -> anyhow::Result<()> {
             lock_file.display()
         )
     })?;
-
-    create_paths(&config).await?;
 
     init_logger(config.log_to_file.then_some(config.base_dir.join("logs/")))?;
 
@@ -305,12 +306,16 @@ fn unix_exit_signal() -> anyhow::Result<BoxFuture<()>> {
 
     let mut sighup = tokio::signal::unix::signal(SignalKind::hangup())?;
     let mut sigint = tokio::signal::unix::signal(SignalKind::interrupt())?;
+    let mut sigterm = tokio::signal::unix::signal(SignalKind::terminate())?;
 
     let fut = async move {
         tokio::select! {
             biased;
             _ = sigint.recv() => {
                 log::info!("Received SIGINT, shutting down...");
+            },
+            _ = sigterm.recv() => {
+                log::info!("Received SIGTERM, shutting down...");
             },
             // This is typically used to signal to reload configuration. Right now we simply exit.
             _ = sighup.recv() => {

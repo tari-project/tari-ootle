@@ -834,7 +834,11 @@ pub enum TransactionApiError {
 
 impl IsNotFoundError for TransactionApiError {
     fn is_not_found_error(&self) -> bool {
-        matches!(self, Self::StoreError(e) if e.is_not_found_error() )
+        matches!(self, Self::StoreError(e) if e.is_not_found_error()) ||
+            matches!(self, Self::NetworkInterfaceError {
+                status: ResponseErrorStatus::NotFound { .. },
+                ..
+            })
     }
 }
 

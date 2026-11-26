@@ -32,7 +32,11 @@ import type {
   SubstateId,
   VersionedSubstateId,
 } from "@tari-project/ootle-ts-bindings";
-import { getRejectReasonFromTransactionResult, rejectReasonToString } from "@tari-project/ootle-ts-bindings";
+import {
+  getRejectReasonFromTransactionResult,
+  rejectReasonToString,
+  transactionBody,
+} from "@tari-project/ootle-ts-bindings";
 import { getSubstateDiffFromTransactionResult } from "@tari-project/ootle-ts-bindings/dist/helpers/helpers";
 import { Decision } from "@tari-project/ootle-ts-bindings/dist/types/Decision";
 import { Transaction } from "@tari-project/ootle-ts-bindings/dist/types/Transaction";
@@ -65,15 +69,31 @@ export default function TransactionDetails() {
   const [logs, setLogs] = useState<LogEntry[]>();
   const [expandedPanels, setExpandedPanels] = useState<string[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
-  const [error, setError] = useState<String>();
+  const [error, setError] = useState<string>();
 
-  const getTransactionByHash = () => {
+  useEffect(() => {
+    if (transactionHash === undefined) {
+      return;
+    }
+    let cancelled = false;
     setLoading(true);
+    setError(undefined);
+    setState(undefined);
+    setUpSubstate([]);
+    setDownSubstate([]);
+    setEvents(undefined);
+    setLogs(undefined);
+    setFee(undefined);
+    setExpandedPanels([]);
+
     Promise.all([
       getTransaction({ transaction_id: String(transactionHash) }),
       getTransactionResult({ transaction_id: String(transactionHash) }),
     ])
       .then(([transaction, resultResp]) => {
+        if (cancelled) {
+          return;
+        }
         const { result } = resultResp.transaction_execution;
         setState({
           transaction: transaction.transaction,
@@ -93,24 +113,28 @@ export default function TransactionDetails() {
             setUpSubstate(diff.up_substates);
           }
         }
-        setError(undefined);
         setEvents(result?.finalize.events);
         setLogs(result?.finalize.logs);
         setFee(result?.finalize.fee_receipt.total_fees_paid);
       })
       .catch((err) => {
+        if (cancelled) {
+          return;
+        }
         setError(err && err.message ? err.message : `Unknown error: ${JSON.stringify(err)}`);
       })
       .finally(() => {
-        setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+        }
       });
-  };
 
-  useEffect(() => {
-    getTransactionByHash();
-  }, []);
+    return () => {
+      cancelled = true;
+    };
+  }, [transactionHash]);
 
-  const handleChange = (panel: string) => (event: React.SyntheticEvent, isExpanded: boolean) => {
+  const handleChange = (panel: string) => (_event: React.SyntheticEvent, isExpanded: boolean) => {
     setExpandedPanels((prevExpandedPanels) => {
       if (isExpanded) {
         return [...prevExpandedPanels, panel];
@@ -142,23 +166,32 @@ export default function TransactionDetails() {
     }
   };
 
+  const result = state?.result;
+  const allPanelIds = [
+    "panel1",
+    "panel2",
+    ...(result && events ? ["panel3"] : []),
+    ...(result && logs ? ["panel4"] : []),
+    "panel5",
+  ];
+
   const expandAll = () => {
-    setExpandedPanels(["panel1", "panel2", "panel3", "panel4", "panel5"]);
+    setExpandedPanels(allPanelIds);
   };
 
   const collapseAll = () => {
     setExpandedPanels([]);
   };
-  if (state === undefined) {
-    return <Loading />;
-  }
-  const { transaction: container, final_decision, finalized_at: finalized_time, result } = state;
-  const transaction = container?.V1.body.transaction;
+
+  const transaction = state ? transactionBody(state.transaction)?.body.transaction : undefined;
+  const final_decision = state?.final_decision;
+  const finalized_time = state?.finalized_at;
   const decision = typeof final_decision === "object" ? "Abort" : final_decision;
   const abortReason = final_decision !== null && typeof final_decision === "object" ? final_decision.Abort : null;
   // Decision is Commit, but the body was rejected after the fee was charged (e.g. out of the
   // per-transaction metering budget) — render the status as a partial commit.
   const feeOnly = !!(result && "AcceptFeeRejectRest" in result.finalize.result);
+
   return (
     <>
       <Grid size={12}>
@@ -173,7 +206,7 @@ export default function TransactionDetails() {
               <div>
                 {error ? (
                   <Alert severity="error">{error}</Alert>
-                ) : (
+                ) : state ? (
                   <>
                     <TableContainer>
                       <Table>
@@ -200,7 +233,7 @@ export default function TransactionDetails() {
                             <TableCell>Max Epoch</TableCell>
                             <DataTableCell>{transaction?.max_epoch?.toString()}</DataTableCell>
                           </TableRow>
-                          {final_decision && (
+                          {decision && (
                             <TableRow>
                               <TableCell>Status</TableCell>
                               <DataTableCell>
@@ -217,9 +250,10 @@ export default function TransactionDetails() {
                           <TableRow>
                             <TableCell>Result</TableCell>
                             <DataTableCell>
-                              {renderResult(result)}
+                              {renderResult(state.result)}
                               <br />
-                              Executed in {result.execution_time ? displayDuration(result.execution_time) : "--"},
+                              Executed in{" "}
+                              {state.result.execution_time ? displayDuration(state.result.execution_time) : "--"},
                               Finalized at {finalized_time}
                             </DataTableCell>
                           </TableRow>
@@ -233,7 +267,6 @@ export default function TransactionDetails() {
                         alignItems: "center",
                         padding: "2rem 1rem 0.5rem 1rem",
                       }}
-                      // className="flex-container"
                     >
                       <Typography variant="h5">More Info</Typography>
                       <div
@@ -249,6 +282,7 @@ export default function TransactionDetails() {
                             fontSize: "0.85rem",
                           }}
                           startIcon={<KeyboardArrowDownIcon />}
+                          disabled={allPanelIds.every((panel) => expandedPanels.includes(panel))}
                         >
                           Expand All
                         </Button>
@@ -264,58 +298,56 @@ export default function TransactionDetails() {
                         </Button>
                       </div>
                     </div>
-                  </>
-                )}
-                <Accordion expanded={expandedPanels.includes("panel1")} onChange={handleChange("panel1")}>
-                  <AccordionSummary aria-controls="panel1bh-content" id="panel1bh-header">
-                    <Typography>Fee Instructions</Typography>
-                  </AccordionSummary>
-                  <AccordionDetails>
-                    {transaction?.fee_instructions?.length ? (
-                      <Instructions data={transaction.fee_instructions} />
-                    ) : (
-                      "Empty"
+                    <Accordion expanded={expandedPanels.includes("panel1")} onChange={handleChange("panel1")}>
+                      <AccordionSummary aria-controls="panel1bh-content" id="panel1bh-header">
+                        <Typography>Fee Instructions</Typography>
+                      </AccordionSummary>
+                      <AccordionDetails>
+                        {transaction?.fee_instructions?.length ? (
+                          <Instructions data={transaction.fee_instructions} />
+                        ) : (
+                          "Empty"
+                        )}
+                      </AccordionDetails>
+                    </Accordion>
+                    <Accordion expanded={expandedPanels.includes("panel2")} onChange={handleChange("panel2")}>
+                      <AccordionSummary aria-controls="panel2bh-content" id="panel2bh-header">
+                        <Typography>Instructions</Typography>
+                      </AccordionSummary>
+                      <AccordionDetails>
+                        {transaction?.instructions?.length ? <Instructions data={transaction.instructions} /> : "Empty"}
+                      </AccordionDetails>
+                    </Accordion>
+                    {result && events && (
+                      <Accordion expanded={expandedPanels.includes("panel3")} onChange={handleChange("panel3")}>
+                        <AccordionSummary aria-controls="panel3bh-content" id="panel3bh-header">
+                          <Typography>Events</Typography>
+                        </AccordionSummary>
+                        <AccordionDetails>
+                          <Events data={events} />
+                        </AccordionDetails>
+                      </Accordion>
                     )}
-                  </AccordionDetails>
-                </Accordion>
-                <Accordion expanded={expandedPanels.includes("panel2")} onChange={handleChange("panel2")}>
-                  <AccordionSummary aria-controls="panel2bh-content" id="panel1bh-header">
-                    <Typography>Instructions</Typography>
-                  </AccordionSummary>
-                  <AccordionDetails>
-                    {transaction?.instructions?.length ? <Instructions data={transaction.instructions} /> : "Empty"}
-                  </AccordionDetails>
-                </Accordion>
-                {result && events && (
-                  <Accordion expanded={expandedPanels.includes("panel3")} onChange={handleChange("panel3")}>
-                    <AccordionSummary aria-controls="panel3bh-content" id="panel1bh-header">
-                      <Typography>Events</Typography>
-                    </AccordionSummary>
-                    <AccordionDetails>
-                      <Events data={events} />
-                    </AccordionDetails>
-                  </Accordion>
-                )}
-                {result && logs && (
-                  <Accordion expanded={expandedPanels.includes("panel4")} onChange={handleChange("panel4")}>
-                    <AccordionSummary aria-controls="panel4bh-content" id="panel1bh-header">
-                      <Typography>Logs</Typography>
-                    </AccordionSummary>
-                    <AccordionDetails>
-                      <Logs data={logs} />
-                    </AccordionDetails>
-                  </Accordion>
-                )}
-                {upSubstate && (
-                  <Accordion expanded={expandedPanels.includes("panel5")} onChange={handleChange("panel5")}>
-                    <AccordionSummary aria-controls="panel5bh-content" id="panel1bh-header">
-                      <Typography>Substates</Typography>
-                    </AccordionSummary>
-                    <AccordionDetails>
-                      <Substates upData={upSubstate} downData={downSubstate} />
-                    </AccordionDetails>
-                  </Accordion>
-                )}
+                    {result && logs && (
+                      <Accordion expanded={expandedPanels.includes("panel4")} onChange={handleChange("panel4")}>
+                        <AccordionSummary aria-controls="panel4bh-content" id="panel4bh-header">
+                          <Typography>Logs</Typography>
+                        </AccordionSummary>
+                        <AccordionDetails>
+                          <Logs data={logs} />
+                        </AccordionDetails>
+                      </Accordion>
+                    )}
+                    <Accordion expanded={expandedPanels.includes("panel5")} onChange={handleChange("panel5")}>
+                      <AccordionSummary aria-controls="panel5bh-content" id="panel5bh-header">
+                        <Typography>Substates</Typography>
+                      </AccordionSummary>
+                      <AccordionDetails>
+                        <Substates upData={upSubstate} downData={downSubstate} />
+                      </AccordionDetails>
+                    </Accordion>
+                  </>
+                ) : null}
               </div>
             </Fade>
           )}

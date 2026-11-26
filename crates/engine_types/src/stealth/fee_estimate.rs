@@ -39,7 +39,7 @@ use crate::{
     confidential::ClaimedOutputTombstone,
     crypto::{ElgamalVerifiableBalanceBytes, OutputBody},
     fees::FeeRates,
-    limits::NativeExecutionPoints,
+    limits::{NativeExecutionPoints, engine_arg_points},
     stealth::transfer_native_points_for_shape,
     substate::{SubstateId, SubstateValue},
     transaction_receipt::TransactionReceipt,
@@ -162,16 +162,14 @@ impl MergedStealthTransferShape {
 
 /// The shape of an L1 burn claim that pays its own fee out of the burn it claims.
 ///
-/// This is the transaction a wallet builds to claim a burn: the claim mints the burnt value as a UTXO,
-/// one stealth transfer spends it into a single stealth output and reveals the fee, and the revealed
-/// bucket is paid straight to `pay_fee`. A fee paid from a bucket is not refunded, so whatever the
-/// claim reveals is gone even where the claim costs a fraction of it. [`Self::estimate_fee`] prices
-/// the shape locally, giving a claimant the most the claim can cost without trusting anyone else's
-/// figure for it.
+/// This is the transaction a wallet builds to claim a burn: the claim reveals the burnt value in a
+/// bucket, one stealth transfer takes that bucket as its revealed input, pays it into a single stealth
+/// output and reveals the fee, and the revealed fee bucket is paid straight to `pay_fee`. A fee paid
+/// from a bucket is not refunded, so whatever the claim reveals is gone even where the claim costs a
+/// fraction of it. [`Self::estimate_fee`] prices the shape locally, giving a claimant the most the
+/// claim can cost without trusting anyone else's figure for it.
 ///
-/// Everything but the stored output and the transaction weight is fixed by the shape. The UTXO the
-/// claim mints is spent by the same transaction, so it never reaches state and costs only the
-/// verification of spending it.
+/// Everything but the stored output and the transaction weight is fixed by the shape.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ClaimBurnShape {
     /// Bytes the claimed value's stealth output occupies in persisted state, measured with
@@ -190,18 +188,24 @@ pub struct ClaimBurnShape {
 }
 
 impl ClaimBurnShape {
-    /// Engine host calls this shape's instruction sequence makes: the merged transfer's three, as the
-    /// engine runs the claim instruction directly. `the_runtime_call_count_matches_the_claim_sequence` in
-    /// `tari_engine`'s claim-burn tests holds it to what the engine counts.
-    pub const RUNTIME_CALLS: u64 = MergedStealthTransferShape::RUNTIME_CALLS;
+    /// Native points the transfer spends resolving the claimed bucket from the workspace, priced as an engine
+    /// argument. The claim's bucket is the first the transaction creates, so its id is a tag around a one-byte
+    /// integer: two CBOR items in three bytes.
+    pub const CLAIMED_BUCKET_ARG_POINTS: u64 = engine_arg_points(3, 2);
+    /// Engine host calls this shape's instruction sequence makes: the claim's bucket output and the
+    /// workspace put that names it, then the merged transfer's three.
+    /// `the_runtime_call_count_matches_the_claim_sequence` in `tari_engine`'s claim-burn tests holds it
+    /// to what the engine counts.
+    pub const RUNTIME_CALLS: u64 = 2 + MergedStealthTransferShape::RUNTIME_CALLS;
 
     /// The native execution points the engine charges a transaction of this shape: the claim's proof verification,
-    /// then a transfer spending the claimed UTXO into one output, with its withdraw authorization. TARI carries no
-    /// view key.
+    /// then a transfer paying the claimed bucket into one output, with its withdraw authorization and the
+    /// resolution of the bucket it takes. TARI carries no view key.
     pub fn native_points() -> u64 {
         NativeExecutionPoints::PER_CLAIM_BURN
-            .saturating_add(transfer_native_points_for_shape(1, 1, false))
+            .saturating_add(transfer_native_points_for_shape(0, 1, false))
             .saturating_add(MergedStealthTransferShape::AUTHORIZATION_POINTS)
+            .saturating_add(Self::CLAIMED_BUCKET_ARG_POINTS)
     }
 
     /// An upper bound, in microtari, on what the engine charges a transaction of this shape.

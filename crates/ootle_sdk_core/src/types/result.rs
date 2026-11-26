@@ -32,6 +32,7 @@ pub fn abort_code(reason: &AbortReason) -> &'static str {
         AbortReason::ValidityWindowTooLong => "VALIDITY_WINDOW_TOO_LONG",
         AbortReason::InputPledgeTooLarge => "INPUT_PLEDGE_TOO_LARGE",
         AbortReason::GovernanceCallAfterPinnedEpoch => "GOVERNANCE_CALL_AFTER_PINNED_EPOCH",
+        AbortReason::InputLoadTooLarge => "INPUT_LOAD_TOO_LARGE",
     }
 }
 
@@ -130,9 +131,22 @@ impl RejectReason {
         }
     }
 
-    /// Builds a boundary reject from a free-form **abort** message (e.g. an indexer `Finalized` result
-    /// whose `abort_details` is set but which carries no `execution_result`). The stable `code` is
-    /// `ABORT` (matching the engine `Abort` variant) and there is no structured abort sub-code.
+    /// Builds a boundary reject from a consensus [`AbortReason`] and optional free-form abort details.
+    ///
+    /// Sets `code` to `"ABORT"` and `abort_code` to the canonical [`abort_code`] for `reason`. Uses `details` as
+    /// `message` when present, or the engine [`InternalRejectReason::Abort`] display string when `details` is `None`.
+    pub fn from_abort(reason: AbortReason, details: Option<String>) -> Self {
+        Self {
+            code: "ABORT".to_string(),
+            abort_code: Some(abort_code(&reason).to_string()),
+            failure_code: None,
+            message: details.unwrap_or_else(|| InternalRejectReason::Abort { reason }.to_string()),
+        }
+    }
+
+    /// Builds a boundary reject from a free-form **abort** message when no structured [`AbortReason`]
+    /// is available. Sets `code` to `"ABORT"` and leaves `abort_code` as `None`; prefer
+    /// [`Self::from_abort`] whenever the consensus [`AbortReason`] is known.
     pub fn from_abort_details(message: impl Into<String>) -> Self {
         Self {
             code: "ABORT".to_string(),
@@ -289,7 +303,7 @@ pub struct FinalizedResult {
 mod tests {
     use super::*;
 
-    /// Every canonical [`AbortReason`] variant — exhaustively listed so adding a 13th variant upstream
+    /// Every canonical [`AbortReason`] variant — exhaustively listed so adding a 14th variant upstream
     /// forces this test (and the canonical code set) to be updated, not silently dropped.
     const ALL_ABORT_REASONS: &[AbortReason] = &[
         AbortReason::ForeignPledgeInputConflict,
@@ -304,6 +318,7 @@ mod tests {
         AbortReason::ValidityWindowTooLong,
         AbortReason::InputPledgeTooLarge,
         AbortReason::GovernanceCallAfterPinnedEpoch,
+        AbortReason::InputLoadTooLarge,
     ];
 
     /// Every [`ExecutionFailureCode`] variant, exhaustively listed on the same contract as
@@ -413,7 +428,7 @@ mod tests {
         }
     }
 
-    /// Each of the 12 canonical `AbortReason` variants surfaces a non-empty, unique stable code.
+    /// Each of the 13 canonical `AbortReason` variants surfaces a non-empty, unique stable code.
     #[test]
     fn abort_codes_are_non_empty_and_unique() {
         let mut seen = std::collections::HashSet::new();
@@ -422,7 +437,7 @@ mod tests {
             assert!(!code.is_empty(), "abort code for {reason:?} is empty");
             assert!(seen.insert(code), "duplicate abort code {code} for {reason:?}");
         }
-        assert_eq!(seen.len(), 12, "expected exactly 12 canonical abort codes");
+        assert_eq!(seen.len(), 13, "expected exactly 13 canonical abort codes");
         assert_eq!(abort_code(&AbortReason::EpochExpired), "EPOCH_EXPIRED");
         assert_eq!(
             abort_code(&AbortReason::ValidityWindowTooLong),
@@ -494,6 +509,30 @@ mod tests {
         });
         assert_eq!(r.code, "ABORT");
         assert_eq!(r.abort_code.as_deref(), Some("EPOCH_EXPIRED"));
+    }
+
+    #[test]
+    fn from_abort_preserves_canonical_abort_code_and_details() {
+        let with_details = RejectReason::from_abort(
+            AbortReason::OneOrMoreInputsNotFound,
+            Some("input substate missing".to_string()),
+        );
+        assert_eq!(with_details.code, "ABORT");
+        assert_eq!(with_details.abort_code.as_deref(), Some("ONE_OR_MORE_INPUTS_NOT_FOUND"));
+        assert_eq!(with_details.failure_code, None);
+        assert_eq!(with_details.message, "input substate missing");
+
+        let without_details = RejectReason::from_abort(AbortReason::EpochExpired, None);
+        assert_eq!(without_details.code, "ABORT");
+        assert_eq!(without_details.abort_code.as_deref(), Some("EPOCH_EXPIRED"));
+        assert_eq!(without_details.failure_code, None);
+        assert_eq!(
+            without_details.message,
+            InternalRejectReason::Abort {
+                reason: AbortReason::EpochExpired,
+            }
+            .to_string()
+        );
     }
 
     #[test]

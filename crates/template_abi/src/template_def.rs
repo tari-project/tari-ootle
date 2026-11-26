@@ -8,13 +8,13 @@ use crate::{
     version::WasmAbiVersion,
 };
 
-/// A template's definition, always in the current layout.
+/// A template's definition, as the `#[template]` macro embeds it in the template binary.
 ///
-/// Decoding accepts every layout a published template can carry and converts it to the current one, so code reading a
-/// definition sees a single shape. Encoding always writes the current layout.
+/// The enum index is the layout version and is part of the encoding, so a future layout is a new variant at the next
+/// index. Index 0 is the first layout, which the engine does not load: decoding it fails with an error telling the
+/// author to rebuild the template.
 #[derive(Debug, Clone, Encode, CborLen)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serde", serde(from = "VersionedTemplateDef"))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum TemplateDef {
     #[n(1)]
@@ -58,40 +58,45 @@ impl TemplateDef {
         use crate::WASM_PTR_SIZE;
         let data_len = encoded_len(self);
         // for the length prefix
-        let mut buf = Vec::with_capacity(data_len + WASM_PTR_SIZE);
-        let full_len = data_len + WASM_PTR_SIZE;
+        let full_len = data_len
+            .checked_add(WASM_PTR_SIZE)
+            .ok_or_else(|| tari_bor::BorError::new("Template definition length overflow".to_string()))?;
+        let full_len_u32 = u32::try_from(full_len)
+            .map_err(|_| tari_bor::BorError::new("Template definition length exceeds u32".to_string()))?;
+        let mut buf = Vec::with_capacity(full_len);
         let writer = &mut buf;
         // length prefix
-        writer.write_all(&(full_len as u32).to_le_bytes())?;
+        writer
+            .write_all(&full_len_u32.to_le_bytes())
+            .map_err(|e| tari_bor::BorError::new(e.to_string()))?;
         encode_into_writer(self, writer)?;
         Ok(buf)
     }
 }
 
+/// The enum index of the first template definition layout, which the engine refuses to load.
+const V1_LAYOUT_INDEX: u32 = 0;
+
 impl<'b, C> Decode<'b, C> for TemplateDef {
     fn decode(d: &mut minicbor::Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
-        VersionedTemplateDef::decode(d, ctx).map(Self::from)
+        let mut probe = d.probe();
+        probe.array()?;
+        if probe.u32()? == V1_LAYOUT_INDEX {
+            return Err(minicbor::decode::Error::message(
+                "the template definition uses the V1 layout, which is not supported. Rebuild the template with \
+                 tari_template_lib 0.38 or later",
+            ));
+        }
+        DecodedTemplateDef::decode(d, ctx).map(|DecodedTemplateDef::V2(def)| TemplateDef::V2(def))
     }
 }
 
-/// Every template definition layout, as encoded. The variant indices match [`TemplateDef`]'s, so the current layout
-/// decodes and encodes identically through either type.
-#[derive(Debug, Clone, Encode, Decode, CborLen)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub enum VersionedTemplateDef {
-    #[n(0)]
-    V1(#[n(0)] TemplateDefV1),
+/// The derived decoder for [`TemplateDef`]'s layout. [`TemplateDef`] decodes by hand so that a V1 definition fails
+/// with an error naming the layout.
+#[derive(Decode)]
+enum DecodedTemplateDef {
     #[n(1)]
     V2(#[n(0)] TemplateDefV2),
-}
-
-impl From<VersionedTemplateDef> for TemplateDef {
-    fn from(def: VersionedTemplateDef) -> Self {
-        match def {
-            VersionedTemplateDef::V1(def) => TemplateDef::V2(def.into()),
-            VersionedTemplateDef::V2(def) => TemplateDef::V2(def),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Default, Encode, Decode, CborLen)]
@@ -201,83 +206,6 @@ pub enum Receiver {
     RefMut,
 }
 
-/// The first template definition layout. A method's receiver is its first argument, named `self` and typed
-/// `Other { name: "&self" }` or `Other { name: "&mut self" }`, and `is_mut` sets the component lock.
-#[derive(Debug, Clone, Default, Encode, Decode, CborLen)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct TemplateDefV1 {
-    #[n(0)]
-    pub template_name: String,
-    #[n(1)]
-    pub abi_version: WasmAbiVersion,
-    #[n(2)]
-    pub functions: Vec<FunctionDefV1>,
-}
-
-impl From<TemplateDefV1> for TemplateDefV2 {
-    fn from(def: TemplateDefV1) -> Self {
-        Self {
-            template_name: def.template_name,
-            abi_version: def.abi_version,
-            functions: def.functions.into_iter().map(Into::into).collect(),
-        }
-    }
-}
-
-/// A function in the [`TemplateDefV1`] layout.
-#[derive(Debug, Clone, Encode, Decode, CborLen)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct FunctionDefV1 {
-    #[n(0)]
-    pub name: String,
-    #[n(1)]
-    pub arguments: Vec<ArgDef>,
-    #[n(2)]
-    pub output: Type,
-    #[n(3)]
-    pub is_mut: bool,
-    #[n(4)]
-    pub is_migration: bool,
-}
-
-impl From<FunctionDefV1> for FunctionDef {
-    /// A leading `&self` or `&mut self` argument becomes the receiver, whose mutability comes from `is_mut` because
-    /// that is what sets the component lock for a V1 method. A migration's first argument, its previous state,
-    /// becomes [`FunctionKind::Migration::from`]. A V1 migration with no arguments, which only a hand-built definition
-    /// can have, migrates from [`Type::Unit`].
-    fn from(def: FunctionDefV1) -> Self {
-        let FunctionDefV1 {
-            name,
-            mut arguments,
-            output,
-            is_mut,
-            is_migration,
-        } = def;
-        let kind = if is_migration {
-            let from = if arguments.is_empty() {
-                Type::Unit
-            } else {
-                arguments.remove(0).arg_type
-            };
-            FunctionKind::Migration { from }
-        } else if arguments
-            .first()
-            .is_some_and(|arg| matches!(arg.arg_type.other(), Some("&self" | "&mut self")))
-        {
-            arguments.remove(0);
-            FunctionKind::Method(if is_mut { Receiver::RefMut } else { Receiver::Ref })
-        } else {
-            FunctionKind::Function
-        };
-        Self {
-            name,
-            kind,
-            arguments,
-            output,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Encode, Decode, CborLen)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
@@ -288,7 +216,8 @@ pub struct ArgDef {
     pub arg_type: Type,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, Encode, Decode, CborLen)]
+/// A type in a function's signature.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Encode, CborLen)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub enum Type {
@@ -330,6 +259,9 @@ pub enum Type {
     },
     #[n(16)]
     Option(#[n(0)] Box<Type>),
+    /// A type that `tari_template_lib` defines, which the macro has checked the template's type resolves to.
+    #[n(17)]
+    WellKnown(#[n(0)] WellKnownType),
 }
 
 impl Type {
@@ -339,6 +271,163 @@ impl Type {
             _ => None,
         }
     }
+
+    /// True when this is `kind`. A template built by `tari_template_lib` before 0.40 names every well-known type
+    /// as `Other` with the type's name, and deployed templates keep that definition.
+    pub fn is_well_known(&self, kind: WellKnownType) -> bool {
+        match self {
+            Type::WellKnown(k) => *k == kind,
+            Type::Other { name } => name == kind.name(),
+            _ => false,
+        }
+    }
+}
+
+/// Written by hand, in the layout the derived `Encode` writes, because `Type` nests and the engine decodes it to its
+/// CBOR nesting bound on a worker thread's stack. A derived decoder's frame holds the locals of every variant, which in
+/// a debug build overflows the stack before the bound; this one keeps each variant's fields in a function of its own.
+impl<'b, C> Decode<'b, C> for Type {
+    fn decode(d: &mut minicbor::Decoder<'b>, ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
+        let start = d.position();
+        if d.array()? != Some(2) {
+            return Err(minicbor::decode::Error::message("expected enum (2-element array)").at(start));
+        }
+        let index_at = d.position();
+        let index = d.i64()?;
+        if let Some(ty) = Type::without_fields(index) {
+            d.skip()?;
+            return Ok(ty);
+        }
+        match index {
+            13 => decode_only_field(d, ctx, "Type::Vec::_0", start).map(Type::Vec),
+            14 => decode_only_field(d, ctx, "Type::Tuple::_0", start).map(Type::Tuple),
+            15 => decode_only_field(d, ctx, "Type::Other::name", start).map(|name| Type::Other { name }),
+            16 => decode_only_field(d, ctx, "Type::Option::_0", start).map(Type::Option),
+            17 => decode_only_field(d, ctx, "Type::WellKnown::_0", start).map(Type::WellKnown),
+            n => Err(minicbor::decode::Error::unknown_variant(n).at(index_at)),
+        }
+    }
+}
+
+impl Type {
+    /// The variant at `index` when it has no fields.
+    fn without_fields(index: i64) -> Option<Self> {
+        Some(match index {
+            0 => Type::Unit,
+            1 => Type::Bool,
+            2 => Type::I8,
+            3 => Type::I16,
+            4 => Type::I32,
+            5 => Type::I64,
+            6 => Type::I128,
+            7 => Type::U8,
+            8 => Type::U16,
+            9 => Type::U32,
+            10 => Type::U64,
+            11 => Type::U128,
+            12 => Type::String,
+            _ => return None,
+        })
+    }
+}
+
+/// The field at index 0 of a variant's fields, which the encoding holds in an array that may be indefinite and may
+/// carry fields at higher indices, which are skipped.
+fn decode_only_field<'b, C, T: Decode<'b, C>>(
+    d: &mut minicbor::Decoder<'b>,
+    ctx: &mut C,
+    field: &'static str,
+    variant_at: usize,
+) -> Result<T, minicbor::decode::Error> {
+    let mut value = None;
+    match d.array()? {
+        Some(len) => {
+            for i in 0..len {
+                if i == 0 {
+                    value = Some(T::decode(d, ctx)?);
+                } else {
+                    d.skip()?;
+                }
+            }
+        },
+        None => {
+            let mut i = 0;
+            while d.datatype()? != minicbor::data::Type::Break {
+                if i == 0 {
+                    value = Some(T::decode(d, ctx)?);
+                } else {
+                    d.skip()?;
+                }
+                i += 1;
+            }
+            d.skip()?;
+        },
+    }
+    value.ok_or_else(|| {
+        minicbor::decode::Error::missing_value(0)
+            .with_message(field)
+            .at(variant_at)
+    })
+}
+
+macro_rules! well_known_types {
+    ($($(#[$doc:meta])* $index:literal => $variant:ident,)+) => {
+        /// A `tari_template_lib` type that a [`TemplateDef`] names by what it is. The `#[template]` macro checks, when
+        /// the template builds, that the template's type is this one.
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Encode, Decode, CborLen)]
+        #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+        #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+        #[cbor(index_only)]
+        #[repr(u8)]
+        pub enum WellKnownType {
+            $($(#[$doc])* #[n($index)] $variant = $index,)+
+        }
+
+        impl WellKnownType {
+            pub const ALL: &[WellKnownType] = &[$(WellKnownType::$variant),+];
+
+            /// The type's name in `tari_template_lib`.
+            pub const fn name(self) -> &'static str {
+                match self {
+                    $(WellKnownType::$variant => stringify!($variant),)+
+                }
+            }
+
+            /// The well-known type named `name`, as a template spells it without its path.
+            pub fn from_name(name: &str) -> Option<Self> {
+                match name {
+                    $(stringify!($variant) => Some(WellKnownType::$variant),)+
+                    _ => None,
+                }
+            }
+        }
+    };
+}
+
+well_known_types! {
+    0 => Amount,
+    1 => Bucket,
+    2 => Proof,
+    3 => ComponentAddress,
+    4 => ResourceAddress,
+    5 => VaultId,
+    6 => NonFungibleId,
+    7 => NonFungibleAddress,
+    8 => UtxoAddress,
+    /// The address of a template. It is the same Rust type as [`WellKnownType::Hash32`], so the macro tags it by
+    /// the name the template used.
+    9 => TemplateAddress,
+    10 => Hash32,
+    11 => Metadata,
+    12 => Bytes,
+    13 => RistrettoPublicKeyBytes,
+    14 => ResourceType,
+    15 => OwnerRule,
+    16 => AccessRule,
+    17 => ConfidentialWithdrawProof,
+    18 => ResourceAuthAction,
+    19 => AuthHookCaller,
+    20 => SpendContext,
 }
 
 #[cfg(feature = "std")]
@@ -371,6 +460,7 @@ impl std::fmt::Display for Type {
                 f.write_str(">")
             },
             Type::Other { name } => write!(f, "{}", name),
+            Type::WellKnown(kind) => f.write_str(kind.name()),
         }
     }
 }
@@ -379,130 +469,192 @@ impl std::fmt::Display for Type {
 mod layout_tests {
     use super::*;
 
-    fn arg(name: &str, arg_type: Type) -> ArgDef {
-        ArgDef {
-            name: name.to_string(),
-            arg_type,
-        }
-    }
-
-    fn receiver_arg(ty: &str) -> ArgDef {
-        arg("self", Type::Other { name: ty.to_string() })
-    }
-
-    fn v1_function(name: &str, arguments: Vec<ArgDef>, is_mut: bool) -> FunctionDefV1 {
-        FunctionDefV1 {
-            name: name.to_string(),
-            arguments,
-            output: Type::Unit,
-            is_mut,
-            is_migration: false,
-        }
-    }
-
-    fn v1_migration(arguments: Vec<ArgDef>) -> FunctionDefV1 {
-        FunctionDefV1 {
-            name: "migrate".to_string(),
-            arguments,
-            output: Type::Other {
-                name: "Counter".to_string(),
-            },
-            is_mut: false,
-            is_migration: true,
-        }
-    }
-
-    fn previous_state() -> Type {
-        Type::Other {
-            name: "CounterV1".to_string(),
-        }
-    }
-
-    fn v1_def() -> VersionedTemplateDef {
-        VersionedTemplateDef::V1(TemplateDefV1 {
+    fn def() -> TemplateDef {
+        TemplateDef::V2(TemplateDefV2 {
             template_name: "Counter".to_string(),
             abi_version: 0,
             functions: vec![
-                v1_function("new", vec![arg("start", Type::U64)], false),
-                v1_function("get", vec![receiver_arg("&self")], false),
-                v1_function("add", vec![receiver_arg("&mut self"), arg("by", Type::U64)], true),
-                v1_migration(vec![arg("previous", previous_state()), arg("seed", Type::U32)]),
+                FunctionDef {
+                    name: "new".to_string(),
+                    kind: FunctionKind::Function,
+                    arguments: vec![ArgDef {
+                        name: "start".to_string(),
+                        arg_type: Type::U64,
+                    }],
+                    output: Type::Other {
+                        name: "Component".to_string(),
+                    },
+                },
+                FunctionDef {
+                    name: "add".to_string(),
+                    kind: FunctionKind::Method(Receiver::RefMut),
+                    arguments: vec![ArgDef {
+                        name: "by".to_string(),
+                        arg_type: Type::U64,
+                    }],
+                    output: Type::Unit,
+                },
+                FunctionDef {
+                    name: "migrate".to_string(),
+                    kind: FunctionKind::Migration {
+                        from: Type::Other {
+                            name: "CounterV1".to_string(),
+                        },
+                    },
+                    arguments: vec![],
+                    output: Type::Other {
+                        name: "Counter".to_string(),
+                    },
+                },
             ],
         })
     }
 
-    fn assert_converted(def: &TemplateDef) {
-        let new = def.get_function("new").unwrap();
-        assert_eq!(new.receiver(), None);
-        assert_eq!(new.arguments.len(), 1);
-        assert_eq!(new.arguments[0].name, "start");
-
-        let get = def.get_function("get").unwrap();
-        assert_eq!(get.receiver(), Some(Receiver::Ref));
-        assert!(get.arguments.is_empty());
-        assert_eq!(get.num_call_args(), 1);
-
-        let add = def.get_function("add").unwrap();
-        assert_eq!(add.receiver(), Some(Receiver::RefMut));
-        assert!(add.is_mut());
-        assert_eq!(add.arguments.len(), 1);
-        assert_eq!(add.arguments[0].name, "by");
-        assert_eq!(add.num_call_args(), 2);
-
-        let migrate = def.get_function("migrate").unwrap();
-        assert_eq!(migrate.kind, FunctionKind::Migration { from: previous_state() });
-        assert_eq!(migrate.receiver(), None);
-        assert_eq!(migrate.arguments.len(), 1);
-        assert_eq!(migrate.arguments[0].name, "seed");
-        assert_eq!(migrate.num_call_args(), 2);
+    fn assert_same(a: &TemplateDef, b: &TemplateDef) {
+        assert_eq!(a.template_name(), b.template_name());
+        assert_eq!(a.abi_version(), b.abi_version());
+        assert_eq!(a.functions().len(), b.functions().len());
+        for (a, b) in a.functions().iter().zip(b.functions()) {
+            assert_eq!(a.name, b.name);
+            assert_eq!(a.kind, b.kind);
+            assert_eq!(a.output, b.output);
+            assert_eq!(
+                a.arguments
+                    .iter()
+                    .map(|arg| (&arg.name, &arg.arg_type))
+                    .collect::<Vec<_>>(),
+                b.arguments
+                    .iter()
+                    .map(|arg| (&arg.name, &arg.arg_type))
+                    .collect::<Vec<_>>()
+            );
+        }
     }
 
     #[test]
-    fn a_v1_definition_decodes_with_its_receivers_lifted_out_of_the_arguments() {
-        let bytes = tari_bor::encode(&v1_def()).unwrap();
-        let def = tari_bor::decode::<TemplateDef>(&bytes).unwrap();
-        assert_converted(&def);
+    fn the_v2_layout_encodes_at_index_1_and_decodes_unchanged() {
+        let bytes = tari_bor::encode(&def()).unwrap();
+        // `[1, [..]]`: a two-element array holding the variant index, then the variant's fields.
+        assert_eq!(bytes[..2], [0x82, 0x01]);
+        assert_same(&tari_bor::decode::<TemplateDef>(&bytes).unwrap(), &def());
     }
 
     #[test]
-    fn a_v1_receiver_takes_its_mutability_from_is_mut() {
-        let converted = FunctionDef::from(v1_function("f", vec![receiver_arg("&self")], true));
-        assert_eq!(converted.receiver(), Some(Receiver::RefMut));
+    fn a_v1_definition_is_rejected_with_a_rebuild_message() {
+        // `[0, [["Buggy", 0, []]]]`: the V1 layout's index and a V1 definition with no functions.
+        let bytes = [0x82, 0x00, 0x81, 0x83, 0x65, b'B', b'u', b'g', b'g', b'y', 0x00, 0x80];
+        let err = tari_bor::decode::<TemplateDef>(&bytes).unwrap_err();
+        assert!(err.to_string().contains("V1 layout"), "{err}");
     }
 
     #[test]
-    fn a_v1_migration_stays_a_migration_whatever_its_first_argument() {
-        let converted = FunctionDef::from(v1_migration(vec![receiver_arg("&mut self")]));
-        assert_eq!(converted.kind, FunctionKind::Migration {
-            from: Type::Other {
-                name: "&mut self".to_string()
-            }
-        });
-        assert!(converted.arguments.is_empty());
-
-        let converted = FunctionDef::from(v1_migration(vec![]));
-        assert_eq!(converted.kind, FunctionKind::Migration { from: Type::Unit });
-    }
-
-    #[test]
-    fn the_current_layout_encodes_and_decodes_unchanged() {
-        let bytes = tari_bor::encode(&v1_def()).unwrap();
-        let def = tari_bor::decode::<TemplateDef>(&bytes).unwrap();
-
-        let reencoded = tari_bor::encode(&def).unwrap();
-        assert_converted(&tari_bor::decode::<TemplateDef>(&reencoded).unwrap());
-        assert!(matches!(
-            tari_bor::decode::<VersionedTemplateDef>(&reencoded).unwrap(),
-            VersionedTemplateDef::V2(_)
-        ));
+    fn an_unknown_layout_is_rejected() {
+        let mut bytes = tari_bor::encode(&def()).unwrap();
+        bytes[1] = 0x02;
+        assert!(tari_bor::decode::<TemplateDef>(&bytes).is_err());
     }
 
     #[cfg(feature = "serde")]
     #[test]
-    fn a_v1_definition_deserializes_through_serde_as_the_current_layout() {
-        let bytes = tari_bor::serde_codec::to_vec(v1_def()).unwrap();
-        let def: TemplateDef = tari_bor::serde_codec::from_slice(&bytes).unwrap();
-        assert_converted(&def);
+    fn the_v2_layout_round_trips_through_serde() {
+        let bytes = tari_bor::serde_codec::to_vec(def()).unwrap();
+        let decoded: TemplateDef = tari_bor::serde_codec::from_slice(&bytes).unwrap();
+        assert_same(&decoded, &def());
+    }
+}
+
+#[cfg(all(test, feature = "std"))]
+mod decode_tests {
+    use super::*;
+
+    fn every_variant() -> Vec<Type> {
+        let mut types = (0..=12).map(|i| Type::without_fields(i).unwrap()).collect::<Vec<_>>();
+        types.extend([
+            Type::Vec(Box::new(Type::Option(Box::new(Type::U8)))),
+            Type::Tuple(vec![Type::String, Type::Tuple(vec![]), Type::Bool]),
+            Type::Other {
+                name: "Component<Counter>".to_string(),
+            },
+            Type::Option(Box::new(Type::WellKnown(WellKnownType::Bucket))),
+        ]);
+        types.extend(WellKnownType::ALL.iter().map(|k| Type::WellKnown(*k)));
+        types
+    }
+
+    #[test]
+    fn every_variant_round_trips() {
+        for ty in every_variant() {
+            let bytes = tari_bor::encode(&ty).unwrap();
+            assert_eq!(tari_bor::decode::<Type>(&bytes).unwrap(), ty, "{ty:?}");
+        }
+    }
+
+    #[test]
+    fn a_well_known_type_encodes_as_its_index() {
+        let bytes = tari_bor::encode(&Type::WellKnown(WellKnownType::SpendContext)).unwrap();
+        // `[17, [20]]`
+        assert_eq!(bytes, [0x82, 0x11, 0x81, 0x14]);
+    }
+
+    #[test]
+    fn fields_in_an_indefinite_array_decode() {
+        // `[13, [_ [0, []]]]`: `Vec<Unit>`, its fields in an indefinite array.
+        let bytes = [0x82, 0x0d, 0x9f, 0x82, 0x00, 0x80, 0xff];
+        assert_eq!(
+            tari_bor::decode::<Type>(&bytes).unwrap(),
+            Type::Vec(Box::new(Type::Unit))
+        );
+    }
+
+    #[test]
+    fn fields_past_the_first_are_skipped() {
+        // `[15, ["A", 7]]` and `[15, [_ "A", 7]]`: `Other` with a field at index 1.
+        for bytes in [vec![0x82, 0x0f, 0x82, 0x61, b'A', 0x07], vec![
+            0x82, 0x0f, 0x9f, 0x61, b'A', 0x07, 0xff,
+        ]] {
+            assert_eq!(tari_bor::decode::<Type>(&bytes).unwrap(), Type::Other {
+                name: "A".to_string()
+            });
+        }
+    }
+
+    #[test]
+    fn a_missing_field_is_rejected() {
+        // `[16, []]`: `Option` without its type.
+        let err = tari_bor::decode::<Type>(&[0x82, 0x10, 0x80]).unwrap_err();
+        assert!(err.to_string().contains("Type::Option::_0"), "{err}");
+    }
+
+    #[test]
+    fn an_unknown_variant_or_well_known_type_is_rejected() {
+        // `[18, []]` and `[17, [200]]`
+        assert!(tari_bor::decode::<Type>(&[0x82, 0x12, 0x80]).is_err());
+        assert!(tari_bor::decode::<Type>(&[0x82, 0x11, 0x81, 0x18, 0xc8]).is_err());
+    }
+
+    #[test]
+    fn a_well_known_type_is_its_tag_or_its_name() {
+        let kind = WellKnownType::SpendContext;
+        assert!(Type::WellKnown(kind).is_well_known(kind));
+        assert!(
+            Type::Other {
+                name: "SpendContext".to_string()
+            }
+            .is_well_known(kind)
+        );
+        assert!(!Type::WellKnown(WellKnownType::Bucket).is_well_known(kind));
+        assert!(
+            !Type::Other {
+                name: "Bucket".to_string()
+            }
+            .is_well_known(kind)
+        );
+    }
+
+    #[test]
+    fn a_variant_without_fields_skips_its_payload() {
+        // `[9, [1]]`: `U32` with an unexpected field.
+        assert_eq!(tari_bor::decode::<Type>(&[0x82, 0x09, 0x81, 0x01]).unwrap(), Type::U32);
     }
 }
 

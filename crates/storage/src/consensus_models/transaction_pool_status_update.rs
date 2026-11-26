@@ -81,12 +81,20 @@ impl TransactionPoolStatusUpdate {
         tx_rec_mut.set_evidence(self.evidence().clone());
         tx_rec_mut.set_ready(self.is_ready_now());
         tx_rec_mut.set_local_decision(self.transaction().current_decision());
+        tx_rec_mut.set_transaction_fee(self.transaction_fee());
+        tx_rec_mut.set_exhaust_burn(self.exhaust_burn());
+        tx_rec_mut.set_fee_intent_only(self.is_fee_intent_only());
+        match self.leader_fee() {
+            Some(leader_fee) => {
+                tx_rec_mut.set_leader_fee(leader_fee.clone());
+            },
+            None => {
+                tx_rec_mut.no_leader_fee();
+            },
+        }
         tx_rec_mut.set_locked_epoch(self.locked_epoch().cloned());
         if let Some(decision) = self.transaction().remote_decision() {
             tx_rec_mut.set_remote_decision(decision);
-        }
-        if self.is_fee_intent_only() {
-            tx_rec_mut.set_fee_intent_only(true);
         }
     }
 }

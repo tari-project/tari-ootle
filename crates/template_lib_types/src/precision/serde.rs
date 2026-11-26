@@ -174,6 +174,18 @@ mod tests {
         let bytes_cbor = encode(&tari_bor::Value::Bytes(neg.to_le_bytes().to_vec())).unwrap();
         let from_bytes: Amount = tari_bor::serde_codec::from_slice(&bytes_cbor).unwrap();
         assert_eq!(from_bytes, neg);
+
+        let sign_extended = encode(&tari_bor::Value::Bytes(vec![0xff])).unwrap();
+        let decoded_bytes: Amount = tari_bor::serde_codec::from_slice(&sign_extended).unwrap();
+        assert_eq!(decoded_bytes, Amount::from(-1i64));
+        // Bytes past `Amount::BYTES` are accepted when they equal the sign fill and rejected otherwise.
+        let zero_extended = encode(&tari_bor::Value::Bytes(vec![0u8; 25])).unwrap();
+        let decoded_bytes: Amount = tari_bor::serde_codec::from_slice(&zero_extended).unwrap();
+        assert_eq!(decoded_bytes, Amount::ZERO);
+        let mut overlong = vec![0u8; 25];
+        overlong[24] = 0x01;
+        let overlong_bytes = encode(&tari_bor::Value::Bytes(overlong)).unwrap();
+        tari_bor::serde_codec::from_slice::<Amount>(&overlong_bytes).unwrap_err();
     }
 
     #[test]
@@ -197,5 +209,37 @@ mod tests {
         let cbor = encode(&amount).unwrap();
         let decoded: Amount = decode_exact(&cbor).unwrap();
         assert_eq!(decoded, amount);
+
+        // Indefinite-length CBOR string within the cap decodes
+        let indef = [0x7f, 0x63, b'1', b'2', b'3', 0x62, b'4', b'5', 0xff];
+        let decoded: Amount = decode_exact(&indef).unwrap();
+        assert_eq!(decoded, Amount::from(12345u64));
+
+        // The longest decimal string decodes, as a definite- or indefinite-length CBOR string
+        let longest = Amount::MIN.to_string();
+        assert_eq!(longest.len(), Amount::MAX_DECIMAL_STR_LEN);
+        let decoded: Amount = decode_exact(&encode(longest.as_str()).unwrap()).unwrap();
+        assert_eq!(decoded, Amount::MIN);
+        let (head, tail) = longest.split_at(30);
+        let decoded: Amount = decode_exact(&indefinite_str(&[head, tail])).unwrap();
+        assert_eq!(decoded, Amount::MIN);
+
+        // One byte past the bound is rejected before parsing, though the zero-padded string is a valid number
+        let overlong = "0".repeat(Amount::MAX_DECIMAL_STR_LEN + 1);
+        let err = decode_exact::<Amount>(&encode(overlong.as_str()).unwrap()).unwrap_err();
+        assert!(err.to_string().contains("exceeds maximum length"), "{err}");
+        let (head, tail) = overlong.split_at(30);
+        let err = decode_exact::<Amount>(&indefinite_str(&[head, tail])).unwrap_err();
+        assert!(err.to_string().contains("exceeds maximum length"), "{err}");
+    }
+
+    /// Encodes `chunks` as one indefinite-length CBOR text string.
+    fn indefinite_str(chunks: &[&str]) -> Vec<u8> {
+        let mut cbor = vec![0x7f];
+        for chunk in chunks {
+            cbor.extend(encode(*chunk).unwrap());
+        }
+        cbor.push(0xff);
+        cbor
     }
 }

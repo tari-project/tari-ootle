@@ -3,7 +3,7 @@
 //! Access control rules for template-related data like component methods and resources
 
 use minicbor::{CborLen, Decode, Decoder, Encode, data::Type, decode};
-use tari_bor::adapters::{bounded_vec, boxed_slice};
+use tari_bor::adapters::bounded_vec;
 use tari_template_abi::rust::{
     collections::BTreeMap,
     fmt::{self, Display},
@@ -133,18 +133,10 @@ pub enum RestrictedAccessRule {
     Require(#[n(0)] RequireRule),
     /// Requires any of the specified conditions to be met (logical OR)
     #[n(1)]
-    AnyOf(
-        #[n(0)]
-        #[cbor(with = "boxed_slice")]
-        Box<[RestrictedAccessRule]>,
-    ),
+    AnyOf(#[n(0)] Box<[RestrictedAccessRule]>),
     /// Requires all of the specified conditions to be met (logical AND)
     #[n(2)]
-    AllOf(
-        #[n(0)]
-        #[cbor(with = "boxed_slice")]
-        Box<[RestrictedAccessRule]>,
-    ),
+    AllOf(#[n(0)] Box<[RestrictedAccessRule]>),
 }
 
 impl RestrictedAccessRule {
@@ -307,15 +299,16 @@ fn decode_restricted_access_rule<'b, C>(
     }
 }
 
-// Decodes one `AnyOf`/`AllOf` boxed slice, recursing at the incremented depth. Reuses the
-// `boxed_slice` adapter's element loop (and its `MAX_PREALLOC` cap) via a depth-threading decoder.
 fn decode_restricted_slice<'b, C>(
     d: &mut Decoder<'b>,
     ctx: &mut C,
     depth: usize,
     num_nodes: &mut usize,
 ) -> Result<Box<[RestrictedAccessRule]>, decode::Error> {
-    boxed_slice::decode_with_fn(d, ctx, |d, ctx| decode_restricted_access_rule(d, ctx, depth, num_nodes))
+    bounded_vec::decode_with_fn(d, ctx, usize::MAX, |d, ctx| {
+        decode_restricted_access_rule(d, ctx, depth, num_nodes)
+    })
+    .map(Vec::into_boxed_slice)
 }
 
 fn decode_requirements<'b, C>(d: &mut Decoder<'b>, ctx: &mut C) -> Result<Box<[RuleRequirement]>, decode::Error> {
@@ -442,10 +435,10 @@ pub enum RequireRule {
     #[n(1)]
     AnyOf(
         #[n(0)]
-        #[cbor(
-            encode_with = "boxed_slice::encode",
-            decode_with = "decode_requirements",
-            cbor_len = "boxed_slice::cbor_len"
+        #[cbor(decode_with = "decode_requirements")]
+        #[cfg_attr(
+            feature = "serde",
+            serde(deserialize_with = "ootle_serde::bounded_seq::deserialize_boxed::<{ MAX_ACCESS_RULE_NODES }, _, _>")
         )]
         Box<[RuleRequirement]>,
     ),
@@ -453,10 +446,10 @@ pub enum RequireRule {
     #[n(2)]
     AllOf(
         #[n(0)]
-        #[cbor(
-            encode_with = "boxed_slice::encode",
-            decode_with = "decode_requirements",
-            cbor_len = "boxed_slice::cbor_len"
+        #[cbor(decode_with = "decode_requirements")]
+        #[cfg_attr(
+            feature = "serde",
+            serde(deserialize_with = "ootle_serde::bounded_seq::deserialize_boxed::<{ MAX_ACCESS_RULE_NODES }, _, _>")
         )]
         Box<[RuleRequirement]>,
     ),
@@ -465,10 +458,10 @@ pub enum RequireRule {
     MOfN(
         #[n(0)] u16,
         #[n(1)]
-        #[cbor(
-            encode_with = "boxed_slice::encode",
-            decode_with = "decode_requirements",
-            cbor_len = "boxed_slice::cbor_len"
+        #[cbor(decode_with = "decode_requirements")]
+        #[cfg_attr(
+            feature = "serde",
+            serde(deserialize_with = "ootle_serde::bounded_seq::deserialize_boxed::<{ MAX_ACCESS_RULE_NODES }, _, _>")
         )]
         Box<[RuleRequirement]>,
     ),
@@ -637,10 +630,13 @@ fn decode_method_access<'b, C>(
             },
             _ => {},
         }
+        let method_pos = d.position();
         let method = String::decode(d, ctx)?;
         let rule = AccessRule::decode(d, ctx)?;
         count_nodes(num_nodes, 1 + rule.num_nodes())?;
-        method_access.insert(method, rule);
+        if method_access.insert(method, rule).is_some() {
+            return Err(decode::Error::message("duplicate method in ComponentAccessRules").at(method_pos));
+        }
         index += 1;
     }
     Ok(method_access)
@@ -702,6 +698,39 @@ impl From<AccessRule> for UpdateRule {
 
 pub const LOCKED: UpdateRule = UpdateRule::Locked;
 pub const OWNER: UpdateRule = UpdateRule::Owner;
+
+/// Who may replace a component's method access rules and its owner rule. Fixed when the component is created.
+///
+/// The setting governs every change, whether it comes from a `SetComponentAccessRules`/`SetComponentOwnerRule`
+/// transaction instruction or from the component's own code through `ComponentManager`.
+#[derive(Debug, Clone, Default, Encode, Decode, CborLen)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
+pub enum RulesUpdater {
+    /// Nobody may change the rules, the component's own code included.
+    #[n(0)]
+    #[default]
+    Locked,
+    /// Only the component's own code may change the rules, and only while the caller satisfies the owner rule. A
+    /// transaction instruction cannot change them. Use this only when the template must run its own logic around a
+    /// change; otherwise prefer `Owner` or `AccessRule`. Components created before this setting existed behave this
+    /// way.
+    #[n(1)]
+    TemplateManaged,
+    /// Whoever satisfies the component's current owner rule, by instruction or from the component's own code.
+    #[n(2)]
+    Owner,
+    /// Whoever satisfies the rule, by instruction or from the component's own code, independent of the owner rule.
+    #[n(3)]
+    AccessRule(#[n(0)] AccessRule),
+}
+
+impl From<AccessRule> for RulesUpdater {
+    fn from(rule: AccessRule) -> Self {
+        Self::AccessRule(rule)
+    }
+}
 
 /// Information needed to specify access rules to a resource
 #[derive(Debug, Clone, Encode, Decode, CborLen)]
@@ -1149,15 +1178,15 @@ macro_rules! __rule_requirement {
 macro_rules! __build_vec {
     () => (Vec::new());
 
-    (@ {$item_fn:ident} $a:ident($b:expr), $($tail:tt)*) => {{
+    (@ {$item_fn:ident} $a:ident($($b:tt)*), $($tail:tt)*) => {{
         let mut items = Vec::with_capacity(1 + $crate::__expr_counter!($($tail)*));
-        $crate::__build_vec_inner!(@ { items, $item_fn } $a($b), $($tail)*);
+        $crate::__build_vec_inner!(@ { items, $item_fn } $a($($b)*), $($tail)*);
         items
     }};
 
-    (@ {$item_fn:ident} $a:ident($b:expr) $(,)?) => {{
+    (@ {$item_fn:ident} $a:ident($($b:tt)*) $(,)?) => {{
         let mut items = Vec::new();
-        $crate::__build_vec_inner!(@ { items, $item_fn } $a($b),);
+        $crate::__build_vec_inner!(@ { items, $item_fn } $a($($b)*),);
         items
     }};
 
@@ -1178,12 +1207,12 @@ macro_rules! __build_vec {
 macro_rules! __build_vec_inner {
     // Terminator: a no-address item recurses with an empty tail once it is the last in the list.
     (@ { $this:ident, $item_fn:ident }) => {};
-    (@ { $this:ident, $item_fn:ident } $a:ident($e:expr), $($tail:tt)*) => {
-        $crate::access_rules::__push(&mut $this, $crate::$item_fn!($a($e)));
+    (@ { $this:ident, $item_fn:ident } $a:ident($($e:tt)*), $($tail:tt)*) => {
+        $crate::access_rules::__push(&mut $this, $crate::$item_fn!($a($($e)*)));
         $crate::__build_vec_inner!(@ {$this, $item_fn } $($tail)*);
     };
-    (@ { $this:ident, $item_fn:ident } $a:ident($e:expr) $(,)*) => {
-        $crate::access_rules::__push(&mut $this, $crate::$item_fn!($a($e)));
+    (@ { $this:ident, $item_fn:ident } $a:ident($($e:tt)*) $(,)*) => {
+        $crate::access_rules::__push(&mut $this, $crate::$item_fn!($a($($e)*)));
     };
     (@ { $this:ident, $item_fn:ident } $a:ident, $($tail:tt)*) => {
         $crate::access_rules::__push(&mut $this, $crate::$item_fn!($a));
@@ -1291,6 +1320,30 @@ mod tests {
                     RuleRequirement::Resource(resource_address),
                 ])
             )))
+        );
+
+        // nested combinators inside any_of / all_of
+        let nested_rule = rule!(any_of(
+            all_of(component(component_address), resource(resource_address)),
+            m_of_n(1, component(component_address), resource(resource_address))
+        ));
+        assert_eq!(
+            nested_rule,
+            AccessRule::Restricted(RestrictedAccessRule::AnyOf(Box::new([
+                RestrictedAccessRule::AllOf(Box::new([
+                    RestrictedAccessRule::Require(RequireRule::Require(RuleRequirement::ScopedToComponent(
+                        component_address
+                    ))),
+                    RestrictedAccessRule::Require(RequireRule::Require(RuleRequirement::Resource(resource_address))),
+                ])),
+                RestrictedAccessRule::Require(RequireRule::MOfN(
+                    1,
+                    Box::new([
+                        RuleRequirement::ScopedToComponent(component_address),
+                        RuleRequirement::Resource(resource_address),
+                    ])
+                )),
+            ])))
         );
     }
 
@@ -1430,6 +1483,27 @@ mod tests {
         let mut e = minicbor::Encoder::new(Vec::new());
         e.array(1).unwrap().map(0).unwrap();
         assert!(tari_bor::decode::<ComponentAccessRules>(e.writer()).is_err());
+    }
+
+    #[test]
+    fn component_access_rules_decode_rejects_duplicate_methods() {
+        let mut e = minicbor::Encoder::new(Vec::new());
+        e.array(2)
+            .unwrap()
+            .map(2)
+            .unwrap()
+            .str("transfer")
+            .unwrap()
+            .encode(AccessRule::DenyAll)
+            .unwrap()
+            .str("transfer")
+            .unwrap()
+            .encode(AccessRule::AllowAll)
+            .unwrap()
+            .encode(AccessRule::DenyAll)
+            .unwrap();
+        let err = tari_bor::decode::<ComponentAccessRules>(e.writer()).unwrap_err();
+        assert!(err.to_string().contains("duplicate method in ComponentAccessRules"));
     }
 
     #[test]
@@ -1721,5 +1795,16 @@ mod tests {
             .find_invalid_rule(),
             None
         );
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn require_rule_deserializes_up_to_max_requirements() {
+        fn deserializes(rule: &RestrictedAccessRule) -> bool {
+            let json = serde_json::to_string(rule).unwrap();
+            serde_json::from_str::<RestrictedAccessRule>(&json).is_ok()
+        }
+        assert!(deserializes(&requirements(MAX_ACCESS_RULE_NODES)));
+        assert!(!deserializes(&requirements(MAX_ACCESS_RULE_NODES + 1)));
     }
 }

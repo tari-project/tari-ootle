@@ -3,7 +3,7 @@
 import CopyToClipboard from "@components/CopyToClipboard";
 import StatusChip, { StatusChipColors } from "@components/StatusChip";
 import { Memo as TyMemo } from "@tari-project/ootle-ts-bindings";
-import { hexToU8 } from "cbor2/utils";
+import { decodeDestinationTagAndBytes } from "./memoHelpers";
 
 export type MemoProps = {
   memo?: TyMemo | null;
@@ -15,48 +15,36 @@ export function Memo({ memo }: MemoProps) {
   }
 
   if ("Message" in memo) {
-    return <span>{memo ? memo.Message : "No Memo"}</span>;
+    return <span>{memo.Message}</span>;
   }
   if ("Bytes" in memo) {
-    return <span>{memo ? Buffer.from(memo.Bytes).toString("hex") : "No Memo"}</span>;
+    return <span>{memo.Bytes}</span>;
+  }
+  if ("U256" in memo) {
+    return <span>{memo.U256}</span>;
   }
   if ("SenderAddress" in memo) {
     // The resolved Ootle address is surfaced separately (see StealthUtxoList); show a label if we end up here.
     return <span>Sender address</span>;
   }
   if ("DestinationTagAndBytes" in memo) {
-    try {
-      const bytes = hexToU8(memo.DestinationTagAndBytes);
-      const len = bytes[0];
-      const destinationTag =
-        tryDecodeUtf8(bytes.slice(1, 1 + len)) || Buffer.from(bytes.slice(1, 1 + len)).toString("hex");
-      const message = bytes.length >= 1 + len ? tryDecodeUtf8(bytes.slice(1 + len)) : [];
+    const decoded = decodeDestinationTagAndBytes(memo.DestinationTagAndBytes);
+    if (decoded) {
+      const { destinationTag, message } = decoded;
       return (
         <span>
           {message}
-          <span style={{ marginLeft: "8px" }}>
-            {destinationTag && (
+          {destinationTag && (
+            <span style={message ? { marginLeft: "8px" } : undefined}>
               <StatusChip color={StatusChipColors.Blue} title="This UTXO has an attached destination tag">
-                <CopyToClipboard copy={destinationTag} /> {destinationTag}{" "}
+                <CopyToClipboard copy={destinationTag} /> {destinationTag}
               </StatusChip>
-            )}
-          </span>
+            </span>
+          )}
         </span>
       );
-    } catch (e) {
-      console.warn("Failed to decode DestinationTagAndBytes memo:", e);
-      // ignore
     }
   }
 
   return <span>{JSON.stringify(memo)}</span>;
-}
-
-function tryDecodeUtf8(bytes: Uint8Array): string | null {
-  try {
-    let decoder = new TextDecoder();
-    return decoder.decode(bytes);
-  } catch (e) {
-    return null;
-  }
 }

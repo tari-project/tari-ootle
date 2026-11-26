@@ -87,6 +87,12 @@ impl BlockDiffEntry {
         let position = self.by_substate.get(substate_id)?.versions.get(&version)?.last()?;
         Some(&self.changes[position])
     }
+
+    /// The block's UP change to `version` of `substate_id`.
+    pub fn version_up(&self, substate_id: &SubstateId, version: SubstateVersion) -> Option<&SubstateChange> {
+        let position = self.by_substate.get(substate_id)?.versions.get(&version)?.up?;
+        Some(&self.changes[position])
+    }
 }
 
 #[derive(Debug, Clone, Default)]

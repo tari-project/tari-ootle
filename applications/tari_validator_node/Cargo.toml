@@ -79,9 +79,6 @@ tower-http = { workspace = true, features = ["default", "cors"] }
 
 console-subscriber = { version = "0.4.1", optional = true }
 
-[build-dependencies]
-tari_common = { workspace = true, features = ["build"] }
-
 [dev-dependencies]
 tempfile = { workspace = true }
 tari_template_lib_types = { workspace = true }

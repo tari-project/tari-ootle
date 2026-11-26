@@ -205,7 +205,7 @@ where TSpec: WalletSdkSpec
 
                 let revealed_to_spend = spend_amount.saturating_sub(amount_locked);
 
-                if src_vault.revealed_balance < revealed_to_spend {
+                if available_revealed_funds < revealed_to_spend {
                     return Err(ConfidentialTransferApiError::InsufficientFunds);
                 }
 
@@ -401,7 +401,7 @@ where TSpec: WalletSdkSpec
 
             let change_value = statement.amount;
 
-            if change_value > 0 {
+            if change_value > 0 && !params.is_dry_run {
                 self.confidential_outputs_api.add_output(ConfidentialOutputModel {
                     account_address: *from_account.component_address(),
                     vault_id: src_vault.id,

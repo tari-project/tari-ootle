@@ -76,7 +76,14 @@ impl TransactionGossipCodec {
     }
 
     pub async fn decode(&self, message: gossipsub::Message) -> std::io::Result<(usize, TariMessage)> {
-        let (length, message) = self.codec.decode_from(&mut message.data.as_slice()).await?;
+        let mut reader = message.data.as_slice();
+        let (length, message) = self.codec.decode_from(&mut reader).await?;
+        if !reader.is_empty() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Gossip message has {} trailing bytes after frame", reader.len()),
+            ));
+        }
         let message = TariMessage::try_from(message).map_err(std::io::Error::other)?;
 
         Ok((length, message))
@@ -97,5 +104,48 @@ impl GossipValidation {
 
     pub fn into_key(self) -> (gossipsub::MessageId, PeerId) {
         self.key
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        future::Future,
+        pin::pin,
+        task::{Context, Poll, Waker},
+    };
+
+    use libp2p::gossipsub;
+    use tari_ootle_common_types::Epoch;
+    use tari_ootle_transaction::Transaction;
+
+    use super::*;
+    use crate::NewTransactionMessage;
+
+    fn poll_ready<F: Future>(fut: F) -> F::Output {
+        let mut fut = pin!(fut);
+        let mut cx = Context::from_waker(Waker::noop());
+        match fut.as_mut().poll(&mut cx) {
+            Poll::Ready(out) => out,
+            Poll::Pending => panic!("in-memory codec future returned Pending"),
+        }
+    }
+
+    #[test]
+    fn decode_rejects_trailing_bytes_after_frame() {
+        let codec = TransactionGossipCodec::new();
+        let msg = TariMessage::NewTransaction(Box::new(NewTransactionMessage {
+            transaction: Transaction::builder_localnet(Epoch(10)).build_and_seal(&Default::default()),
+        }));
+        let mut data = poll_ready(codec.encode(msg)).unwrap();
+        data.extend_from_slice(&[0xde, 0xad]);
+        let gossip_msg = gossipsub::Message {
+            source: None,
+            data,
+            sequence_number: None,
+            topic: gossipsub::IdentTopic::new(TRANSACTION_TOPIC).hash(),
+        };
+        let err = poll_ready(codec.decode(gossip_msg)).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
     }
 }

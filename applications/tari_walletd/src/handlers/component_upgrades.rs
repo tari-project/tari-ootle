@@ -81,7 +81,7 @@ pub fn authorize_component_upgrades(
     }
 }
 
-fn display_component_reference(component: &ComponentReference) -> String {
+pub(super) fn display_component_reference(component: &ComponentReference) -> String {
     match component {
         ComponentReference::Address(address) => address.to_string(),
         ComponentReference::Workspace(id) => format!("in workspace slot {id}"),
@@ -279,6 +279,7 @@ mod tests {
                 access_rules: ComponentAccessRules::new(),
                 entity_id: EntityId::default(),
                 upgrade_rule,
+                rules_updater: None,
             },
             body: ComponentBody::empty(),
         }

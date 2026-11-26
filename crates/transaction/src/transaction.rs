@@ -35,6 +35,7 @@ use crate::{
     Blobs,
     Instruction,
     MainSigner,
+    SchemaVersion,
     TransactionIntent,
     TransactionSealSignature,
     TransactionSignature,
@@ -52,6 +53,8 @@ use crate::{
 pub enum Transaction {
     #[n(0)]
     V1(#[n(0)] TransactionV1),
+    #[n(1)]
+    V2(#[n(0)] TransactionV1),
 }
 
 impl Transaction {
@@ -69,26 +72,44 @@ impl Transaction {
     pub fn new(transaction: UnsealedTransaction, seal_signature: TransactionSealSignature) -> Self {
         match transaction {
             UnsealedTransaction::V1(tx) => Self::V1(TransactionV1::new(tx, seal_signature)),
+            UnsealedTransaction::V2(tx) => Self::V2(TransactionV1::new(tx, seal_signature)),
+        }
+    }
+
+    /// Wraps `body` in the variant for `schema`.
+    pub fn from_body(schema: SchemaVersion, body: TransactionV1) -> Self {
+        match schema {
+            SchemaVersion::V1 => Self::V1(body),
+            SchemaVersion::V2 => Self::V2(body),
+        }
+    }
+
+    pub const fn schema(&self) -> SchemaVersion {
+        match self {
+            Self::V1(_) => SchemaVersion::V1,
+            Self::V2(_) => SchemaVersion::V2,
+        }
+    }
+
+    pub fn body(&self) -> &TransactionV1 {
+        match self {
+            Self::V1(tx) | Self::V2(tx) => tx,
         }
     }
 
     pub fn calculate_id(&self) -> TransactionId {
-        match self {
-            Self::V1(tx) => tx.calculate_id(),
-        }
+        self.body().calculate_id(self.schema())
     }
 
     /// Id and intent commitment derived from a single pass over the blobs. See
     /// [`TransactionV1::calculate_id_and_intent_commitment`].
     pub fn calculate_id_and_intent_commitment(&self) -> (TransactionId, Hash32) {
-        match self {
-            Self::V1(tx) => tx.calculate_id_and_intent_commitment(),
-        }
+        self.body().calculate_id_and_intent_commitment(self.schema())
     }
 
     pub fn calculate_transaction_weight(&self) -> TransactionWeight {
         match self {
-            Self::V1(tx) => tx.calculate_transaction_weight(),
+            Self::V1(tx) | Self::V2(tx) => tx.calculate_transaction_weight(),
         }
     }
 
@@ -106,82 +127,80 @@ impl Transaction {
 
     pub fn is_dry_run(&self) -> bool {
         match self {
-            Transaction::V1(tx) => tx.is_dry_run(),
+            Transaction::V1(tx) | Transaction::V2(tx) => tx.is_dry_run(),
         }
     }
 
     pub fn unsealed_transaction(&self) -> &UnsealedTransactionV1 {
         match self {
-            Self::V1(tx) => tx.unsealed_transaction(),
+            Self::V1(tx) | Self::V2(tx) => tx.unsealed_transaction(),
         }
     }
 
     pub fn network(&self) -> u8 {
         match self {
-            Self::V1(tx) => tx.network(),
+            Self::V1(tx) | Self::V2(tx) => tx.network(),
         }
     }
 
     pub fn fee_instructions(&self) -> &[Instruction] {
         match self {
-            Self::V1(tx) => tx.fee_instructions(),
+            Self::V1(tx) | Self::V2(tx) => tx.fee_instructions(),
         }
     }
 
     pub fn instructions(&self) -> &[Instruction] {
         match self {
-            Self::V1(tx) => tx.instructions(),
+            Self::V1(tx) | Self::V2(tx) => tx.instructions(),
         }
     }
 
     pub fn blobs(&self) -> &Blobs {
         match self {
-            Self::V1(tx) => tx.blobs(),
+            Self::V1(tx) | Self::V2(tx) => tx.blobs(),
         }
     }
 
     pub fn signatures(&self) -> &[TransactionSignature] {
         match self {
-            Self::V1(tx) => tx.signatures(),
+            Self::V1(tx) | Self::V2(tx) => tx.signatures(),
         }
     }
 
     pub fn seal_signature(&self) -> &TransactionSealSignature {
         match self {
-            Self::V1(tx) => tx.seal_signature(),
+            Self::V1(tx) | Self::V2(tx) => tx.seal_signature(),
         }
     }
 
     pub fn is_seal_signer_authorized(&self) -> bool {
         match self {
-            Self::V1(tx) => tx.is_seal_signer_authorized(),
+            Self::V1(tx) | Self::V2(tx) => tx.is_seal_signer_authorized(),
         }
     }
 
     #[must_use]
     pub fn verify_all_signatures(&self) -> bool {
-        match self {
-            Self::V1(tx) => tx.verify_all_signatures(),
-        }
+        self.body().verify_all_signatures(self.schema())
+    }
+
+    /// True when the authorization list is in the order the schema requires: strictly ascending by
+    /// public key under [`SchemaVersion::V2`], any order under [`SchemaVersion::V1`].
+    pub fn has_canonical_authorizations(&self) -> bool {
+        !self.schema().binds_authorizer_set() || crate::is_canonical_authorization_list(self.signatures())
     }
 
     pub fn declared_main_signer(&self) -> &MainSigner {
         match self {
-            Self::V1(tx) => tx.declared_main_signer(),
+            Self::V1(tx) | Self::V2(tx) => tx.declared_main_signer(),
         }
     }
 
     /// Returns the public key of the main signer the transaction declares, or `None` if it declares none. A declared
     /// [`MainSigner::Authorizer`] counts only if that key signed the transaction.
     pub fn main_signer(&self) -> Option<RistrettoPublicKeyBytes> {
-        match self.declared_main_signer() {
-            MainSigner::None => None,
-            MainSigner::SealSigner => Some(*self.seal_signature().public_key()),
-            MainSigner::Authorizer(public_key) => self
-                .signatures()
-                .iter()
-                .any(|sig| sig.public_key() == public_key)
-                .then_some(*public_key),
+        match self {
+            Self::V1(tx) | Self::V2(tx) => tx.main_signer(),
         }
     }
 
@@ -192,21 +211,21 @@ impl Transaction {
 
     pub fn inputs(&self) -> &IndexSet<InputDeclaration> {
         match self {
-            Self::V1(tx) => tx.inputs(),
+            Self::V1(tx) | Self::V2(tx) => tx.inputs(),
         }
     }
 
     /// Returns (fee instructions, instructions)
     pub fn into_instruction_parts(self) -> (Vec<Instruction>, Vec<Instruction>) {
         match self {
-            Self::V1(tx) => tx.into_unsealed_transaction().into_instruction_parts(),
+            Self::V1(tx) | Self::V2(tx) => tx.into_unsealed_transaction().into_instruction_parts(),
         }
     }
 
     /// Returns (fee instructions, main instructions, blobs).
     pub fn into_instructions_and_blobs(self) -> (Vec<Instruction>, Vec<Instruction>, crate::Blobs) {
         match self {
-            Self::V1(tx) => {
+            Self::V1(tx) | Self::V2(tx) => {
                 let unsealed = tx.into_unsealed_transaction();
                 let (unsigned, _signatures) = unsealed.into_parts();
                 (unsigned.fee_instructions, unsigned.instructions, unsigned.blobs)
@@ -216,19 +235,19 @@ impl Transaction {
 
     pub fn all_published_templates_iter(&self) -> impl Iterator<Item = (PublishedTemplateAddress, &[u8])> + '_ {
         match self {
-            Self::V1(tx) => tx.all_published_templates_iter(),
+            Self::V1(tx) | Self::V2(tx) => tx.all_published_templates_iter(),
         }
     }
 
     pub fn into_parts(self) -> (UnsealedTransactionV1, TransactionSealSignature) {
         match self {
-            Self::V1(tx) => tx.into_parts(),
+            Self::V1(tx) | Self::V2(tx) => tx.into_parts(),
         }
     }
 
     pub fn all_inputs_iter(&self) -> impl Iterator<Item = InputDeclarationRef<'_>> + '_ {
         match self {
-            Self::V1(tx) => tx.all_inputs_iter(),
+            Self::V1(tx) | Self::V2(tx) => tx.all_inputs_iter(),
         }
     }
 
@@ -349,31 +368,29 @@ impl Transaction {
     /// blob is referenced. See `TransactionV1::validate_blob_references`.
     pub fn validate_blob_references(&self) -> Result<(), crate::v1::BlobValidationError> {
         match self {
-            Self::V1(tx) => tx.validate_blob_references(),
+            Self::V1(tx) | Self::V2(tx) => tx.validate_blob_references(),
         }
     }
 
     pub fn min_epoch(&self) -> Option<Epoch> {
         match self {
-            Self::V1(tx) => tx.min_epoch(),
+            Self::V1(tx) | Self::V2(tx) => tx.min_epoch(),
         }
     }
 
     pub fn max_epoch(&self) -> Epoch {
         match self {
-            Self::V1(tx) => tx.max_epoch(),
+            Self::V1(tx) | Self::V2(tx) => tx.max_epoch(),
         }
     }
 
     pub const fn schema_version(&self) -> u16 {
-        match self {
-            Self::V1(tx) => tx.schema_version(),
-        }
+        self.schema().as_u16()
     }
 
     pub fn as_referenced_components(&self) -> impl Iterator<Item = &ComponentAddress> + '_ {
         match self {
-            Self::V1(tx) => tx.as_referenced_components(),
+            Self::V1(tx) | Self::V2(tx) => tx.as_referenced_components(),
         }
     }
 
@@ -389,35 +406,27 @@ impl Transaction {
     /// Returns all substates addresses referenced by this transaction
     pub fn to_referenced_substates(&self) -> Result<HashSet<SubstateId>, IndexedValueError> {
         match self {
-            Self::V1(tx) => tx.to_referenced_substates(),
+            Self::V1(tx) | Self::V2(tx) => tx.to_referenced_substates(),
         }
     }
 
     pub fn has_inputs_without_version(&self) -> bool {
         match self {
-            Self::V1(tx) => tx.has_inputs_without_version(),
+            Self::V1(tx) | Self::V2(tx) => tx.has_inputs_without_version(),
         }
     }
 }
 
 impl TransactionIntent for Transaction {
     fn calculate_intent_commitment(&self) -> Hash32 {
-        match self {
-            Self::V1(tx) => tx.calculate_intent_commitment(),
-        }
-    }
-}
-
-impl From<TransactionV1> for Transaction {
-    fn from(tx: TransactionV1) -> Self {
-        Self::V1(tx)
+        self.body().calculate_intent_commitment(self.schema())
     }
 }
 
 impl Display for Transaction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Transaction::V1(tx) => write!(f, "{tx}"),
+            Transaction::V1(tx) | Transaction::V2(tx) => write!(f, "{tx}"),
         }
     }
 }
@@ -434,94 +443,101 @@ impl Display for Transaction {
 pub enum PrunedTransaction {
     #[n(0)]
     V1(#[n(0)] crate::v1::PrunedTransactionV1),
+    #[n(1)]
+    V2(#[n(0)] crate::v1::PrunedTransactionV1),
 }
 
 impl PrunedTransaction {
-    pub fn calculate_id(&self) -> TransactionId {
+    pub const fn schema(&self) -> SchemaVersion {
         match self {
-            Self::V1(tx) => tx.calculate_id(),
+            Self::V1(_) => SchemaVersion::V1,
+            Self::V2(_) => SchemaVersion::V2,
         }
     }
 
-    pub fn schema_version(&self) -> u16 {
+    pub fn body(&self) -> &crate::v1::PrunedTransactionV1 {
         match self {
-            Self::V1(tx) => tx.schema_version(),
+            Self::V1(tx) | Self::V2(tx) => tx,
         }
+    }
+
+    pub fn calculate_id(&self) -> TransactionId {
+        self.body().calculate_id(self.schema())
+    }
+
+    pub fn schema_version(&self) -> u16 {
+        self.schema().as_u16()
     }
 
     pub fn fee_instructions(&self) -> &[Instruction] {
         match self {
-            Self::V1(tx) => tx.fee_instructions(),
+            Self::V1(tx) | Self::V2(tx) => tx.fee_instructions(),
         }
     }
 
     pub fn instructions(&self) -> &[Instruction] {
         match self {
-            Self::V1(tx) => tx.instructions(),
+            Self::V1(tx) | Self::V2(tx) => tx.instructions(),
         }
     }
 
     pub fn blob_hashes(&self) -> &crate::BlobHashes {
         match self {
-            Self::V1(tx) => tx.blob_hashes(),
+            Self::V1(tx) | Self::V2(tx) => tx.blob_hashes(),
         }
     }
 
     pub fn signatures(&self) -> &[TransactionSignature] {
         match self {
-            Self::V1(tx) => tx.signatures(),
+            Self::V1(tx) | Self::V2(tx) => tx.signatures(),
         }
     }
 
     pub fn seal_signature(&self) -> &TransactionSealSignature {
         match self {
-            Self::V1(tx) => tx.seal_signature(),
+            Self::V1(tx) | Self::V2(tx) => tx.seal_signature(),
         }
     }
 
     #[must_use]
     pub fn verify_all_signatures(&self) -> bool {
-        match self {
-            Self::V1(tx) => tx.verify_all_signatures(),
-        }
+        self.body().verify_all_signatures(self.schema())
     }
 
     pub fn network(&self) -> u8 {
         match self {
-            Self::V1(tx) => tx.network(),
+            Self::V1(tx) | Self::V2(tx) => tx.network(),
         }
     }
 
     pub fn min_epoch(&self) -> Option<Epoch> {
         match self {
-            Self::V1(tx) => tx.min_epoch(),
+            Self::V1(tx) | Self::V2(tx) => tx.min_epoch(),
         }
     }
 
     pub fn max_epoch(&self) -> Epoch {
         match self {
-            Self::V1(tx) => tx.max_epoch(),
+            Self::V1(tx) | Self::V2(tx) => tx.max_epoch(),
         }
     }
 
     pub fn is_seal_signer_authorized(&self) -> bool {
         match self {
-            Self::V1(tx) => tx.is_seal_signer_authorized(),
+            Self::V1(tx) | Self::V2(tx) => tx.is_seal_signer_authorized(),
         }
     }
 
     pub fn is_dry_run(&self) -> bool {
         match self {
-            Self::V1(tx) => tx.is_dry_run(),
+            Self::V1(tx) | Self::V2(tx) => tx.is_dry_run(),
         }
     }
 }
 
 impl TransactionIntent for PrunedTransaction {
     fn calculate_intent_commitment(&self) -> Hash32 {
-        match self {
-            Self::V1(tx) => tx.calculate_intent_commitment(),
-        }
+        self.body().calculate_intent_commitment(self.schema())
     }
 }
 
@@ -529,6 +545,7 @@ impl From<Transaction> for PrunedTransaction {
     fn from(tx: Transaction) -> Self {
         match tx {
             Transaction::V1(tx) => Self::V1(tx.into()),
+            Transaction::V2(tx) => Self::V2(tx.into()),
         }
     }
 }
@@ -651,7 +668,7 @@ mod tests {
         let secret2 = RistrettoSecretKey::random(&mut rand::rng());
         let subject = create_transaction()
             .finish()
-            .add_signer(&public_key.to_byte_type(), &secret2)
+            .authorize(&public_key.to_byte_type(), [&secret2])
             .seal(&secret);
         assert!(subject.verify_all_signatures());
     }
@@ -685,8 +702,11 @@ mod tests {
         let unsigned = create_transaction()
             .with_main_signer(MainSigner::Authorizer(main_public))
             .build_unsigned();
-        let main_sig = TransactionSignature::sign(&main_secret, &seal_public, &unsigned);
-        let other_sig = TransactionSignature::sign(&other_secret, &seal_public, &unsigned);
+        let other_public = RistrettoPublicKey::from_secret_key(&other_secret).to_byte_type();
+        let both: crate::AuthorizerSet = [main_public, other_public].into_iter().collect();
+        let context = crate::AuthorizationContext::new(&seal_public, &both);
+        let main_sig = TransactionSignature::sign(&main_secret, context, unsigned.body());
+        let other_sig = TransactionSignature::sign(&other_secret, context, unsigned.body());
 
         for signatures in [vec![main_sig.clone(), other_sig.clone()], vec![
             other_sig.clone(),
@@ -697,7 +717,7 @@ mod tests {
             assert_eq!(subject.main_signer(), Some(main_public));
         }
 
-        let subject = unsigned.with_signatures(vec![other_sig]).seal(&seal_secret);
+        let subject = unsigned.authorize(&seal_public, [&other_secret]).seal(&seal_secret);
         assert!(subject.verify_all_signatures());
         assert_eq!(subject.main_signer(), None);
     }

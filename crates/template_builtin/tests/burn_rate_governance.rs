@@ -58,15 +58,15 @@ impl Council {
         let seal_index = signers[0];
         let seal_signer = self.public_key(seal_index);
 
-        let mut unsealed = self
-            .test
+        let authorizers = signers
+            .iter()
+            .filter(|i| **i != seal_index)
+            .map(|index| &self.members[*index]);
+        self.test
             .transaction()
             .call_method(BURN_RATE_GOVERNANCE_COMPONENT_ADDRESS, method, call_args)
-            .finish();
-        for index in signers.iter().filter(|i| **i != seal_index) {
-            unsealed = unsealed.add_signer(&seal_signer, &self.members[*index]);
-        }
-        unsealed.seal(&self.members[seal_index])
+            .authorize(&seal_signer, authorizers)
+            .seal(&self.members[seal_index])
     }
 
     fn set_burn_rate(&mut self, signers: &[usize], rate_bps: u16, activation_epoch: u64) -> Transaction {
@@ -127,7 +127,7 @@ fn signers_outside_the_council_do_not_meet_the_threshold() {
             EARLIEST_ACTIVATION
         ])
         .finish()
-        .add_signer(&member, &outsider_secret)
+        .authorize(&member, [&outsider_secret])
         .seal(&council.members[0]);
 
     let reason = council.test.execute_expect_failure(transaction, vec![]);

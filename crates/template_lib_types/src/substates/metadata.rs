@@ -138,8 +138,12 @@ impl FromStr for Metadata {
             let (key, value) = pair
                 .split_once('=')
                 .ok_or_else(|| "Invalid key=value pair".to_string())?;
+            let key = key.trim();
+            if key.is_empty() {
+                return Err(format!("Metadata key is empty in pair '{pair}'"));
+            }
             metadata
-                .try_insert(key.trim(), value.trim())
+                .try_insert(key, value.trim())
                 .map_err(|e| format!("Failed to encode metadata value: {}", e))?;
         }
         Ok(metadata)
@@ -340,5 +344,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(original_metadata, parsed_metadata);
+        assert!("=val".parse::<Metadata>().is_err());
+        assert!("a=1, =2".parse::<Metadata>().is_err());
     }
 }

@@ -214,8 +214,8 @@ mod template {
             let contributed_b = bucket_b.take(b_contribution);
 
             // deposit the liquidity to the pool
-            self.vault_a.deposit(contributed_a);
-            self.vault_b.deposit(contributed_b);
+            self.deposit_revealed(pool_a, contributed_a);
+            self.deposit_revealed(pool_b, contributed_b);
 
             emit_event("contribute", metadata![
                 "resource_a" => resource_a,

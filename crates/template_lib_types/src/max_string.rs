@@ -9,8 +9,22 @@ use tari_template_abi::rust::{
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Hash)]
-#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize, borsh::BorshDeserialize))]
+#[cfg_attr(feature = "borsh", derive(borsh::BorshSerialize))]
 pub struct MaxString<const N: usize>(Box<str>);
+
+#[cfg(feature = "borsh")]
+impl<const N: usize> borsh::BorshDeserialize for MaxString<N> {
+    fn deserialize_reader<R: borsh::io::Read>(reader: &mut R) -> Result<Self, borsh::io::Error> {
+        let s = Box::<str>::deserialize_reader(reader)?;
+        let len = s.len();
+        Self::new_checked(s).ok_or_else(|| {
+            borsh::io::Error::new(
+                borsh::io::ErrorKind::InvalidData,
+                format!("string length exceeds maximum of {}: got {}", N, len),
+            )
+        })
+    }
+}
 
 impl<const N: usize> Deref for MaxString<N> {
     type Target = str;
@@ -215,6 +229,27 @@ mod tests {
             let bytes = MaxString::<5>(Box::from("123456"));
             let serialized = tari_bor::encode(&bytes).unwrap();
             let err = tari_bor::decode::<MaxString<5>>(&serialized).unwrap_err();
+            assert!(err.to_string().contains("string length exceeds maximum"));
+        }
+    }
+
+    #[cfg(feature = "borsh")]
+    mod borsh_impl {
+        use borsh::{BorshDeserialize, BorshSerialize};
+
+        use super::*;
+
+        #[test]
+        fn it_enforces_max_length_on_borsh_deserialize() {
+            let valid = MaxString::<5>::new_checked("12345").unwrap();
+            let mut encoded = Vec::new();
+            valid.serialize(&mut encoded).unwrap();
+            let decoded = MaxString::<5>::try_from_slice(&encoded).unwrap();
+            assert_eq!(decoded, valid);
+
+            let mut oversized = Vec::new();
+            "123456".serialize(&mut oversized).unwrap();
+            let err = MaxString::<5>::try_from_slice(&oversized).unwrap_err();
             assert!(err.to_string().contains("string length exceeds maximum"));
         }
     }

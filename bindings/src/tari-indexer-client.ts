@@ -15,6 +15,8 @@ export * from "./types/tari-indexer-client/GetNetworkSyncStateResponse";
 export * from "./types/tari-indexer-client/GetResourceResponse";
 export * from "./types/tari-indexer-client/GetSubstatesRequest";
 export * from "./types/tari-indexer-client/GetSubstatesResponse";
+export * from "./types/tari-indexer-client/GetSubstateVersionsRequest";
+export * from "./types/tari-indexer-client/GetSubstateVersionsResponse";
 export * from "./types/tari-indexer-client/GetTemplateDefinitionResponse";
 export * from "./types/tari-indexer-client/GetTransactionReceiptResponse";
 export * from "./types/tari-indexer-client/GetUtxosRequest";

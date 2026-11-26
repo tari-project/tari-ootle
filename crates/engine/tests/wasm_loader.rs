@@ -19,11 +19,18 @@ use tari_template_abi::{ArgDef, FunctionDef, FunctionKind, TemplateDef, Template
 use tari_template_lib::types::TemplateAddress;
 use tari_template_test_tooling::{Package, TemplateTest};
 
-/// Bor-encoded `VersionedTemplateDef::V1(TemplateDefV1 { template_name: "Buggy", abi_version: 0, functions:
-/// [FunctionDefV1 { name: "main", arguments: [], output: Type::Unit, is_mut: false, is_migration:
-/// false }] })`, behind the 4-byte little-endian length prefix `encode_for_wasm_embedding` adds.
-/// Shared with `tests/templates/buggy`, which embeds the same blob.
+/// Bor-encoded `TemplateDef::V2(TemplateDefV2 { template_name: "Buggy", abi_version: 0, functions: [FunctionDef {
+/// name: "main", kind: FunctionKind::Function, arguments: [], output: Type::Unit }] })`, behind the 4-byte
+/// little-endian length prefix `encode_for_wasm_embedding` adds. Shared with `tests/templates/buggy`, which embeds the
+/// same blob.
 const TEMPLATE_DEF: &[u8] = &[
+    29, 0, 0, 0, 130, 1, 129, 131, 101, 66, 117, 103, 103, 121, 0, 129, 132, 100, 109, 97, 105, 110, 130, 0, 128, 128,
+    130, 0, 128,
+];
+
+/// [`TEMPLATE_DEF`] with the V1 layout's index and its `main` in the V1 function layout:
+/// `{ name, arguments, output, is_mut, is_migration }`.
+const V1_TEMPLATE_DEF: &[u8] = &[
     28, 0, 0, 0, 130, 0, 129, 131, 101, 66, 117, 103, 103, 121, 0, 129, 133, 100, 109, 97, 105, 110, 128, 130, 0, 128,
     244, 244,
 ];
@@ -98,14 +105,14 @@ const ABI_EXPORTS: &str = r#"
 "#;
 
 fn validation_error(code: &[u8]) -> String {
-    WasmModule::validate_code(code)
+    WasmModule::validate_and_load(code)
         .expect_err("module was accepted")
         .to_string()
 }
 
 #[test]
 fn accepts_a_hand_written_template() {
-    let def = WasmModule::validate_code(&template_module(ABI_EXPORTS)).unwrap();
+    let def = WasmModule::validate_and_load(&template_module(ABI_EXPORTS)).unwrap();
     assert_eq!(def.template_name(), "Buggy");
 }
 
@@ -121,7 +128,7 @@ fn rejects_a_start_section() {
         "#
     ));
 
-    let err = WasmModule::validate_code(&code).expect_err("module with a start section was accepted");
+    let err = WasmModule::validate_and_load(&code).expect_err("module with a start section was accepted");
     assert!(
         matches!(
             err,
@@ -173,6 +180,29 @@ fn rejects_a_memory_declaring_more_pages_than_the_limit() {
 
     let err = validation_error(&code);
     assert!(err.contains("memory limit"), "unexpected error: {err}");
+}
+
+#[test]
+fn the_template_def_fixture_is_the_encoded_buggy_definition() {
+    let def = TemplateDef::V2(TemplateDefV2 {
+        template_name: "Buggy".to_string(),
+        abi_version: 0,
+        functions: vec![FunctionDef {
+            name: "main".to_string(),
+            kind: FunctionKind::Function,
+            arguments: vec![],
+            output: Type::Unit,
+        }],
+    });
+    assert_eq!(def.encode_for_wasm_embedding().unwrap(), TEMPLATE_DEF);
+}
+
+#[test]
+fn rejects_a_v1_template_definition() {
+    let code = template_module_defining(V1_TEMPLATE_DEF, "", ABI_EXPORTS);
+
+    let err = validation_error(&code);
+    assert!(err.contains("V1 layout"), "unexpected error: {err}");
 }
 
 #[test]
@@ -454,7 +484,7 @@ fn a_table_growing_module_is_refused() {
         "#,
     );
 
-    let err = WasmModule::load_template_from_code(&code).expect_err("a table-growing module was accepted");
+    let err = WasmModule::load(&code).expect_err("a table-growing module was accepted");
     assert!(err.to_string().contains("modifies a table"), "unexpected error: {err}");
 }
 
@@ -672,7 +702,7 @@ fn element_segment_entries_are_charged_per_instantiation() {
         "#
     ));
 
-    let shape = match WasmModule::load_template_from_code(&code).expect("module was rejected") {
+    let shape = match WasmModule::load(&code).expect("module was rejected") {
         tari_engine::template::LoadedTemplate::Wasm(loaded) => loaded.shape(),
     };
 
@@ -699,7 +729,7 @@ fn passive_segments_are_refused() {
             "#
         ));
 
-        let err = WasmModule::load_template_from_code(&code).expect_err("a passive segment was accepted");
+        let err = WasmModule::load(&code).expect_err("a passive segment was accepted");
         assert!(
             err.to_string().contains("passive"),
             "unexpected error for {segment}: {err}"
@@ -727,7 +757,7 @@ fn a_second_active_element_segment_is_refused() {
             "#
         ));
 
-        let err = WasmModule::load_template_from_code(&code).expect_err("a second active element segment was accepted");
+        let err = WasmModule::validate_and_load(&code).expect_err("a second active element segment was accepted");
         assert!(
             matches!(
                 err,
@@ -754,7 +784,7 @@ fn declarative_element_segments_load_alongside_the_active_one() {
         "#
     ));
 
-    let shape = match WasmModule::load_template_from_code(&code).expect("module was rejected") {
+    let shape = match WasmModule::load(&code).expect("module was rejected") {
         tari_engine::template::LoadedTemplate::Wasm(loaded) => loaded.shape(),
     };
     assert_eq!(shape.element_segment_entries, 2);
@@ -777,7 +807,7 @@ fn table_init_is_refused() {
         "#,
     );
 
-    let err = WasmModule::load_template_from_code(&code).expect_err("table.init was accepted");
+    let err = WasmModule::load(&code).expect_err("table.init was accepted");
     assert!(err.to_string().contains("TableInit"), "unexpected error: {err}");
 }
 
@@ -803,7 +833,7 @@ fn empty_data_segments_are_charged_per_segment() {
         "#
     ));
 
-    let shape = match WasmModule::load_template_from_code(&code).expect("module was rejected") {
+    let shape = match WasmModule::load(&code).expect("module was rejected") {
         tari_engine::template::LoadedTemplate::Wasm(loaded) => loaded.shape(),
     };
 
@@ -832,7 +862,7 @@ fn declared_table_capacity_is_charged_without_any_element_segment() {
         "#
     ));
 
-    let shape = match WasmModule::load_template_from_code(&code).expect("module was rejected") {
+    let shape = match WasmModule::load(&code).expect("module was rejected") {
         tari_engine::template::LoadedTemplate::Wasm(loaded) => loaded.shape(),
     };
 
@@ -1095,7 +1125,7 @@ fn rejects_an_abi_type_past_the_limits_at_any_depth() {
     ];
     for (case, arg_type, output) in cases {
         let code = template_module_defining(&template_def_with(arg_type, output), "", ABI_EXPORTS);
-        let error = WasmModule::validate_code(&code)
+        let error = WasmModule::validate_and_load(&code)
             .err()
             .unwrap_or_else(|| panic!("{case} past the limits was admitted"))
             .to_string();
@@ -1106,7 +1136,7 @@ fn rejects_an_abi_type_past_the_limits_at_any_depth() {
 
     let at_the_limits = Type::Tuple(vec![nested(other(max_name), max_depth - 2); 2]);
     let code = template_module_defining(&template_def_with(at_the_limits, other(max_name)), "", ABI_EXPORTS);
-    WasmModule::validate_code(&code).expect("a type at the limits was rejected");
+    WasmModule::validate_and_load(&code).expect("a type at the limits was rejected");
 }
 
 /// A panic report is logged only once the trap it announces ends the call, so a template that
@@ -1292,4 +1322,121 @@ fn a_failure_while_staging_a_response_stays_the_reject_reason() {
         reason.to_string().contains("Invalid engine op"),
         "the reject reason is not the first failure: {reason}"
     );
+}
+
+#[test]
+fn rejects_duplicate_function_names_and_colliding_function_idents() {
+    use tari_template_abi::{Receiver, func_hasher::hash_function_name};
+
+    let expected_ident = hash_function_name("admin_90260");
+    assert_eq!(expected_ident, hash_function_name("public_13865"));
+
+    let duplicate_def = TemplateDef::V2(TemplateDefV2 {
+        template_name: "Buggy".to_string(),
+        abi_version: 0,
+        functions: vec![
+            FunctionDef {
+                name: "transfer".to_string(),
+                kind: FunctionKind::Method(Receiver::RefMut),
+                arguments: vec![],
+                output: Type::Unit,
+            },
+            FunctionDef {
+                name: "transfer".to_string(),
+                kind: FunctionKind::Function,
+                arguments: vec![],
+                output: Type::Unit,
+            },
+        ],
+    })
+    .encode_for_wasm_embedding()
+    .unwrap();
+
+    let duplicate_code = template_module_defining(&duplicate_def, "", ABI_EXPORTS);
+    let err =
+        WasmModule::validate_and_load(&duplicate_code).expect_err("module with duplicate function names was accepted");
+    assert!(
+        matches!(
+            &err,
+            tari_engine::template::TemplateLoaderError::WasmModuleError(WasmExecutionError::WasmValidationError(
+                WasmValidationError::DuplicateFunctionName { name }
+            )) if name == "transfer"
+        ),
+        "unexpected error: {err:?}"
+    );
+
+    let colliding_def = TemplateDef::V2(TemplateDefV2 {
+        template_name: "Buggy".to_string(),
+        abi_version: 0,
+        functions: vec![
+            FunctionDef {
+                name: "admin_90260".to_string(),
+                kind: FunctionKind::Method(Receiver::RefMut),
+                arguments: vec![],
+                output: Type::Unit,
+            },
+            FunctionDef {
+                name: "public_13865".to_string(),
+                kind: FunctionKind::Method(Receiver::Ref),
+                arguments: vec![],
+                output: Type::Unit,
+            },
+        ],
+    })
+    .encode_for_wasm_embedding()
+    .unwrap();
+
+    let colliding_code = template_module_defining(&colliding_def, "", ABI_EXPORTS);
+    let err = WasmModule::validate_and_load(&colliding_code)
+        .expect_err("module with colliding function identifiers was accepted");
+    assert!(
+        matches!(
+            &err,
+            tari_engine::template::TemplateLoaderError::WasmModuleError(WasmExecutionError::WasmValidationError(
+                WasmValidationError::FunctionIdentCollision { first, second, ident }
+            )) if first == "admin_90260" && second == "public_13865" && *ident == expected_ident
+        ),
+        "unexpected error: {err:?}"
+    );
+}
+
+/// A stored template passed the publish admission rules in force when it was published, and loads on those terms: a
+/// rule added later refuses new templates while a published one that breaks it keeps loading.
+#[test]
+fn a_stored_template_loads_without_the_publish_admission_rules() {
+    let duplicate_def = TemplateDef::V2(TemplateDefV2 {
+        template_name: "Buggy".to_string(),
+        abi_version: 0,
+        functions: vec![
+            FunctionDef {
+                name: "transfer".to_string(),
+                kind: FunctionKind::Function,
+                arguments: vec![],
+                output: Type::Unit,
+            },
+            FunctionDef {
+                name: "transfer".to_string(),
+                kind: FunctionKind::Function,
+                arguments: vec![],
+                output: Type::Unit,
+            },
+        ],
+    })
+    .encode_for_wasm_embedding()
+    .unwrap();
+    let segments = ["(elem (i32.const 0) func)"; limits::WASM_LIMITS.max_element_segments + 1].join("\n");
+    let exports = format!(
+        r#"
+        (table 1 1 funcref)
+        {ABI_EXPORTS}
+        (func (export "unexpected"))
+        {segments}
+        "#
+    );
+    // Breaks a `TemplateDef` rule, an export rule and a structural limit at once.
+    let code = template_module_defining(&duplicate_def, "", &exports);
+
+    WasmModule::validate_and_load(&code).expect_err("publish admitted a module that breaks its rules");
+    let loaded = WasmModule::load(&code).expect("a stored template was refused at load");
+    assert_eq!(loaded.template_name(), "Buggy");
 }

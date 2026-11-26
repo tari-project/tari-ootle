@@ -9,6 +9,14 @@ import { ActionButton, Empty, Field, Live, Panel, Tag } from "../ui";
 
 const ONE_TARI = 1_000_000;
 
+function parsePositiveInt(raw: string, fallback: number): number {
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    return fallback;
+  }
+  return Math.floor(parsed);
+}
+
 function Miner() {
   const swarm = useSwarm();
   const [blocks, setBlocks] = useState(1);
@@ -34,8 +42,9 @@ function Miner() {
             <input
               type="number"
               min={1}
+              step={1}
               value={blocks}
-              onChange={(e) => setBlocks(Math.max(1, Number(e.target.value)))}
+              onChange={(e) => setBlocks(parsePositiveInt(e.target.value, 1))}
             />
           </Field>
           <ActionButton
@@ -52,9 +61,10 @@ function Miner() {
             <input
               type="number"
               min={1}
+              step={1}
               value={seconds}
               disabled={swarm.isMining}
-              onChange={(e) => setSeconds(Math.max(1, Number(e.target.value)))}
+              onChange={(e) => setSeconds(parsePositiveInt(e.target.value, 1))}
             />
           </Field>
           <ActionButton
@@ -88,6 +98,9 @@ function BurnFunds() {
     return <span className="faint">Start a wallet daemon to burn funds into an account.</span>;
   }
 
+  const trimmedAccountName = accountName.trim();
+  const isValidAmount = Number.isInteger(amount) && amount > 0;
+
   return (
     <div className="stack">
       <div className="eyebrow">Burn to {target.name}</div>
@@ -96,9 +109,13 @@ function BurnFunds() {
           <input
             type="number"
             min={1}
+            step={1}
             style={{ width: 140 }}
-            value={amount}
-            onChange={(e) => setAmount(Number(e.target.value))}
+            value={Number.isFinite(amount) ? amount : ""}
+            onChange={(e) => {
+              const raw = e.target.value;
+              setAmount(raw === "" ? Number.NaN : Math.floor(Number(raw)));
+            }}
           />
         </Field>
         <Field label="Account name">
@@ -110,13 +127,14 @@ function BurnFunds() {
           />
         </Field>
         <ActionButton
-          disabled={!accountName}
+          disabled={!trimmedAccountName || !isValidAmount}
           busyTitle="Burning — this mines 10 blocks"
           onAct={() =>
             swarm.act("Burn funds", async () => {
+              setClaimUrl(null);
               const resp = await swarmRpc("burn_funds", {
                 wallet_instance_id: target.instance_id,
-                account_name: accountName,
+                account_name: trimmedAccountName,
                 amount,
               });
               setClaimUrl(resp.url);
@@ -126,7 +144,11 @@ function BurnFunds() {
           Burn funds
         </ActionButton>
       </div>
-      <span className="faint">{(amount / ONE_TARI).toLocaleString()} tTARI. This mines 10 blocks.</span>
+      <span className="faint">
+        {isValidAmount
+          ? `${(amount / ONE_TARI).toLocaleString()} tTARI. This mines 10 blocks.`
+          : "Enter a positive whole amount in microTari. This mines 10 blocks."}
+      </span>
       {claimUrl && (
         <a href={claimUrl} target="_blank" rel="noreferrer">
           Claim proof

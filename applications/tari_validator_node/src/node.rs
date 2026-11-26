@@ -55,7 +55,10 @@ impl ValidatorNode {
     pub async fn start(mut self, shutdown: Shutdown) -> Result<(), anyhow::Error> {
         let mut hotstuff_events = self.services.consensus_handle.subscribe_to_hotstuff_events()?;
         let mut epoch_manager_events = self.services.epoch_manager.subscribe();
+        let mut hotstuff_events_closed = false;
+        let mut epoch_events_closed = false;
 
+        let mut service_error = None;
         loop {
             let metrics = tokio::runtime::Handle::current().metrics();
             info!(
@@ -80,12 +83,30 @@ impl ValidatorNode {
                     break;
                 },
 
-                Ok(event) = hotstuff_events.recv() => if let Err(err) = self.handle_hotstuff_event(event).await {
-                    error!(target: LOG_TARGET, "Error handling hotstuff event: {}", err);
+                result = hotstuff_events.recv(), if !hotstuff_events_closed => match result {
+                    Ok(event) => if let Err(err) = self.handle_hotstuff_event(event).await {
+                        error!(target: LOG_TARGET, "Error handling hotstuff event: {}", err);
+                    },
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        warn!(target: LOG_TARGET, "Hotstuff event subscriber lagged by {} event(s)", n);
+                    },
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        warn!(target: LOG_TARGET, "Hotstuff event stream closed");
+                        hotstuff_events_closed = true;
+                    },
                 },
 
-                Ok(event) = epoch_manager_events.recv() => if let Err(err) = self.handle_epoch_manager_event(event).await {
-                    error!(target: LOG_TARGET, "Error handling epoch manager event: {}", err);
+                result = epoch_manager_events.recv(), if !epoch_events_closed => match result {
+                    Ok(event) => if let Err(err) = self.handle_epoch_manager_event(event).await {
+                        error!(target: LOG_TARGET, "Error handling epoch manager event: {}", err);
+                    },
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        warn!(target: LOG_TARGET, "Epoch manager event subscriber lagged by {} event(s)", n);
+                    },
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        warn!(target: LOG_TARGET, "Epoch manager event stream closed");
+                        epoch_events_closed = true;
+                    },
                 },
 
                 result = self.services.on_any_exit() => {
@@ -105,27 +126,49 @@ impl ValidatorNode {
                         },
                         Err(err) => {
                             error!(target: LOG_TARGET, "Error in service: {}", err);
-                            self.services.diagnostics.emit(diag_event!(error, "node.task_failed", "A service task failed: {err}", error => &err));
-                            return Err(err);
+                            self.services.diagnostics.emit(diag_event!(
+                                error,
+                                "node.task_failed",
+                                "A service task failed: {err}",
+                                error => &err
+                            ));
+                            shutdown.trigger();
+                            service_error = Some(err);
+                            break;
                         }
                     }
                 }
             }
         }
 
+        self.join_services(service_error).await
+    }
+
+    /// Waits for every service to stop after shutdown is triggered. A service failure that caused the shutdown is
+    /// returned in preference to any error raised while the remaining services stop.
+    async fn join_services(self, service_error: Option<anyhow::Error>) -> Result<(), anyhow::Error> {
         // Just exit ASAP on panic
         info!(target: LOG_TARGET, "💤 Waiting for all services to shut down... ctrl+c to force shutdown");
-        tokio::select! {
+        let join_res = tokio::select! {
             _ = tokio::signal::ctrl_c() => {
                 // Second SIGINT forces shutdown
                 warn!(target: LOG_TARGET, "💤 Shutdown NOW");
                 process::exit(1);
             },
             res = tokio::time::timeout(Duration::from_secs(20), self.services.join_all()) => {
-                res.context("Timeout waiting for all workers to end")??;
-                info!(target: LOG_TARGET, "🏁 All services have exited cleanly");
+                res.context("Timeout waiting for all workers to end").and_then(|r| r)
             }
+        };
+
+        if let Some(err) = service_error {
+            if let Err(join_err) = join_res {
+                warn!(target: LOG_TARGET, "Error while shutting down services after task failure: {join_err}");
+            }
+            return Err(err);
         }
+
+        join_res?;
+        info!(target: LOG_TARGET, "🏁 All services have exited cleanly");
 
         Ok(())
     }
@@ -154,19 +197,19 @@ impl ValidatorNode {
 
         info!(target: LOG_TARGET, "🏁 Block {} committed", block);
 
-        let committed_transactions = block
+        let finalized_transactions = block
             .commands()
             .iter()
-            .filter_map(|cmd| cmd.committing())
+            .filter_map(|cmd| cmd.finalising())
             .map(|t| *t.id())
             .collect::<Vec<_>>();
 
-        if committed_transactions.is_empty() {
+        if finalized_transactions.is_empty() {
             return Ok(());
         }
 
-        info!(target: LOG_TARGET, "🏁 Removing {} finalized transaction(s) from mempool", committed_transactions.len());
-        if let Err(err) = self.services.mempool.remove_transactions(committed_transactions).await {
+        info!(target: LOG_TARGET, "🏁 Removing {} finalized transaction(s) from mempool", finalized_transactions.len());
+        if let Err(err) = self.services.mempool.remove_transactions(finalized_transactions).await {
             error!(target: LOG_TARGET, "Failed to remove transaction from mempool: {}", err);
         }
 

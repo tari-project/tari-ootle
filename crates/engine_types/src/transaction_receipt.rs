@@ -5,7 +5,6 @@ use std::{collections::HashSet, fmt, fmt::Display, str::FromStr};
 
 use ootle_network::Network;
 use serde::{Deserialize, Serialize};
-use tari_bor::adapters::boxed_slice;
 use tari_template_lib::types::Hash32;
 
 use crate::{
@@ -27,10 +26,8 @@ pub struct TransactionReceipt {
     #[n(1)]
     pub diff_summary: DiffSummary,
     #[n(2)]
-    #[cbor(with = "tari_bor::adapters::boxed_slice")]
     pub fee_withdrawals: Box<[ValidatorFeeWithdrawal]>,
     #[n(3)]
-    #[cbor(with = "tari_bor::adapters::boxed_slice")]
     pub events: Box<[Event]>,
     #[n(4)]
     pub fee_receipt: FeeReceipt,
@@ -126,11 +123,10 @@ impl TransactionReceipt {
                 .collect(),
         };
 
-        let ctx = &mut ();
         let mut len = minicbor::len(&diff_summary);
-        len += boxed_slice::cbor_len(events, ctx);
+        len += minicbor::len(events);
         len += events.iter().map(Event::charged_size_padding).sum::<usize>();
-        len += boxed_slice::cbor_len(fee_withdrawals, ctx);
+        len += minicbor::len(fee_withdrawals);
         len += minicbor::len(FeeReceipt::widest());
         len += minicbor::len(epoch);
         len += minicbor::len(Hash32::from_array([0xff; Hash32::LENGTH]));
@@ -208,7 +204,6 @@ pub struct FinalizeOutcomeParseError;
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct DiffSummary {
     #[n(0)]
-    #[cbor(with = "tari_bor::adapters::boxed_slice")]
     pub upped: Box<[UpSubstate]>,
     /// The substates the transaction downed without upping a later version: spent UTXOs and
     /// confidential outputs.
@@ -216,7 +211,6 @@ pub struct DiffSummary {
     /// A substate that is upped is always downed at its previous version, so those downs are implied
     /// by `upped` and are left out to keep the receipt small.
     #[n(1)]
-    #[cbor(with = "tari_bor::adapters::boxed_slice")]
     pub downed: Box<[DownSubstate]>,
 }
 

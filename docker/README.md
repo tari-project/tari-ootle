@@ -116,7 +116,8 @@ with this password, so the same password must be given on every later start.
     gets `421` while the `127.0.0.1` health check stays green.
 - For a cold and a hot wallet in one task, give each its own `JRPC_LISTEN_ON` port (e.g.
   `127.0.0.1:5100` and `127.0.0.1:5101`) and its own health-check port. If the port is taken the
-  daemon silently binds a random port instead, so two wallets on 5100 conflict.
+  daemon logs a warning and binds an OS-assigned port on the same address, so two wallets on 5100
+  conflict and the image health check (which still calls port 5100) no longer matches the second wallet.
 - Cold and hot wallets must not share a data directory: two containers with the same
   `TARI_BASE_DIR` open the same `wallet.sqlite` and seed, and nothing locks it. Give each wallet
   its own volume, or its own `TARI_BASE_DIR` (e.g. `/data/cold`, `/data/hot`) and `XDG_DATA_HOME`

@@ -20,7 +20,6 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { SubstateId, substateIdToString } from "@tari-project/ootle-ts-bindings";
 import { toHexString } from "../routes/VN/Components/helpers";
 
 export const renderJson = (json: any) => {
@@ -77,45 +76,9 @@ export function fromHexString(hexString: string) {
   return res;
 }
 
-export function shortenSubstateId(substateId: SubstateId | null | undefined, start: number = 4, end: number = 4) {
-  if (substateId === null || substateId === undefined) {
-    return "";
-  }
-  const string = substateIdToString(substateId);
-  const parts = string.split("_", 2);
-  return parts[0] + "_" + shortenString(parts[1], start, end);
-}
-
-export function shortenString(string: string, start: number = 8, end: number = 8) {
-  return string.substring(0, start) + "..." + string.slice(-end);
-}
-
 export function emptyRows(page: number, rowsPerPage: number, array: any[]) {
   return page > 0 ? Math.max(0, (1 + page) * rowsPerPage - array.length) : 0;
 }
 
-export interface Duration {
-  secs: number;
-  nanos: number;
-}
-
-export function displayDuration(duration: Duration) {
-  if (duration.secs === 0) {
-    if (duration.nanos > 1000000) {
-      return `${(duration.nanos / 1000000).toFixed(2)}ms`;
-    }
-    if (duration.nanos > 1000) {
-      return `${(duration.nanos / 1000).toFixed(2)}µs`;
-    }
-    return `${duration.nanos}ns`;
-  }
-  if (duration.secs >= 60 * 60) {
-    const minutes_secs = duration.secs - Math.floor(duration.secs / 60 / 60) * 60 * 60;
-    return `${(duration.secs / 60 / 60).toFixed(0)}h${Math.floor(minutes_secs / 60)}m`;
-  }
-  if (duration.secs >= 60) {
-    const secs = duration.secs - Math.floor(duration.secs / 60) * 60;
-    return `${(duration.secs / 60).toFixed(0)}m${secs.toFixed(0)}s`;
-  }
-  return `${duration.secs}s`;
-}
+export { displayDuration } from "./duration";
+export type { Duration } from "./duration";

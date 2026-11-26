@@ -45,7 +45,7 @@ import {
   ResourceType,
   substateIdToString,
 } from "@tari-project/ootle-ts-bindings";
-import { base64FromArrayBuffer } from "@utils/helpers";
+import { base64FromArrayBuffer, parseFeeInput } from "@utils/helpers";
 import { DragEvent, FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { Form } from "react-router-dom";
 
@@ -125,9 +125,11 @@ function PublishTemplateDialog(props: DialogProps) {
 
   const hasFile = formState.binary !== null;
   const hasAccount = Boolean(formState.account);
-  const maxFeeNum = formState.maxFee ? BigInt(formState.maxFee) : 0n;
-  const feeIsBelowEstimate = estimatedFee !== null && maxFeeNum !== null && maxFeeNum > 0 && maxFeeNum < estimatedFee;
-  const canSubmit = hasFile && hasAccount && maxFeeNum !== null && maxFeeNum > 0;
+  const feeState = parseFeeInput(formState.maxFee);
+  const maxFeeNum = feeState.kind === "valid" ? feeState.value : null;
+  const feeError = feeState.kind === "invalid";
+  const feeIsBelowEstimate = estimatedFee !== null && maxFeeNum !== null && maxFeeNum < estimatedFee;
+  const canSubmit = hasFile && hasAccount && maxFeeNum !== null;
 
   // Set default account when accounts load
   useEffect(() => {
@@ -328,7 +330,7 @@ function PublishTemplateDialog(props: DialogProps) {
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    if (!formState.binary || !formState.account || !maxFeeNum) return;
+    if (!formState.binary || !formState.account || maxFeeNum === null) return;
 
     setDisabled(true);
     try {
@@ -573,7 +575,9 @@ function PublishTemplateDialog(props: DialogProps) {
               disabled={disabled || isEstimating}
               fullWidth
               size="small"
-              slotProps={{ htmlInput: { min: 0, step: "any" } }}
+              error={feeError}
+              helperText={feeError ? "Enter a positive integer fee in micro-TARI" : undefined}
+              slotProps={{ htmlInput: { min: 1, step: 1 } }}
             />
             {feeIsBelowEstimate && (
               <Alert severity="warning" sx={{ mt: 1 }}>

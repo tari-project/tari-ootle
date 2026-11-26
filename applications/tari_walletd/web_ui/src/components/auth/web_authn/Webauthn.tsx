@@ -2,11 +2,13 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 import { useWebauthnAlreadyRegistered } from "@api/hooks/useWebauthn";
+import Error from "@components/Error";
 import Loading from "@components/Loading";
 import type { Permission } from "@tari-project/ootle-ts-bindings";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import WebauthnLogin from "./components/Login";
 import WebauthnRegistration from "./components/Registration";
+import { resolveWebauthnView } from "./webauthnHelpers";
 
 export const APP_NAME: string = "tari-wallet-webui";
 export const DEFAULT_PERMISSIONS: Permission[] = ["Admin"];
@@ -17,7 +19,6 @@ export interface WebauthnProps {
 
 export default function WebAuthn(props: WebauthnProps) {
   const { onAuthenticated } = props;
-  const [registered, setRegistered] = useState(false);
   const {
     data: alreadyRegisteredResponse,
     isLoading: alreadyRegisteredIsLoading,
@@ -26,22 +27,26 @@ export default function WebAuthn(props: WebauthnProps) {
   } = useWebauthnAlreadyRegistered();
 
   useEffect(() => {
-    if (!alreadyRegisteredIsError && alreadyRegisteredResponse) {
-      setRegistered(alreadyRegisteredResponse.registered);
-    }
-
     if (alreadyRegisteredIsError) {
       console.error(alreadyRegisteredError);
     }
-  }, [alreadyRegisteredResponse, alreadyRegisteredIsError]);
+  }, [alreadyRegisteredIsError, alreadyRegisteredError]);
 
-  if (alreadyRegisteredIsLoading) {
-    return <Loading />;
+  const view = resolveWebauthnView({
+    isLoading: alreadyRegisteredIsLoading,
+    isError: alreadyRegisteredIsError,
+    errorMessage: alreadyRegisteredError?.message,
+    registered: alreadyRegisteredResponse?.registered,
+  });
+
+  switch (view.kind) {
+    case "loading":
+      return <Loading />;
+    case "error":
+      return <Error message={view.message} />;
+    case "register":
+      return <WebauthnRegistration onAuthenticated={onAuthenticated} />;
+    case "login":
+      return <WebauthnLogin onAuthenticated={onAuthenticated} />;
   }
-
-  if (!registered) {
-    return <WebauthnRegistration onAuthenticated={onAuthenticated} />;
-  }
-
-  return <WebauthnLogin onAuthenticated={onAuthenticated} />;
 }

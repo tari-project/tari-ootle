@@ -20,6 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+import Alert from "@mui/material/Alert";
 import Grid from "@mui/material/Grid";
 import Table from "@mui/material/Table";
 import TableBody from "@mui/material/TableBody";
@@ -46,15 +47,36 @@ function formatType(type: Type): string {
 function TemplateFunctions() {
   const { address } = useParams();
   const [info, setInfo] = useState<GetTemplateResponse>();
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const load = (address: string) => {
-      getTemplate({ template_address: address }).then((response) => {
-        setInfo(response);
+    setInfo(undefined);
+    setError(null);
+    const data = address ? address.replace(/^0x/i, "") : "";
+    if (!data) {
+      return;
+    }
+
+    let cancelled = false;
+    getTemplate({ template_address: data })
+      .then((response) => {
+        if (!cancelled) {
+          setInfo(response);
+        }
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          const message =
+            err && typeof err === "object" && "message" in err && typeof err.message === "string"
+              ? err.message
+              : "Failed to load template details";
+          setError(message);
+        }
       });
+
+    return () => {
+      cancelled = true;
     };
-    const data = address ? address.replace("0x", "") : "";
-    load(data);
   }, [address]);
 
   const renderFunctions = (template: GetTemplateResponse) => {
@@ -103,7 +125,7 @@ function TemplateFunctions() {
       <Grid size={12}>
         <StyledPaper>
           <BoxHeading>Address: {address}</BoxHeading>
-          {info ? renderFunctions(info) : ""}
+          {error ? <Alert severity="error">{error}</Alert> : info ? renderFunctions(info) : ""}
         </StyledPaper>
       </Grid>
     </>

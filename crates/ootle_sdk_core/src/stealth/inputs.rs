@@ -106,7 +106,7 @@ impl WantList {
                 required: true,
             },
         ];
-        if intent.revealed_input_amount > 0 && transfer_resource != tari_resource {
+        if !intent.revealed_input_amount.is_zero() && transfer_resource != tari_resource {
             items.push(WantItem::VaultForResource {
                 component_address: from_account,
                 resource_address: transfer_resource,
@@ -734,8 +734,8 @@ mod tests {
                 },
             ],
             outputs: vec![],
-            revealed_input_amount: 0,
-            revealed_output_amount: 0,
+            revealed_input_amount: crate::types::U128::ZERO,
+            revealed_output_amount: crate::types::U128::ZERO,
             min_epoch: None,
             max_epoch: 1,
             dry_run: false,
@@ -782,8 +782,8 @@ mod tests {
             fee: BoundaryAmount::new(2000),
             inputs: vec![input.clone(), input],
             outputs: vec![],
-            revealed_input_amount: 0,
-            revealed_output_amount: 0,
+            revealed_input_amount: crate::types::U128::ZERO,
+            revealed_output_amount: crate::types::U128::ZERO,
             min_epoch: None,
             max_epoch: 1,
             dry_run: false,
@@ -817,8 +817,8 @@ mod tests {
                 owner_account_pk: PublicKeyBytes::from_hex(owner1).unwrap(),
             }],
             outputs: vec![],
-            revealed_input_amount: 0,
-            revealed_output_amount: 0,
+            revealed_input_amount: crate::types::U128::ZERO,
+            revealed_output_amount: crate::types::U128::ZERO,
             min_epoch: None,
             max_epoch: 1,
             dry_run: false,
@@ -841,7 +841,7 @@ mod tests {
         ]);
 
         // With revealed input on custom resource: also wants the custom resource vault.
-        intent.revealed_input_amount = 500;
+        intent.revealed_input_amount = crate::types::U128::from_u64(500);
         let wants_with_rev = WantList::from_stealth_inputs_with_account(&intent);
         assert_eq!(wants_with_rev.0, vec![
             WantItem::SpecificSubstate {

@@ -12,6 +12,11 @@ fn u64_arg(name: &str, value: BigInt) -> Result<u64, JsError> {
     u64::try_from(value).map_err(|_| JsError::new(&format!("{name} must be an integer in [0, 2^64 - 1]")))
 }
 
+/// Revealed amounts are public and carry no range proof, so they take the full `Amount` width.
+fn u128_arg(name: &str, value: BigInt) -> Result<u128, JsError> {
+    u128::try_from(value).map_err(|_| JsError::new(&format!("{name} must be an integer in [0, 2^128 - 1]")))
+}
+
 /// Called automatically when the WASM module is instantiated. Do not call directly.
 #[wasm_bindgen(start)]
 fn on_start() {
@@ -314,7 +319,7 @@ pub fn generate_stealth_outputs_statement(
 ) -> Result<StealthOutputsResult, JsError> {
     let result = ootle_wasm_core::stealth::outputs::generate_stealth_outputs_statement(
         witnesses_json,
-        u64_arg("revealed_output_amount_microtari", revealed_output_amount_microtari)?,
+        u128_arg("revealed_output_amount_microtari", revealed_output_amount_microtari)?,
         revealed_receiver,
     )
     .map_err(|e| JsError::new(&e.to_string()))?;
@@ -400,7 +405,7 @@ pub fn build_stealth_inputs_statement(
 ) -> Result<String, JsError> {
     ootle_wasm_core::stealth::inputs::build_stealth_inputs_statement(
         input_commitments,
-        u64_arg("revealed_amount_microtari", revealed_amount_microtari)?,
+        u128_arg("revealed_amount_microtari", revealed_amount_microtari)?,
     )
     .map_err(|e| JsError::new(&e.to_string()))
 }
@@ -422,7 +427,7 @@ pub fn build_stealth_inputs_statement_from_inputs(
 ) -> Result<String, JsError> {
     ootle_wasm_core::stealth::inputs::build_stealth_inputs_statement_from_inputs(
         inputs_json,
-        u64_arg("revealed_amount_microtari", revealed_amount_microtari)?,
+        u128_arg("revealed_amount_microtari", revealed_amount_microtari)?,
     )
     .map_err(|e| JsError::new(&e.to_string()))
 }
@@ -473,9 +478,9 @@ pub fn build_stealth_transfer_statement(
 ) -> Result<String, JsError> {
     ootle_wasm_core::stealth::transfer::build_stealth_transfer_statement(
         input_witnesses_json,
-        u64_arg("revealed_input_amount_microtari", revealed_input_amount_microtari)?,
+        u128_arg("revealed_input_amount_microtari", revealed_input_amount_microtari)?,
         output_witnesses_json,
-        u64_arg("revealed_output_amount_microtari", revealed_output_amount_microtari)?,
+        u128_arg("revealed_output_amount_microtari", revealed_output_amount_microtari)?,
         revealed_receiver,
     )
     .map_err(|e| JsError::new(&e.to_string()))

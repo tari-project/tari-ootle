@@ -154,19 +154,29 @@ where TSpec: WalletSdkSpec
             };
 
             let maybe_vault_version = known_child_vaults.get(&vault_substate_id).copied().flatten();
+            let has_local_vault = accounts_api.has_vault(vault_id)?;
             // The first time a vault is found, know about the vault substate from the tx result but never added
             // it to the database.
             let is_known_version = maybe_vault_version
                 .is_some_and(|vault_version| versioned_vault_substate_id.version() <= vault_version) &&
-                accounts_api.has_vault(vault_id)?;
+                has_local_vault;
+            let is_exact_known_version = maybe_vault_version
+                .is_some_and(|vault_version| versioned_vault_substate_id.version() == vault_version) &&
+                has_local_vault;
             // A known vault version is only up to date once every confidential output and non-fungible it names is
-            // recorded.
-            let unrecorded_outputs = if is_known_version {
-                self.count_unrecorded_vault_contents(account_address, *vault_id, latest_vault)?
+            // recorded and (at the exact known version) every confidential output's `Unspent`/`Spent` status matches
+            // it.
+            let pending_reconciliations = if is_known_version {
+                self.count_pending_vault_reconciliations(
+                    account_address,
+                    *vault_id,
+                    latest_vault,
+                    is_exact_known_version,
+                )?
             } else {
                 0
             };
-            if is_known_version && unrecorded_outputs == 0 {
+            if is_known_version && pending_reconciliations == 0 {
                 info!(target: LOG_TARGET, "Vault {} is up to date", versioned_vault_substate_id.substate_id());
                 continue;
             }
@@ -186,14 +196,22 @@ where TSpec: WalletSdkSpec
             )
             .await?;
 
-            substate_api.save_child(
-                account_substate_id.substate_id(),
-                versioned_vault_substate_id.as_versioned_ref(),
-                [SubstateId::from(*latest_vault.resource_address())],
-            )?;
-            // At a known version only newly recorded outputs and non-fungibles can change the vault.
+            if maybe_vault_version.is_none_or(|vault_version| versioned_vault_substate_id.version() >= vault_version) {
+                substate_api.save_child(
+                    account_substate_id.substate_id(),
+                    versioned_vault_substate_id.as_versioned_ref(),
+                    [SubstateId::from(*latest_vault.resource_address())],
+                )?;
+            }
+            // At a known version only newly recorded outputs/non-fungibles or reconciled spent outputs change the
+            // vault.
             if is_known_version &&
-                self.count_unrecorded_vault_contents(account_address, *vault_id, latest_vault)? == unrecorded_outputs
+                self.count_pending_vault_reconciliations(
+                    account_address,
+                    *vault_id,
+                    latest_vault,
+                    is_exact_known_version,
+                )? == pending_reconciliations
             {
                 continue;
             }
@@ -344,6 +362,22 @@ where TSpec: WalletSdkSpec
                     vault_id,
                     outputs.iter().map(|(c, o)| (c, o)),
                 )?;
+            let stored_vault_version = maybe_current_vault.as_ref().map(|v| v.vault_version);
+            let known_substate_version = self
+                .wallet_sdk
+                .substate_api()
+                .get_substate(&SubstateId::Vault(vault_id))
+                .optional()?
+                .map(|s| s.substate_id.version());
+            let max_known_version = stored_vault_version.into_iter().chain(known_substate_version).max();
+            if max_known_version.is_none_or(|known| vault_version >= known) {
+                self.wallet_sdk.confidential_outputs_api().reconcile_vault_outputs(
+                    &account_address,
+                    &vault_id,
+                    &resource_address,
+                    commitments,
+                )?;
+            }
             has_changed = true;
         }
 
@@ -411,17 +445,43 @@ where TSpec: WalletSdkSpec
         Ok(commitments)
     }
 
-    /// The confidential outputs and non-fungibles `vault` names that the wallet holds no record of.
-    fn count_unrecorded_vault_contents(
+    /// The confidential outputs and non-fungibles `vault` names that the wallet holds no record of, plus (when
+    /// `reconcile_output_status` is true at the exact known vault version) confidential outputs whose `Unspent` /
+    /// `Spent` status disagrees with `vault`.
+    fn count_pending_vault_reconciliations(
+        &self,
+        account_address: ComponentAddress,
+        vault_id: VaultId,
+        vault: &Vault,
+        reconcile_output_status: bool,
+    ) -> Result<usize, AccountMonitorError> {
+        let out_of_sync_outputs = if reconcile_output_status {
+            self.count_out_of_sync_confidential_outputs(account_address, vault_id, vault)?
+        } else {
+            0
+        };
+        Ok(
+            self.count_unrecorded_confidential_outputs(account_address, vault_id, vault)? +
+                self.count_unrecorded_non_fungibles(vault_id, vault)? +
+                out_of_sync_outputs,
+        )
+    }
+
+    fn count_out_of_sync_confidential_outputs(
         &self,
         account_address: ComponentAddress,
         vault_id: VaultId,
         vault: &Vault,
     ) -> Result<usize, AccountMonitorError> {
-        Ok(
-            self.count_unrecorded_confidential_outputs(account_address, vault_id, vault)? +
-                self.count_unrecorded_non_fungibles(vault_id, vault)?,
-        )
+        let Some(commitments) = vault.get_confidential_commitments() else {
+            return Ok(0);
+        };
+        Ok(self.wallet_sdk.confidential_outputs_api().count_out_of_sync_outputs(
+            &account_address,
+            &vault_id,
+            vault.resource_address(),
+            commitments,
+        )?)
     }
 
     fn count_unrecorded_non_fungibles(&self, vault_id: VaultId, vault: &Vault) -> Result<usize, AccountMonitorError> {

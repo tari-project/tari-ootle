@@ -1,7 +1,7 @@
 [package]
 name = "tari_ootle_template_metadata"
 description = "Template metadata types, serialization, and hashing for Tari Ootle templates"
-version = "0.20.0"
+version = "0.21.0"
 edition.workspace = true
 authors.workspace = true
 repository.workspace = true
@@ -14,7 +14,6 @@ minicbor = { workspace = true, default-features = false, features = ["std", "der
 
 borsh = { workspace = true, optional = true, features = ["std"] }
 cargo_toml = "0.22"
-gix-hash = { workspace = true }
 hex = { workspace = true }
 multihash = { version = "0.19.4" }
 serde = { workspace = true, features = ["derive"] }

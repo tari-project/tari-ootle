@@ -207,6 +207,10 @@ fn signing_context_matches_protocol() {
         SIGNING_CONTEXT,
         tari_ootle_transaction::TRANSACTION_SIGNING_CONTEXT.as_bytes()
     );
+    assert_eq!(
+        ootle_ledger_common::arg_types::EXPECTED_SCHEMA_VERSION,
+        tari_ootle_transaction::SchemaVersion::CURRENT.as_u16()
+    );
 }
 
 #[test]
@@ -516,7 +520,9 @@ fn sign_stream_state_accepts_canonical_preimages_and_rejects_boundary_spoofing()
             .collect()
     };
 
-    let add_signer_segments = to_pairs(TransactionSignature::signing_preimage_v1(&seal_signer, &tx));
+    let authorizers: AuthorizerSet = [authorizer].into_iter().collect();
+    let context = AuthorizationContext::new(&seal_signer, &authorizers);
+    let add_signer_segments = to_pairs(TransactionSignature::signing_preimage(context, &tx));
     let expected_display = TxDisplay {
         network: tx.network,
         fee_instruction_count: tx.fee_instructions.len() as u32,
@@ -533,7 +539,7 @@ fn sign_stream_state_accepts_canonical_preimages_and_rejects_boundary_spoofing()
     let signer = random_scalar();
     let auth_msg = message(
         TX_LABEL_SIGNATURE,
-        &TransactionSignature::signing_preimage_v1(&seal_signer, &tx),
+        &TransactionSignature::signing_preimage(context, &tx),
     );
     let (auth_pk, auth_sig) = sign(&signer, &auth_msg);
     let prior = TransactionSignature::new(
@@ -541,21 +547,30 @@ fn sign_stream_state_accepts_canonical_preimages_and_rejects_boundary_spoofing()
         sig_bytes(&auth_sig),
     );
     let unsealed = UnsealedTransactionV1::new(tx.clone(), vec![prior.clone(), prior.clone(), prior]);
-    let seal_segments = to_pairs(TransactionSealSignature::signing_preimage_v1(&unsealed));
+    let seal_segments = to_pairs(TransactionSealSignature::signing_preimage(&unsealed));
     assert_eq!(run_stream(SignMode::Seal, &seal_segments, 250), Ok(expected_display));
     assert_eq!(run_stream(SignMode::Seal, &seal_segments, 64), Ok(expected_display));
 
-    // Shifting the network byte into SchemaVersion or SealSigner to spoof display.network / stealth key derivation is
-    // rejected.
+    // Shifting the network byte into SchemaVersion or appending bytes to SealSigner is rejected.
     let mut shifted_network = seal_segments.clone();
-    shifted_network[0].1.push(0x00);
+    shifted_network
+        .iter_mut()
+        .find(|(field, _)| *field == SigningField::SchemaVersion)
+        .unwrap()
+        .1
+        .push(0x00);
     assert_eq!(
         run_stream(SignMode::Seal, &shifted_network, 250),
         Err(OotleStatusWord::BadRequest)
     );
 
     let mut shifted_seal_signer = add_signer_segments.clone();
-    shifted_seal_signer[1].1.push(0x00);
+    shifted_seal_signer
+        .iter_mut()
+        .find(|(field, _)| *field == SigningField::SealSigner)
+        .unwrap()
+        .1
+        .push(0x00);
     assert_eq!(
         run_stream(SignMode::AddSigner, &shifted_seal_signer, 250),
         Err(OotleStatusWord::BadRequest)
@@ -563,7 +578,12 @@ fn sign_stream_state_accepts_canonical_preimages_and_rejects_boundary_spoofing()
 
     // Shifting bytes into Network to spoof display.fee_instruction_count is rejected.
     let mut shifted_fee_count = seal_segments;
-    shifted_fee_count[1].1.extend_from_slice(&[0u8, 0, 0, 0]);
+    shifted_fee_count
+        .iter_mut()
+        .find(|(field, _)| *field == SigningField::Network)
+        .unwrap()
+        .1
+        .extend_from_slice(&[0u8, 0, 0, 0]);
     assert_eq!(
         run_stream(SignMode::Seal, &shifted_fee_count, 250),
         Err(OotleStatusWord::BadRequest)

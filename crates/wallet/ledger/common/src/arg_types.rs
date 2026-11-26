@@ -250,9 +250,8 @@ pub struct SignTransactionResponse {
 
 /// Summary fields extracted from the fixed-offset prefix of the streamed preimage.
 ///
-/// `SchemaVersion`, `SealSigner` (when present) and `Network` have exact byte lengths, so
-/// `network` and the leading `u32` count of `FeeInstructions` sit at fixed offsets in the
-/// unframed preimage.
+/// `SchemaVersion` and `Network` have exact byte lengths, so `network` and the leading `u32`
+/// count of `FeeInstructions` sit at fixed offsets in the unframed preimage.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct TxDisplay {
     pub network: u8,
@@ -276,7 +275,7 @@ pub struct SignStreamState {
     display: TxDisplay,
 }
 
-const EXPECTED_SCHEMA_VERSION: u16 = 1;
+pub const EXPECTED_SCHEMA_VERSION: u16 = 2;
 const PUBLIC_KEY_BYTES_LEN: usize = 32;
 
 impl SignStreamState {

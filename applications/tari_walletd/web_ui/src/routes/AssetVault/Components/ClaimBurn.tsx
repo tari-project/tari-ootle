@@ -47,7 +47,7 @@ import type {
 } from "@tari-project/ootle-ts-bindings";
 import { rejectReasonToString } from "@tari-project/ootle-ts-bindings";
 import { XTR_CURRENCY } from "@utils/currency";
-import { formatCurrency } from "@utils/helpers";
+import { formatCurrency, parseFeeInput } from "@utils/helpers";
 import { accountsClaimBurn, burnProofsGet, burnProofsList, transactionsWaitResult } from "@utils/json_rpc";
 import React, { SyntheticEvent, useEffect, useState } from "react";
 import { Form } from "react-router-dom";
@@ -151,9 +151,11 @@ export default function ClaimBurn() {
   };
 
   const hasProof = isProofValid();
-  const parsedFee = formState.fee ? BigInt(formState.fee) : undefined;
-  const hasFee = Boolean(parsedFee) && parsedFee! > 0n;
-  const canEstimate = formState.account !== "" && hasProof;
+  const feeState = parseFeeInput(formState.fee);
+  const parsedFee = feeState.kind === "valid" ? feeState.value : undefined;
+  const hasFee = parsedFee !== undefined;
+  const feeError = feeState.kind === "invalid";
+  const canEstimate = formState.account !== "" && hasProof && !feeError;
 
   const onAccountChange = (e: SelectChangeEvent) => {
     setFormState({ ...formState, account: e.target.value, selectedFile: "" });
@@ -242,6 +244,10 @@ export default function ClaimBurn() {
 
   const onSubmit = async (e: SyntheticEvent) => {
     e.preventDefault();
+
+    if (feeError) {
+      return;
+    }
 
     if (!hasFee) {
       await estimateFee();
@@ -407,6 +413,8 @@ export default function ClaimBurn() {
               onChange={onFeeChange}
               style={{ flexGrow: 1 }}
               disabled={formState.disabled}
+              error={feeError}
+              helperText={feeError ? "Enter a positive integer fee in micro-TARI" : undefined}
             />
 
             <Box

@@ -436,6 +436,10 @@ pub enum RequireRule {
     AnyOf(
         #[n(0)]
         #[cbor(decode_with = "decode_requirements")]
+        #[cfg_attr(
+            feature = "serde",
+            serde(deserialize_with = "ootle_serde::bounded_seq::deserialize_boxed::<{ MAX_ACCESS_RULE_NODES }, _, _>")
+        )]
         Box<[RuleRequirement]>,
     ),
     /// Requires all of the specified conditions to be met (logical AND)
@@ -443,6 +447,10 @@ pub enum RequireRule {
     AllOf(
         #[n(0)]
         #[cbor(decode_with = "decode_requirements")]
+        #[cfg_attr(
+            feature = "serde",
+            serde(deserialize_with = "ootle_serde::bounded_seq::deserialize_boxed::<{ MAX_ACCESS_RULE_NODES }, _, _>")
+        )]
         Box<[RuleRequirement]>,
     ),
     /// Requires N of the specified conditions to be met
@@ -451,6 +459,10 @@ pub enum RequireRule {
         #[n(0)] u16,
         #[n(1)]
         #[cbor(decode_with = "decode_requirements")]
+        #[cfg_attr(
+            feature = "serde",
+            serde(deserialize_with = "ootle_serde::bounded_seq::deserialize_boxed::<{ MAX_ACCESS_RULE_NODES }, _, _>")
+        )]
         Box<[RuleRequirement]>,
     ),
 }
@@ -1166,15 +1178,15 @@ macro_rules! __rule_requirement {
 macro_rules! __build_vec {
     () => (Vec::new());
 
-    (@ {$item_fn:ident} $a:ident($b:expr), $($tail:tt)*) => {{
+    (@ {$item_fn:ident} $a:ident($($b:tt)*), $($tail:tt)*) => {{
         let mut items = Vec::with_capacity(1 + $crate::__expr_counter!($($tail)*));
-        $crate::__build_vec_inner!(@ { items, $item_fn } $a($b), $($tail)*);
+        $crate::__build_vec_inner!(@ { items, $item_fn } $a($($b)*), $($tail)*);
         items
     }};
 
-    (@ {$item_fn:ident} $a:ident($b:expr) $(,)?) => {{
+    (@ {$item_fn:ident} $a:ident($($b:tt)*) $(,)?) => {{
         let mut items = Vec::new();
-        $crate::__build_vec_inner!(@ { items, $item_fn } $a($b),);
+        $crate::__build_vec_inner!(@ { items, $item_fn } $a($($b)*),);
         items
     }};
 
@@ -1195,12 +1207,12 @@ macro_rules! __build_vec {
 macro_rules! __build_vec_inner {
     // Terminator: a no-address item recurses with an empty tail once it is the last in the list.
     (@ { $this:ident, $item_fn:ident }) => {};
-    (@ { $this:ident, $item_fn:ident } $a:ident($e:expr), $($tail:tt)*) => {
-        $crate::access_rules::__push(&mut $this, $crate::$item_fn!($a($e)));
+    (@ { $this:ident, $item_fn:ident } $a:ident($($e:tt)*), $($tail:tt)*) => {
+        $crate::access_rules::__push(&mut $this, $crate::$item_fn!($a($($e)*)));
         $crate::__build_vec_inner!(@ {$this, $item_fn } $($tail)*);
     };
-    (@ { $this:ident, $item_fn:ident } $a:ident($e:expr) $(,)*) => {
-        $crate::access_rules::__push(&mut $this, $crate::$item_fn!($a($e)));
+    (@ { $this:ident, $item_fn:ident } $a:ident($($e:tt)*) $(,)*) => {
+        $crate::access_rules::__push(&mut $this, $crate::$item_fn!($a($($e)*)));
     };
     (@ { $this:ident, $item_fn:ident } $a:ident, $($tail:tt)*) => {
         $crate::access_rules::__push(&mut $this, $crate::$item_fn!($a));
@@ -1308,6 +1320,30 @@ mod tests {
                     RuleRequirement::Resource(resource_address),
                 ])
             )))
+        );
+
+        // nested combinators inside any_of / all_of
+        let nested_rule = rule!(any_of(
+            all_of(component(component_address), resource(resource_address)),
+            m_of_n(1, component(component_address), resource(resource_address))
+        ));
+        assert_eq!(
+            nested_rule,
+            AccessRule::Restricted(RestrictedAccessRule::AnyOf(Box::new([
+                RestrictedAccessRule::AllOf(Box::new([
+                    RestrictedAccessRule::Require(RequireRule::Require(RuleRequirement::ScopedToComponent(
+                        component_address
+                    ))),
+                    RestrictedAccessRule::Require(RequireRule::Require(RuleRequirement::Resource(resource_address))),
+                ])),
+                RestrictedAccessRule::Require(RequireRule::MOfN(
+                    1,
+                    Box::new([
+                        RuleRequirement::ScopedToComponent(component_address),
+                        RuleRequirement::Resource(resource_address),
+                    ])
+                )),
+            ])))
         );
     }
 
@@ -1759,5 +1795,16 @@ mod tests {
             .find_invalid_rule(),
             None
         );
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn require_rule_deserializes_up_to_max_requirements() {
+        fn deserializes(rule: &RestrictedAccessRule) -> bool {
+            let json = serde_json::to_string(rule).unwrap();
+            serde_json::from_str::<RestrictedAccessRule>(&json).is_ok()
+        }
+        assert!(deserializes(&requirements(MAX_ACCESS_RULE_NODES)));
+        assert!(!deserializes(&requirements(MAX_ACCESS_RULE_NODES + 1)));
     }
 }

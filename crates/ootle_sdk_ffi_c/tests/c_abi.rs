@@ -1244,9 +1244,8 @@ fn abi_version_is_the_stable_tag() {
     assert!(!p.is_null());
     let s = unsafe { CStr::from_ptr(p) }.to_str().unwrap();
     assert_eq!(
-        s, "ootle-sdk-ffi-c/20",
-        "the ABI tag every host binding asserts against (bumped when the co-sign record export took the authorizer \
-         set)"
+        s, "ootle-sdk-ffi-c/21",
+        "the ABI tag every host binding asserts against (bumped when revealed amounts became `{{hi, lo}}` records)"
     );
     // Static pointer — explicitly NOT freed (freeing it would be UB).
 }
@@ -1757,17 +1756,15 @@ fn decode_substate_round_trips() {
         decoded, fx["expected"]["decoded_substate"],
         "decoded DecodedSubstate matches the vector"
     );
-    // The u64 balance survives as a native JSON number (no float truncation).
+    // The revealed balance crosses as a `{hi, lo}` record of native JSON u64 words (no float truncation).
+    let balance = &decoded["value"]["revealed_balance"];
     assert!(
-        decoded["value"]["revealed_balance"].is_u64(),
-        "revealed_balance must be a native JSON u64, got {}",
-        decoded["value"]["revealed_balance"]
+        balance["hi"].is_u64() && balance["lo"].is_u64(),
+        "revealed_balance must be a {{hi, lo}} record of native JSON u64 words, got {balance}"
     );
     assert_eq!(
-        decoded["value"]["revealed_balance"].as_u64().unwrap(),
-        fx["expected"]["decoded_substate"]["value"]["revealed_balance"]
-            .as_u64()
-            .unwrap()
+        balance,
+        &fx["expected"]["decoded_substate"]["value"]["revealed_balance"]
     );
     unsafe { ootle_result_free(result) };
 
@@ -1959,7 +1956,7 @@ fn encoded_decoders_match_wasm_bor() {
 }
 
 /// `ootle_account_balances` over the committed account-balances vector reproduces the per-resource
-/// revealed balance (a sum > 2^33, native u64); `ootle_account_balance_wants` names the account's
+/// revealed balance (a sum > 2^33, as a `{hi, lo}` record); `ootle_account_balance_wants` names the account's
 /// vault ids; a missing vault ⇒ RESOLUTION; bad JSON ⇒ PARSE; null arg ⇒ INVALID.
 #[test]
 fn account_balances_round_trips() {
@@ -1967,7 +1964,7 @@ fn account_balances_round_trips() {
     let account = CArg::new(&serde_json::to_string(&fx["input"]["substate_value"]).unwrap());
     let vaults = CArg::new(&serde_json::to_string(&fx["input"]["vault_substates"]).unwrap());
 
-    // (a) balances reproduce the vector and carry a native u64 sum > 2^33.
+    // (a) balances reproduce the vector and carry a sum > 2^33 in the record's low word.
     let result = unsafe { ootle_account_balances(account.ptr(), vaults.ptr()) };
     assert!(ok(&result), "account_balances failed: {}", error_code(&result));
     assert!(result.handle.is_null(), "stateless — no handle");
@@ -1977,8 +1974,14 @@ fn account_balances_round_trips() {
         "balances match the vector"
     );
     let bal = &payload["balances"][0]["revealed_balance"];
-    assert!(bal.is_u64(), "revealed_balance must be a native JSON u64, got {bal}");
-    assert!(bal.as_u64().unwrap() > (1u64 << 33), "the locked balance is > 2^33");
+    assert!(
+        bal["hi"].is_u64() && bal["lo"].is_u64(),
+        "revealed_balance must be a {{hi, lo}} record of native JSON u64 words, got {bal}"
+    );
+    assert!(
+        bal["lo"].as_u64().unwrap() > (1u64 << 33),
+        "the locked balance is > 2^33"
+    );
     unsafe { ootle_result_free(result) };
 
     // (b) account_balance_wants names the account's vault ids (the fetch_ids pattern).

@@ -21,14 +21,16 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import { ApiError } from "@api/helpers/types";
+import { accountBalancesQueryKey } from "@api/hooks/accountQueryKeys";
 import { useNFTsList } from "@api/hooks/useNfts";
+import queryClient from "@api/queryClient";
 import AccountName from "@components/AccountName";
 import CopyAddress from "@components/CopyAddress";
 import FetchStatusCheck from "@components/FetchStatusCheck";
 import Loading from "@components/Loading";
 import PageHeading from "@components/PageHeading";
 import { DataTableCell, InnerHeading, StyledPaper } from "@components/StyledComponents";
-import { Box, Button, Fade, TextField } from "@mui/material";
+import { Box, Button, Collapse, TextField } from "@mui/material";
 import Grid from "@mui/material/Grid";
 import Table from "@mui/material/Table";
 import TableBody from "@mui/material/TableBody";
@@ -49,6 +51,7 @@ import { accountsAssociateStealthResource } from "@utils/json_rpc";
 import { useState } from "react";
 import { IoAdd } from "react-icons/io5";
 import { Form, useParams } from "react-router-dom";
+import { useErrorNotification } from "../../contexts/ErrorNotificationContext";
 import { useAccountsGet, useAccountsGetBalances } from "../../services/api/hooks/useAccounts";
 import { BalanceChangeHistory, BalanceChangeHistoryAction } from "./BalanceChangeHistory";
 
@@ -79,25 +82,31 @@ function BalanceRow({ balance, accountAddress }: { balance: BalanceEntry; accoun
 
 function AccountDetailsLayout() {
   const { id: accountAddr } = useParams();
-  const accountAddress = substateIdToString(accountAddr!) as ComponentAddress;
+  return <AccountDetailsContent key={accountAddr} accountAddr={accountAddr!} />;
+}
+
+function AccountDetailsContent({ accountAddr }: { accountAddr: string }) {
+  const accountAddress = substateIdToString(accountAddr) as ComponentAddress;
   const [showAddStealth, setShowAddStealth] = useState(false);
   const [stealthResource, setStealthResource] = useState({ newResourceAddress: "" });
+  const [isAddingStealth, setIsAddingStealth] = useState(false);
   const [nftPage, setNftPage] = useState(0);
   const [nftRowsPerPage, setNftRowsPerPage] = useState(12);
+  const { showError, showSuccess } = useErrorNotification();
 
   const {
     data: balancesData,
     isLoading: balancesIsLoading,
     isError: balancesIsError,
     error: balancesError,
-  } = useAccountsGetBalances(substateIdToString(accountAddr!));
+  } = useAccountsGetBalances(accountAddress);
 
   const {
     data: accountsData,
     isLoading: accountsIsLoading,
     isError: accountsIsError,
     error: accountsError,
-  } = useAccountsGet(accountAddr!);
+  } = useAccountsGet(accountAddr);
 
   const offset = nftPage * nftRowsPerPage;
   const {
@@ -105,7 +114,7 @@ function AccountDetailsLayout() {
     isLoading: nftsListIsFetching,
     isError: nftsListIsError,
     error: nftsListError,
-  } = useNFTsList(substateIdToString(accountAddr!), offset, nftRowsPerPage);
+  } = useNFTsList(accountAddress, offset, nftRowsPerPage);
 
   const currentNfts = nftsListData?.nfts || [];
   const hasMore = currentNfts.length === nftRowsPerPage;
@@ -115,24 +124,35 @@ function AccountDetailsLayout() {
     setStealthResource({ ...stealthResource, [event.target.name]: event.target.value });
   };
 
-  const onSubmitAddStealthResource = (event: React.FormEvent<HTMLFormElement>) => {
+  const handleCancelAddStealth = () => {
+    setStealthResource({ newResourceAddress: "" });
+    setShowAddStealth(false);
+  };
+
+  const onSubmitAddStealthResource = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (stealthResource.newResourceAddress) {
-      accountsAssociateStealthResource({
-        account: { ComponentAddress: accountAddr! },
-        resource_address: stealthResource.newResourceAddress,
-      })
-        .then(() => {
-          setStealthResource({ newResourceAddress: "" });
-          setShowAddStealth(false);
-        })
-        .catch((error) => {
-          console.error("Error adding stealth resource:", error);
-        });
+    const resourceAddress = stealthResource.newResourceAddress.trim();
+    if (isAddingStealth || !resourceAddress) {
+      return;
+    }
+    setIsAddingStealth(true);
+    try {
+      await accountsAssociateStealthResource({
+        account: { ComponentAddress: accountAddr },
+        resource_address: resourceAddress,
+      });
+      setStealthResource({ newResourceAddress: "" });
+      setShowAddStealth(false);
+      showSuccess("Stealth resource associated with account");
+      void queryClient.invalidateQueries({ queryKey: accountBalancesQueryKey(accountAddress) });
+    } catch (error: unknown) {
+      showError(error instanceof Error && error.message ? error.message : "Failed to associate stealth resource");
+    } finally {
+      setIsAddingStealth(false);
     }
   };
 
-  if (balancesIsLoading || accountsIsLoading || nftsListIsFetching) {
+  if (accountsIsLoading) {
     return <Loading />;
   }
 
@@ -151,29 +171,41 @@ function AccountDetailsLayout() {
             variant="outlined"
             startIcon={<IoAdd />}
             title="Associates a stealth resource with this account. This will enable periodic scans for this resource"
-            onClick={() => setShowAddStealth(!showAddStealth)}
+            disabled={isAddingStealth}
+            onClick={() => {
+              if (showAddStealth) {
+                handleCancelAddStealth();
+              } else {
+                setShowAddStealth(true);
+              }
+            }}
           >
             Add Stealth Resource
           </Button>
-          <Box mt={2} mb={2}>
-            <Fade in={showAddStealth}>
+          <Collapse in={showAddStealth} unmountOnExit>
+            <Box mt={2} mb={2}>
               <Form onSubmit={onSubmitAddStealthResource} className="flex-container">
                 <TextField
                   name="newResourceAddress"
                   label="Resource Address"
                   value={stealthResource.newResourceAddress}
                   onChange={onStealthResourceChange}
+                  disabled={isAddingStealth}
                   style={{ flexGrow: 1 }}
                 />
-                <Button variant="contained" type="submit">
+                <Button
+                  variant="contained"
+                  type="submit"
+                  disabled={isAddingStealth || !stealthResource.newResourceAddress.trim()}
+                >
                   Add Stealth Resource
                 </Button>
-                <Button variant="outlined" onClick={() => setShowAddStealth(false)}>
+                <Button variant="outlined" onClick={handleCancelAddStealth} disabled={isAddingStealth}>
                   Cancel
                 </Button>
               </Form>
-            </Fade>
-          </Box>
+            </Box>
+          </Collapse>
           <TableContainer>
             <Table>
               <TableHead>
@@ -190,7 +222,9 @@ function AccountDetailsLayout() {
                     <AccountName accountAddress={accountAddr!} currentName={accountsData?.account?.name} />
                   </DataTableCell>
                   <DataTableCell>
-                    <CopyAddress address={substateIdToString(accountsData?.account.component_address)} />
+                    {accountsData?.account && (
+                      <CopyAddress address={substateIdToString(accountsData.account.component_address)} />
+                    )}
                   </DataTableCell>
                   <DataTableCell>
                     {" "}

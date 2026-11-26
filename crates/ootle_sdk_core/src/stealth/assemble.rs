@@ -33,7 +33,6 @@ use tari_ootle_wallet_crypto::balance_proof::{
     validate_balance_proof_signature,
 };
 use tari_template_lib_types::{
-    Amount,
     ComponentAddress,
     ResourceAddress,
     crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes},
@@ -81,7 +80,7 @@ fn build_inputs_statement(intent: &StealthTransferIntent) -> Result<StealthInput
 
     Ok(StealthInputsStatement {
         inputs,
-        revealed_amount: Amount::from_u64(intent.revealed_input_amount),
+        revealed_amount: intent.revealed_input_amount.to_amount(),
     })
 }
 
@@ -189,7 +188,7 @@ fn build_unsigned_transaction(
     network: Network,
     intent: &StealthTransferIntent,
     transfer: StealthTransferStatement,
-    resolved_utxo_inputs: Vec<tari_ootle_common_types::InputDeclaration>,
+    mut resolved_utxo_inputs: Vec<tari_ootle_common_types::InputDeclaration>,
 ) -> Result<UnsignedTransaction, OotleSdkError> {
     let from_component: ComponentAddress = intent.from_account.to_internal()?;
     let resource: ResourceAddress = intent.resource_address.to_internal()?;
@@ -199,42 +198,35 @@ fn build_unsigned_transaction(
     let mut builder = TransactionBuilder::new(network.as_byte(), tari_ootle_common_types::Epoch(intent.max_epoch));
     builder = builder.pay_fee_from_component(from_component, fee);
 
-    builder = if revealed_amount > 0 {
+    builder = if revealed_amount.is_zero() {
+        builder.stealth_transfer(resource, transfer)
+    } else {
         // The revealed input enters as a bucket from a prior withdraw. The bucket label must be
         // derived via `bucket_label(&builder)` at this exact point in the call chain so its numeric
         // workspace id matches what the encoded instruction carries.
         let bucket = bucket_label(&builder);
         builder
-            .call_method(from_component, "withdraw", args![
-                resource,
-                Amount::from_u64(revealed_amount)
-            ])
+            .call_method(from_component, "withdraw", args![resource, revealed_amount.to_amount()])
             .put_last_instruction_output_on_workspace(&bucket)
             .stealth_transfer_with_opt_input_bucket(resource, transfer, Some(bucket))
-    } else {
-        builder.stealth_transfer(resource, transfer)
     };
 
     // Revealed-output deposit: when the transfer pays revealed (plaintext) value, the
     // `StealthTransfer` instruction returns it as a bucket. Capture it on the workspace and deposit
     // it per-output into each recipient account. The per-output `revealed_amount` slices were
     // validated to sum to `revealed_output_amount` upstream.
-    if intent.revealed_output_amount > 0 {
+    if !intent.revealed_output_amount.is_zero() {
         builder = builder.put_last_instruction_output_on_workspace("output_bucket");
-        let needs_to_split = intent.outputs.len() > 1;
+        let needs_to_split = intent.outputs.iter().filter(|o| !o.revealed_amount.is_zero()).count() > 1;
         for (i, output) in intent.outputs.iter().enumerate() {
-            if output.revealed_amount == 0 {
+            if output.revealed_amount.is_zero() {
                 continue;
             }
             let dest_pk = output.destination_account_pk.to_internal();
             builder = if needs_to_split {
                 let sub_bucket = format!("output-sub-bucket-{i}");
                 builder
-                    .take_from_bucket(
-                        "output_bucket",
-                        Amount::from_u64(output.revealed_amount),
-                        sub_bucket.clone(),
-                    )
+                    .take_from_bucket("output_bucket", output.revealed_amount.to_amount(), sub_bucket.clone())
                     .create_account_with_bucket(dest_pk, sub_bucket)
             } else {
                 builder.create_account_with_bucket(dest_pk, "output_bucket")
@@ -248,9 +240,14 @@ fn build_unsigned_transaction(
         .with_dry_run(intent.dry_run);
 
     // Attach the resolved input substates (the from-account component + its vault, resolved via the
-    // account wants, plus any stealth-input UTXOs). Without these the engine rejects the tx for
-    // missing input substates. The resource input is auto-added by `stealth_transfer*` — do not
-    // re-add it.
+    // account wants, plus any stealth-input UTXOs) and ensure non-XTR transfer resources are
+    // declared as a read input (`TransactionBuilder::new` has `fill_inputs: false`).
+    if resource != tari_template_lib_types::constants::TARI_TOKEN {
+        crate::inputs::push_unique(
+            &mut resolved_utxo_inputs,
+            tari_ootle_common_types::InputDeclaration::read(resource),
+        );
+    }
     builder = builder.with_inputs(resolved_utxo_inputs);
 
     Ok(builder.build_unsigned())
@@ -460,7 +457,7 @@ fn resolve_revealed_receiver(
     sig_reqs: &StealthSignatureRequirementsState,
     keys: &StealthKeys,
 ) -> Result<Option<RistrettoPublicKeyBytes>, OotleSdkError> {
-    if intent.revealed_output_amount == 0 {
+    if intent.revealed_output_amount.is_zero() {
         return Ok(None);
     }
     let secrets = SpendSecrets::parse(keys)?;
@@ -613,7 +610,7 @@ mod tests {
             destination_account_pk: pk_bytes(3),
             destination_view_pk: pk_bytes(4),
             amount,
-            revealed_amount: 0,
+            revealed_amount: crate::types::U128::ZERO,
             resource_address: tari_resource(),
             resource_view_key: None,
             memo: None,
@@ -707,8 +704,8 @@ mod tests {
             fee: BoundaryAmount::new(2000),
             inputs: Vec::<StealthInputSpec>::new(),
             outputs: vec![output_spec(out_amount)],
-            revealed_input_amount: revealed_input,
-            revealed_output_amount: 0,
+            revealed_input_amount: crate::types::U128::from_u64(revealed_input),
+            revealed_output_amount: crate::types::U128::ZERO,
             min_epoch: None,
             max_epoch: 1,
             dry_run: false,
@@ -753,6 +750,19 @@ mod tests {
             .collect()
     }
 
+    #[test]
+    fn inputs_statement_carries_a_revealed_input_above_u64_max() {
+        let mut intent = serde_json::to_value(balanced_intent(1_000, 1_000)).unwrap();
+        intent["revealed_input_amount"] = serde_json::json!({ "hi": 1, "lo": 7 });
+        let intent: StealthTransferIntent = serde_json::from_value(intent).unwrap();
+
+        let statement = build_inputs_statement(&intent).unwrap();
+        assert_eq!(
+            statement.revealed_amount,
+            tari_template_lib_types::Amount::new((1u128 << 64) + 7)
+        );
+    }
+
     // (a) Balanced statement → Ok with exactly one StealthTransfer instruction.
     #[test]
     fn balanced_statement_assembles_one_stealth_transfer() {
@@ -787,8 +797,8 @@ mod tests {
             fee: BoundaryAmount::new(2000),
             inputs: Vec::<StealthInputSpec>::new(),
             outputs: Vec::<StealthOutputSpec>::new(),
-            revealed_input_amount: 500_000,
-            revealed_output_amount: 500_000,
+            revealed_input_amount: crate::types::U128::from_u64(500_000),
+            revealed_output_amount: crate::types::U128::from_u64(500_000),
             min_epoch: None,
             max_epoch: 1,
             dry_run: false,
@@ -878,8 +888,8 @@ mod tests {
                 owner_account_pk: pk_bytes(9),
             }],
             outputs: intent_out.outputs,
-            revealed_input_amount: 0,
-            revealed_output_amount: 0,
+            revealed_input_amount: crate::types::U128::ZERO,
+            revealed_output_amount: crate::types::U128::ZERO,
             min_epoch: None,
             max_epoch: 1,
             dry_run: false,
@@ -1079,8 +1089,8 @@ mod tests {
                 owner_account_pk: owner_pk,
             }],
             outputs: vec![output_spec(value)],
-            revealed_input_amount: 0,
-            revealed_output_amount: 0,
+            revealed_input_amount: crate::types::U128::ZERO,
+            revealed_output_amount: crate::types::U128::ZERO,
             min_epoch: None,
             max_epoch: 1,
             dry_run: false,
@@ -1195,8 +1205,8 @@ mod tests {
                 owner_account_pk: owner_pk,
             }],
             outputs: vec![output_spec(value)],
-            revealed_input_amount: 0,
-            revealed_output_amount: 0,
+            revealed_input_amount: crate::types::U128::ZERO,
+            revealed_output_amount: crate::types::U128::ZERO,
             min_epoch: None,
             max_epoch: 1,
             dry_run: false,
@@ -1291,8 +1301,8 @@ mod tests {
                 owner_account_pk: owner_pk,
             }],
             outputs: vec![output_spec(value)],
-            revealed_input_amount: 0,
-            revealed_output_amount: 0,
+            revealed_input_amount: crate::types::U128::ZERO,
+            revealed_output_amount: crate::types::U128::ZERO,
             min_epoch: None,
             max_epoch: 1,
             dry_run: false,
@@ -1421,8 +1431,8 @@ mod tests {
                 owner_account_pk: pk_bytes(9),
             }],
             outputs: vec![output_spec(value)],
-            revealed_input_amount: 0,
-            revealed_output_amount: 0,
+            revealed_input_amount: crate::types::U128::ZERO,
+            revealed_output_amount: crate::types::U128::ZERO,
             min_epoch: None,
             max_epoch: 1,
             dry_run: false,
@@ -1463,7 +1473,7 @@ mod tests {
             destination_account_pk: pk_bytes(account_seed),
             destination_view_pk: pk_bytes(view_seed),
             amount,
-            revealed_amount,
+            revealed_amount: crate::types::U128::from_u64(revealed_amount),
             resource_address: tari_resource(),
             resource_view_key: None,
             memo: None,
@@ -1507,8 +1517,8 @@ mod tests {
             inputs: Vec::<StealthInputSpec>::new(),
             // revealed_input 1_500_000 = stealth output 1_000_000 + revealed output 500_000.
             outputs: vec![revealed_output_spec(3, 4, 1_000_000, 500_000)],
-            revealed_input_amount: 1_500_000,
-            revealed_output_amount: 500_000,
+            revealed_input_amount: crate::types::U128::from_u64(1_500_000),
+            revealed_output_amount: crate::types::U128::from_u64(500_000),
             min_epoch: None,
             max_epoch: 1,
             dry_run: false,
@@ -1549,8 +1559,8 @@ mod tests {
                 revealed_output_spec(3, 4, 500_000, 1_000_000),
                 revealed_output_spec(5, 6, 500_000, 500_000),
             ],
-            revealed_input_amount: 2_500_000,
-            revealed_output_amount: 1_500_000,
+            revealed_input_amount: crate::types::U128::from_u64(2_500_000),
+            revealed_output_amount: crate::types::U128::from_u64(1_500_000),
             min_epoch: None,
             max_epoch: 1,
             dry_run: false,
@@ -1598,8 +1608,8 @@ mod tests {
             inputs: Vec::<StealthInputSpec>::new(),
             // Per-output revealed sum (400_000) != revealed_output_amount (500_000).
             outputs: vec![revealed_output_spec(3, 4, 1_000_000, 400_000)],
-            revealed_input_amount: 1_500_000,
-            revealed_output_amount: 500_000,
+            revealed_input_amount: crate::types::U128::from_u64(1_500_000),
+            revealed_output_amount: crate::types::U128::from_u64(500_000),
             min_epoch: None,
             max_epoch: 1,
             dry_run: false,
@@ -1607,5 +1617,47 @@ mod tests {
         };
         let err = assemble_from_intent(&intent, &entropy).unwrap_err();
         assert_eq!(err.code(), "VALIDATION");
+    }
+
+    #[test]
+    fn custom_resource_declares_read_input_and_single_revealed_among_multiple_outputs_does_not_split() {
+        use tari_engine_types::substate::SubstateId;
+        use tari_template_lib_types::{ObjectKey, ResourceAddress};
+
+        let custom_res = ResourceAddress::new(ObjectKey::from_array([0x44; ObjectKey::LENGTH]));
+        let custom_res_str = ResourceAddressStr::parse(custom_res.to_string()).unwrap();
+
+        let mut out0 = revealed_output_spec(3, 4, 500_000, 0);
+        out0.resource_address = custom_res_str.clone();
+        let mut out1 = revealed_output_spec(5, 6, 500_000, 500_000);
+        out1.resource_address = custom_res_str.clone();
+
+        let entropy = entropy_for(2, 150);
+        let intent = StealthTransferIntent {
+            from_account: from_component(),
+            resource_address: custom_res_str,
+            fee: BoundaryAmount::new(2000),
+            inputs: Vec::<StealthInputSpec>::new(),
+            outputs: vec![out0, out1],
+            revealed_input_amount: crate::types::U128::from_u64(1_500_000),
+            revealed_output_amount: crate::types::U128::from_u64(500_000),
+            min_epoch: None,
+            max_epoch: 1,
+            dry_run: false,
+            pay_fee_from_revealed: false,
+        };
+
+        let partial = assemble_from_intent(&intent, &entropy).unwrap();
+        let unsigned = partial.unsigned();
+        let decl = unsigned
+            .inputs()
+            .get(&SubstateId::Resource(custom_res))
+            .expect("custom transfer resource must be declared as an input");
+        assert!(decl.is_read(), "custom transfer resource must be a read input");
+        assert_eq!(
+            count_take_from_bucket(unsigned),
+            0,
+            "only one output carries a revealed slice, so no TakeFromBucket split should be emitted"
+        );
     }
 }

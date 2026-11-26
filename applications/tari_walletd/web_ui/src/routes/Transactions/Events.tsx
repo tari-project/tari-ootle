@@ -41,8 +41,8 @@ import { useTheme } from "@mui/material/styles";
 import { convertCborValue, Event, substateIdToString } from "@tari-project/ootle-ts-bindings";
 import { useState } from "react";
 
-interface RowDataProps extends Event {
-  index: number;
+function stringifyValue(value: object): string {
+  return JSON.stringify(value, (_key, v) => (typeof v === "bigint" ? v.toString() : v));
 }
 
 function renderPayloadField(key: string, value: any) {
@@ -95,31 +95,38 @@ function renderPayloadField(key: string, value: any) {
       <Typography variant="body2" color="text.secondary">
         {key}:
       </Typography>
-      <Typography variant="body2">{typeof value === "object" ? JSON.stringify(value) : String(value)}</Typography>
+      <Typography variant="body2">
+        {value !== null && typeof value === "object" ? stringifyValue(value) : String(value)}
+      </Typography>
     </Box>
   );
 }
 
 function renderPayload(payload: any) {
-  if (!payload || typeof payload !== "object") {
-    return <Typography variant="body2">{JSON.stringify(payload)}</Typography>;
+  const decoded = convertCborValue(payload);
+  if (!decoded || typeof decoded !== "object" || Array.isArray(decoded)) {
+    return (
+      <Typography variant="body2">
+        {decoded !== null && typeof decoded === "object" ? stringifyValue(decoded) : String(decoded)}
+      </Typography>
+    );
   }
 
   return (
     <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
-      {Object.entries(convertCborValue(payload)).map(([key, value]) => (
+      {Object.entries(decoded).map(([key, value]) => (
         <Box key={key}>{renderPayloadField(key, value)}</Box>
       ))}
     </Box>
   );
 }
 
-function RowData({ index, substate_id, template_address, topic, payload }: RowDataProps) {
+function RowData({ substate_id, template_address, topic, payload }: Event) {
   const [open, setOpen] = useState(false);
   const theme = useTheme();
   return (
     <>
-      <TableRow key={index}>
+      <TableRow>
         <DataTableCell sx={{ borderTop: 1, borderTopColor: "divider", borderBottom: "none" }}>{topic}</DataTableCell>
         <DataTableCell sx={{ borderTop: 1, borderTopColor: "divider", borderBottom: "none" }}>
           {substate_id ? <CopyAddress address={substateIdToString(substate_id)} /> : "--"}
@@ -146,7 +153,7 @@ function RowData({ index, substate_id, template_address, topic, payload }: RowDa
             paddingTop: 0,
             borderBottom: "none",
           }}
-          colSpan={5}
+          colSpan={4}
         >
           <Collapse in={open} timeout="auto" unmountOnExit>
             <Box sx={{ p: 2, backgroundColor: theme.palette.accent.background, borderRadius: 1 }}>
@@ -174,7 +181,6 @@ export default function Events({ data }: { data: Event[] }) {
             <TableCell>Topic</TableCell>
             <TableCell>Substate Id</TableCell>
             <TableCell>Template Address</TableCell>
-            <TableCell>Transaction Hash</TableCell>
             <TableCell width={90}>Details</TableCell>
           </TableRow>
         </TableHead>
@@ -187,7 +193,6 @@ export default function Events({ data }: { data: Event[] }) {
                 topic={topic}
                 payload={payload}
                 key={index}
-                index={index}
               />
             );
           })}

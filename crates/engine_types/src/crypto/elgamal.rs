@@ -18,25 +18,30 @@ use crate::{
     resource_container::ResourceError,
 };
 
+/// An output carries a viewable balance proof exactly when its resource has a view key.
+pub(crate) fn check_viewable_balance_proof_presence(
+    view_key: Option<&RistrettoPublicKey>,
+    viewable_balance_proof: Option<&ViewableBalanceProof>,
+) -> Result<(), ResourceError> {
+    match (view_key, viewable_balance_proof) {
+        (None, Some(_)) => Err(ResourceError::InvalidConfidentialProof {
+            details: "ViewableBalanceProof provided for a resource that is not viewable".to_string(),
+        }),
+        (Some(_), None) => Err(ResourceError::InvalidConfidentialProof {
+            details: "ViewableBalanceProof is required for a viewable resource".to_string(),
+        }),
+        _ => Ok(()),
+    }
+}
+
 pub fn validate_elgamal_verifiable_balance_proof(
     commitment: &PedersenCommitment,
     view_key: Option<&RistrettoPublicKey>,
     viewable_balance_proof: Option<&ViewableBalanceProof>,
 ) -> Result<Option<ElgamalVerifiableBalance>, ResourceError> {
-    // Check that if a view key is provided, then a viewable balance proof is also provided and vice versa
-    let Some(view_key) = view_key else {
-        if viewable_balance_proof.is_none() {
-            return Ok(None);
-        }
-        return Err(ResourceError::InvalidConfidentialProof {
-            details: "ViewableBalanceProof provided for a resource that is not viewable".to_string(),
-        });
-    };
-
-    let Some(proof) = viewable_balance_proof else {
-        return Err(ResourceError::InvalidConfidentialProof {
-            details: "ViewableBalanceProof is required for a viewable resource".to_string(),
-        });
+    check_viewable_balance_proof_presence(view_key, viewable_balance_proof)?;
+    let (Some(view_key), Some(proof)) = (view_key, viewable_balance_proof) else {
+        return Ok(None);
     };
 
     // Decode and check that each field is well-formed

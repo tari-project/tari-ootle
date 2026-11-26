@@ -9,8 +9,10 @@ use tari_template_lib_types::{
     Amount,
     FunctionName,
     OwnerRule,
+    ResourceAddress,
     TemplateAddress,
     TemplateMetadataHash,
+    UtxoAddress,
     ValidatorFeePoolAddress,
     access_rules::ComponentAccessRules,
     crypto::RistrettoPublicKeyBytes,
@@ -51,6 +53,10 @@ pub enum Instruction {
         function: FunctionName,
         #[n(2)]
         #[cbor(decode_with = "decode_args")]
+        #[cfg_attr(
+            feature = "serde",
+            serde(deserialize_with = "ootle_serde::bounded_seq::deserialize::<{ crate::MAX_INSTRUCTION_ARGS }, _, _>")
+        )]
         args: Vec<InstructionArg>,
     },
     #[n(2)]
@@ -62,6 +68,10 @@ pub enum Instruction {
         method: FunctionName,
         #[n(2)]
         #[cbor(decode_with = "decode_args")]
+        #[cfg_attr(
+            feature = "serde",
+            serde(deserialize_with = "ootle_serde::bounded_seq::deserialize::<{ crate::MAX_INSTRUCTION_ARGS }, _, _>")
+        )]
         args: Vec<InstructionArg>,
     },
     #[n(3)]
@@ -459,6 +469,43 @@ impl Instruction {
             _ => None,
         }
     }
+
+    /// The UTXOs a `StealthTransfer` of a resource given by address spends.
+    pub fn stealth_input_utxos(&self) -> impl Iterator<Item = UtxoAddress> + '_ {
+        self.addressed_stealth_transfer()
+            .into_iter()
+            .flat_map(|(resource_address, statement)| {
+                statement
+                    .inputs_statement
+                    .inputs
+                    .iter()
+                    .map(move |input| UtxoAddress::new(*resource_address, input.commitment.into()))
+            })
+    }
+
+    /// The UTXOs a `StealthTransfer` of a resource given by address creates.
+    pub fn stealth_output_utxos(&self) -> impl Iterator<Item = UtxoAddress> + '_ {
+        self.addressed_stealth_transfer()
+            .into_iter()
+            .flat_map(|(resource_address, statement)| {
+                statement
+                    .outputs_statement
+                    .outputs
+                    .iter()
+                    .map(move |output| UtxoAddress::new(*resource_address, output.commitment().into()))
+            })
+    }
+
+    fn addressed_stealth_transfer(&self) -> Option<(&ResourceAddress, &StealthTransferStatement)> {
+        match self {
+            Self::StealthTransfer {
+                resource_address_ref: ResourceAddressRef::Address(resource_address),
+                statement,
+                ..
+            } => Some((resource_address, statement)),
+            _ => None,
+        }
+    }
 }
 
 impl Display for Instruction {
@@ -629,6 +676,10 @@ pub struct MigrateFunction {
     pub name: FunctionName,
     #[n(1)]
     #[cbor(decode_with = "decode_args")]
+    #[cfg_attr(
+        feature = "serde",
+        serde(deserialize_with = "ootle_serde::bounded_seq::deserialize::<{ crate::MAX_INSTRUCTION_ARGS }, _, _>")
+    )]
     pub args: Vec<InstructionArg>,
 }
 
@@ -766,5 +817,20 @@ mod tests {
             metadata_hash: None,
         };
         assert_eq!(borsh::to_vec(&instruction).unwrap(), [9, 7, 0]);
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn serde_rejects_more_args_than_max_instruction_args() {
+        let with_args = |n: usize| Instruction::CallFunction {
+            address: Default::default(),
+            function: "test".try_into().unwrap(),
+            args: vec![InstructionArg::Blob(0); n],
+        };
+        let json = serde_json::to_string(&with_args(MAX_INSTRUCTION_ARGS)).unwrap();
+        serde_json::from_str::<Instruction>(&json).unwrap();
+
+        let json = serde_json::to_string(&with_args(MAX_INSTRUCTION_ARGS + 1)).unwrap();
+        serde_json::from_str::<Instruction>(&json).unwrap_err();
     }
 }

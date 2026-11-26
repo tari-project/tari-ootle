@@ -33,7 +33,7 @@ function TimeChip({ timestamp }: { timestamp: string | null | undefined }) {
 
   const label = <Typography variant="label">{timeAgo}</Typography>;
   return (
-    <Tooltip title={`Created at: ${formattedTime}`} placement="top" arrow>
+    <Tooltip title={`Last updated: ${formattedTime}`} placement="top" arrow>
       <Chip label={label} color="default" size="small" variant="filled" style={{ paddingLeft: 2, paddingRight: 2 }} />
     </Tooltip>
   );

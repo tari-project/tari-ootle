@@ -191,7 +191,8 @@ mod tests {
             let substate_type = SubstateType::from(&id);
             assert_eq!(substate_type, expected_type);
             assert!(substate_type.matches(&id));
-            let (prefix, _) = id.to_string().split_once('_').unwrap();
+            let id_str = id.to_string();
+            let (prefix, _) = id_str.split_once('_').unwrap();
             assert_eq!(substate_type.as_prefix_str(), prefix);
         }
     }

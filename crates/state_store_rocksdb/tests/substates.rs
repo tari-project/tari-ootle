@@ -251,6 +251,65 @@ fn substate_head_iter() {
     tx.rollback().unwrap();
 }
 
+/// A substate's head is its highest version, and DOWN once that version is put down, whatever order a state version
+/// lists the substate's transitions in.
+#[test]
+fn substate_head_is_the_highest_version_in_any_transition_order() {
+    fn up(id: &SubstateId, version: u64) -> SubstateTransition {
+        let version = SubstateVersion::new(version);
+        SubstateTransition::Up {
+            id: id.clone(),
+            version,
+            substate_or_hash: build_substate_record(id, version, 0).into_substate_value_or_hash(),
+        }
+    }
+
+    fn down(id: &SubstateId, version: u64) -> SubstateTransition {
+        SubstateTransition::Down {
+            id: VersionedSubstateId::new(id.clone(), SubstateVersion::new(version)),
+        }
+    }
+
+    fn batch(id: &SubstateId, state_version: u64, transitions: Vec<SubstateTransition>) -> SubstateUpdateBatch {
+        let shard = VersionedSubstateIdRef::new(id, SubstateVersion::ZERO).to_shard(num_preshards());
+        let mut batch = SubstateUpdateBatch::new(helpers::NETWORK, Epoch::zero());
+        batch.with_transition(shard, state_version).extend(transitions);
+        batch
+    }
+
+    let (db, _tmp) = create_rocksdb();
+    let id = substate_id(1);
+
+    // One state version takes the substate from version 0 to version 2. Each order lists the same transitions, with
+    // every version put up before it is put down.
+    let orders = [
+        vec![down(&id, 0), up(&id, 1), down(&id, 1), up(&id, 2)],
+        vec![up(&id, 1), down(&id, 0), up(&id, 2), down(&id, 1)],
+        vec![up(&id, 1), up(&id, 2), down(&id, 1), down(&id, 0)],
+    ];
+    for transitions in orders {
+        let mut tx = db.create_write_tx().unwrap();
+        tx.substates_commit_batch(batch(&id, 1, vec![up(&id, 0)])).unwrap();
+        tx.substates_commit_batch(batch(&id, 2, transitions)).unwrap();
+
+        assert_eq!(
+            tx.substates_get_max_version_for_substate(&id).unwrap(),
+            (SubstateVersion::new(2), true)
+        );
+        tx.rollback().unwrap();
+    }
+
+    // A version put up and down by one state version is left down
+    let mut tx = db.create_write_tx().unwrap();
+    tx.substates_commit_batch(batch(&id, 1, vec![up(&id, 0), down(&id, 0)]))
+        .unwrap();
+    assert_eq!(
+        tx.substates_get_max_version_for_substate(&id).unwrap(),
+        (SubstateVersion::ZERO, false)
+    );
+    tx.rollback().unwrap();
+}
+
 /// Pruning reaches every epoch at or before the prune epoch, so values downed in an epoch whose GC never ran, or was
 /// interrupted, are cleared by a later run.
 #[test]

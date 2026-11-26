@@ -4,6 +4,8 @@
 use async_trait::async_trait;
 use indexmap::IndexSet;
 use tari_ootle_transaction::{
+    AuthorizationContext,
+    AuthorizerSet,
     Transaction,
     TransactionMessage,
     TransactionSignature,
@@ -83,13 +85,40 @@ impl WalletStealthAuthorizer<'_, OotleWallet> {
         }
     }
 
-    /// The exact message every authorization signature for this transaction must sign. An external co-signer (or an
-    /// adaptor pre-signer) produces its signature over [`TransactionMessage::as_bytes`]; the resulting
-    /// [`TransactionAuthorization`] is attached via [`crate::TransactionRequest::add_authorization`].
-    pub async fn authorization_message(&self, unsigned: &UnsignedTransaction) -> signer::Result<TransactionMessage> {
+    /// The one-time keys of the stealth inputs this authorizer signs for.
+    async fn own_authorizers(&self) -> signer::Result<Vec<RistrettoPublicKeyBytes>> {
+        let mut keys = Vec::with_capacity(self.authorizers.len());
+        for req in &self.authorizers {
+            keys.push(self.wallet.stealth_public_key(req.signer(), req.public_nonce()).await?);
+        }
+        Ok(keys)
+    }
+
+    /// The full authorizer set: `external_authorizers` together with this authorizer's own stealth input keys.
+    async fn authorizer_set(&self, external_authorizers: &[RistrettoPublicKeyBytes]) -> signer::Result<AuthorizerSet> {
+        let mut set: AuthorizerSet = external_authorizers.iter().collect();
+        for key in self.own_authorizers().await? {
+            set.insert(key);
+        }
+        Ok(set)
+    }
+
+    /// The exact message every authorization signature for this transaction must sign, given the keys of every
+    /// externally produced authorization that will be attached. An external co-signer (or an adaptor pre-signer)
+    /// produces its signature over [`TransactionMessage::as_bytes`]; the resulting [`TransactionAuthorization`] is
+    /// attached via [`crate::TransactionRequest::add_authorization`]. Every external authorization must come from one
+    /// of `external_authorizers`, and each of them must be attached, or none verifies.
+    pub async fn authorization_message(
+        &self,
+        unsigned: &UnsignedTransaction,
+        external_authorizers: &[RistrettoPublicKeyBytes],
+    ) -> signer::Result<TransactionMessage> {
         let seal_signer = self.seal_public_key().await?;
-        let UnsignedTransaction::V1(unsigned_v1) = unsigned;
-        Ok(TransactionSignature::create_message_v1(&seal_signer, unsigned_v1))
+        let authorizers = self.authorizer_set(external_authorizers).await?;
+        Ok(TransactionSignature::create_message(
+            AuthorizationContext::new(&seal_signer, &authorizers),
+            unsigned.body(),
+        ))
     }
 }
 
@@ -98,17 +127,20 @@ impl TransactionSealSigner for WalletStealthAuthorizer<'_, OotleWallet> {
     async fn authorizations_for(
         &self,
         unsigned: &UnsignedTransaction,
+        external_authorizers: &AuthorizerSet,
     ) -> signer::Result<Vec<TransactionAuthorization>> {
         if self.authorizers.is_empty() {
             return Ok(Vec::new());
         }
 
         let seal_signer = self.seal_public_key().await?;
+        let authorizers = self.authorizer_set(external_authorizers.keys()).await?;
+        let context = AuthorizationContext::new(&seal_signer, &authorizers);
         let mut authorizations = Vec::with_capacity(self.authorizers.len());
         for req in &self.authorizers {
             let auth = self
                 .wallet
-                .authorize_transaction_with_stealth_key(req.signer(), req.public_nonce(), &seal_signer, unsigned)
+                .authorize_transaction_with_stealth_key(req.signer(), req.public_nonce(), context, unsigned)
                 .await?;
             authorizations.push(auth);
         }
@@ -254,8 +286,9 @@ mod tests {
             let unsigned = unsigned();
 
             let secret = RistrettoSecretKey::random(&mut rand::rng());
+            let external = RistrettoPublicKey::from_secret_key(&secret).to_byte_type();
             let message = authorizer
-                .authorization_message(&unsigned)
+                .authorization_message(&unsigned, &[external])
                 .await
                 .expect("the seal key is resolvable before sealing");
 

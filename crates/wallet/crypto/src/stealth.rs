@@ -340,7 +340,10 @@ pub fn create_outputs_statement<'a, Outputs: IntoIterator<Item = &'a StealthOutp
 
 #[cfg(test)]
 mod tests {
-    use tari_crypto::{keys::SecretKey, ristretto::RistrettoSecretKey};
+    use tari_crypto::{
+        keys::{PublicKey, SecretKey},
+        ristretto::{RistrettoPublicKey, RistrettoSecretKey},
+    };
     use tari_engine_types::stealth::validate_stealth_outputs_statement;
     use tari_template_lib_types::{
         AccessRule,
@@ -356,6 +359,7 @@ mod tests {
 
     fn create_valid_proof(amount: u64, minimum_value_promise: u64) -> StealthOutputsStatement {
         let mask = RistrettoSecretKey::random(&mut rand::rng());
+        let owner_pk = RistrettoPublicKey::from_secret_key(&mask).to_byte_type();
         create_outputs_statement(
             &[StealthOutputWitness {
                 witness: OutputWitness {
@@ -366,7 +370,7 @@ mod tests {
                     encrypted_data: EncryptedData::try_from(vec![0; EncryptedData::min_size()]).unwrap(),
                     resource_view_key: None,
                 },
-                auth: SpendAuthorization::Key(RistrettoPublicKeyBytes::default()),
+                auth: SpendAuthorization::Key(owner_pk),
                 tag: UtxoTag::new(0),
             }],
             None,

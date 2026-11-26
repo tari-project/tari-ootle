@@ -22,7 +22,6 @@
 
 import PopupTitle from "@/components/PopupTitle";
 import { useAccountsList } from "@api/hooks/useAccounts";
-import { useKeysList } from "@api/hooks/useKeys";
 import {
   FormControl,
   FormControlLabel,
@@ -41,18 +40,23 @@ import { useTheme } from "@mui/material/styles";
 import TextField from "@mui/material/TextField";
 import useAccountStore from "@store/accountStore";
 import {
-  AccountInfo,
   getRejectReasonFromTransactionResult,
   GetValidatorFeesResponse,
-  KeyId,
-  matchesTypeEnum,
   rejectReasonToString,
-  substateIdToString,
   TransactionResult,
 } from "@tari-project/ootle-ts-bindings";
+import { XTR_CURRENCY } from "@utils/currency";
+import { formatCurrency } from "@utils/helpers";
 import { validatorsClaimFees, validatorsGetFees } from "@utils/json_rpc";
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import { Form } from "react-router-dom";
+import {
+  canSubmitClaimFees,
+  findAccountAddressForClaimKey,
+  getAccountClaimKeys,
+  parseOptionalFee,
+  sumScannedFees,
+} from "./claimFeesHelpers";
 
 interface FormState {
   account: string | null;
@@ -70,52 +74,38 @@ const INITIAL_VALUES: FormState = {
   outputToRevealed: false,
 };
 
-const INITIAL_VALIDITY = {
-  key: false,
-  shard: false,
-};
-
 export default function ClaimFees() {
   const [open, setOpen] = useState(false);
   const [disabled, setDisabled] = useState(false);
-  const [isValid, setIsValid] = useState(false);
   const [formState, setFormState] = useState<FormState>(INITIAL_VALUES);
   const [scannedFees, setScannedFees] = useState<GetValidatorFeesResponse | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [validity, setValidity] = useState<{ [key: string]: boolean }>(INITIAL_VALIDITY);
-  const { data: dataAccountsList } = useAccountsList(0, 10);
-  const { data: dataKeysList } = useKeysList("account");
+  const { data: dataAccountsList } = useAccountsList(0, 1000);
   const { setPopup } = useAccountStore();
 
   const theme = useTheme();
 
-  const isFormFilled = () => {
-    return validity.key && validity.shard;
-  };
-
-  useEffect(() => {
-    setIsValid(!isFormFilled());
-  }, [validity]);
+  // A validator's fees are claimed with the key of a derived account
+  const claimKeys = getAccountClaimKeys(dataAccountsList?.accounts);
+  const parsedFee = parseOptionalFee(formState.fee);
+  const canSubmit = canSubmitClaimFees(formState.keyIndex, formState.shards, formState.fee);
 
   const onClaimFeesKeyChange = (e: SelectChangeEvent<number>) => {
-    if (!dataKeysList) {
+    if (!dataAccountsList) {
       return;
     }
     const keyIndex = +e.target.value;
     if (keyIndex === formState.keyIndex) {
       return;
     }
-    const selected_account = dataAccountsList?.accounts.find((account: AccountInfo) =>
-      matchesTypeEnum(account.account.owner_key_id, { Derived: { key_branch: "account", index: BigInt(keyIndex) } }),
-    );
-    const account = selected_account?.account.component_address
-      ? substateIdToString(selected_account!.account.component_address)
-      : null;
+    const account = findAccountAddressForClaimKey(claimKeys, keyIndex);
     setScannedFees(null);
     setFormState({
       ...formState,
       keyIndex,
       account,
+      shards: [],
+      fee: "",
     });
   };
 
@@ -124,12 +114,6 @@ export default function ClaimFees() {
       ...formState,
       [e.target.name]: e.target.value,
     });
-    if (validity[e.target.name as keyof object] !== undefined && "validity" in e.target) {
-      setValidity({
-        ...validity,
-        [e.target.name]: e.target.validity.valid,
-      });
-    }
   }
 
   const onClaim = async (e: React.FormEvent) => {
@@ -142,13 +126,16 @@ export default function ClaimFees() {
       console.warn("No shards selected");
       return;
     }
+    if (parsedFee.kind === "invalid") {
+      return;
+    }
 
-    const isFeeSet = Boolean(formState.fee) && BigInt(formState.fee) > 0n;
+    const isFeeSet = parsedFee.kind === "valid";
     setDisabled(true);
     validatorsClaimFees({
       account: formState.account ? { ComponentAddress: formState.account } : null,
       claim_key_index: formState.keyIndex,
-      max_fee: isFeeSet ? BigInt(formState.fee) : 1n,
+      max_fee: isFeeSet ? parsedFee.value : 1n,
       shards: formState.shards,
       dry_run: !isFeeSet,
       output_to_revealed: formState.outputToRevealed,
@@ -157,11 +144,11 @@ export default function ClaimFees() {
         if ("Accept" in resp.result.result) {
           if (isFeeSet) {
             setFormState(INITIAL_VALUES);
-            setValidity(INITIAL_VALIDITY);
+            setScannedFees(null);
             setOpen(false);
             setPopup({ title: "Claim successful", error: false });
           } else {
-            setFormState({ ...formState, fee: resp.fee.toString() });
+            setFormState((prev) => ({ ...prev, fee: resp.fee.toString() }));
           }
         } else {
           setPopup({
@@ -177,8 +164,7 @@ export default function ClaimFees() {
         setPopup({ title: "Claim failed", error: true, message: e.message });
       })
       .finally(() => {
-        // Previous value of disabled
-        setDisabled(disabled);
+        setDisabled(false);
       });
   };
 
@@ -187,6 +173,7 @@ export default function ClaimFees() {
   };
 
   const handleClose = () => {
+    setFormState(INITIAL_VALUES);
     setScannedFees(null);
     setOpen(false);
   };
@@ -204,42 +191,16 @@ export default function ClaimFees() {
         shard_group: null,
       });
       setScannedFees(fees);
-      setFormState({ ...formState, shards: Object.entries(fees.fees).map(([shard, _info]) => +shard) });
+      setFormState((prev) => ({
+        ...prev,
+        shards: Object.keys(fees.fees).map((shard) => +shard),
+        fee: "",
+      }));
     } catch (e: any) {
       setPopup({ title: "Scan failed", error: true, message: e.message });
     } finally {
       setIsLoading(false);
     }
-  };
-
-  function extractKeyIndex(keyId: KeyId): bigint | null {
-    if ("Derived" in keyId) {
-      return BigInt(keyId.Derived.index);
-    }
-    return null;
-  }
-
-  const formatKey = ([keyId, publicKey, _isActive]: [KeyId, string, boolean]) => {
-    let account = dataAccountsList?.accounts.find((account: AccountInfo) =>
-      matchesTypeEnum(account.account.owner_key_id, keyId),
-    );
-
-    function displayKeyId(keyId: KeyId): string {
-      if ("Derived" in keyId) {
-        return `Derived:${keyId.Derived.index}`;
-      }
-      if ("Imported" in keyId) {
-        return `Imported:${keyId.Imported.local_key_id}`;
-      }
-      return JSON.stringify(keyId);
-    }
-
-    return (
-      <div>
-        <b>{displayKeyId(keyId)}</b> {publicKey}
-        <br></br>Account <i>{account?.account.name || "<None>"}</i>
-      </div>
-    );
   };
 
   return (
@@ -262,9 +223,12 @@ export default function ClaimFees() {
                 style={{ flexGrow: 1, minWidth: "200px" }}
                 disabled={disabled}
               >
-                {dataKeysList?.keys.map((account: [KeyId, string, boolean], i) => (
-                  <MenuItem key={i} value={extractKeyIndex(account[0])!.toString()}>
-                    {formatKey(account)}
+                {claimKeys.map(({ index, account }) => (
+                  <MenuItem key={index.toString()} value={index.toString()}>
+                    <div>
+                      <b>Derived:{index.toString()}</b> {account.owner_public_key}
+                      <br></br>Account <i>{account.name || "<None>"}</i>
+                    </div>
                   </MenuItem>
                 ))}
               </Select>
@@ -278,11 +242,8 @@ export default function ClaimFees() {
             </Button>
             {scannedFees?.fees ? (
               <Box>
-                Found fees in {Object.entries(scannedFees.fees).length} shards. Total:{" "}
-                {Object.values(scannedFees.fees)
-                  .map((info) => BigInt(info!.amount))
-                  .reduce((acc, amt) => acc + amt, 0n)}{" "}
-                TARI
+                Found fees in {Object.keys(scannedFees.fees).length} shards. Total:{" "}
+                {formatCurrency(sumScannedFees(scannedFees.fees), XTR_CURRENCY)}
               </Box>
             ) : null}
             <InputLabel>Max Fee</InputLabel>
@@ -293,6 +254,8 @@ export default function ClaimFees() {
               onChange={setFormValue}
               style={{ flexGrow: 1 }}
               disabled={disabled}
+              error={parsedFee.kind === "invalid"}
+              helperText={parsedFee.kind === "invalid" ? "Enter a positive integer fee in micro-TARI" : undefined}
             />
 
             <FormControlLabel
@@ -322,8 +285,8 @@ export default function ClaimFees() {
               <Button variant="outlined" onClick={handleClose} disabled={disabled}>
                 Cancel
               </Button>
-              <Button variant="contained" type="submit" disabled={disabled || !isValid}>
-                {formState.fee ? "Claim" : "Estimate fee"}
+              <Button variant="contained" type="submit" disabled={disabled || !canSubmit}>
+                {parsedFee.kind === "valid" ? "Claim" : "Estimate fee"}
               </Button>
             </Box>
           </Form>

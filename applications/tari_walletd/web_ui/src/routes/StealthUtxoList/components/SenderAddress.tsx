@@ -17,29 +17,10 @@ import {
   Tooltip,
   Typography,
 } from "@mui/material";
-import { decodeOotleAddressOrNull } from "@tari-project/ootle-ts-bindings";
 import { shortenString } from "@utils/helpers";
 import { useMemo, useState } from "react";
 import { MdCheckCircle, MdPerson, MdPersonAdd } from "react-icons/md";
-
-function formatDestinationTag(destinationTag: string | Uint8Array | null | undefined): string | null {
-  if (!destinationTag) return null;
-  if (typeof destinationTag === "string") return destinationTag.length > 0 ? destinationTag : null;
-  if (destinationTag.length === 0) return null;
-  // Non-UTF-8 bytes: show as hex so the user can still copy/identify the value.
-  return Array.from(destinationTag)
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-}
-
-// Identity key for "is this the same account?" comparisons. We drop the optional destination tag so an incoming
-// SenderAddress with a destination tag still matches the wallet's own account address (which has no tag) or an
-// address-book entry stored without one.
-function identityKey(address: string): string | null {
-  const decoded = decodeOotleAddressOrNull(address);
-  if (!decoded) return null;
-  return `${decoded.accountPublicKey}:${decoded.viewOnlyKey}`;
-}
+import { formatAddressBookAddError, identityKey, parseSenderAddress } from "./senderAddressHelpers";
 
 export function SenderAddress({ address }: { address: string }) {
   const { data: addressBook } = useAddressBookList();
@@ -53,39 +34,49 @@ export function SenderAddress({ address }: { address: string }) {
   // The sender may be one of the wallet's own accounts (e.g. a self-transfer or change) — there's nothing to
   // "add to contacts" in that case. We compare on the (account_key, view_key) identity so a SenderAddress that
   // carries a destination tag still matches the bare account or address-book entry.
-  const senderIdentity = useMemo(() => identityKey(address), [address]);
+  const { identityKey: senderIdentity, destinationTagText } = useMemo(() => parseSenderAddress(address), [address]);
   const ownAccount = useMemo(
-    () => accountsData?.accounts?.find((a) => senderIdentity !== null && identityKey(a.address) === senderIdentity),
+    () =>
+      senderIdentity === null
+        ? undefined
+        : accountsData?.accounts?.find((a) => identityKey(a.address) === senderIdentity),
     [accountsData, senderIdentity],
   );
   const existing = useMemo(
     () =>
-      addressBook?.entries?.find((entry) => senderIdentity !== null && identityKey(entry.address) === senderIdentity),
+      senderIdentity === null
+        ? undefined
+        : addressBook?.entries?.find((entry) => identityKey(entry.address) === senderIdentity),
     [addressBook, senderIdentity],
   );
-  const destinationTagText = useMemo(
-    () => formatDestinationTag(decodeOotleAddressOrNull(address)?.destinationTag ?? null),
-    [address],
-  );
 
-  const handleClose = () => {
+  const resetDialog = () => {
     setDialogOpen(false);
     setName("");
     setNote("");
     setFormError(null);
   };
 
+  const handleClose = () => {
+    if (addMutation.isPending) {
+      return;
+    }
+    resetDialog();
+  };
+
   const handleSave = async () => {
+    if (addMutation.isPending) {
+      return;
+    }
     if (!name.trim()) {
       setFormError("Name is required");
       return;
     }
     try {
       await addMutation.mutateAsync({ name: name.trim(), address, note: note.trim() || null });
-      handleClose();
-    } catch (e: any) {
-      const msg = e?.cause?.message || e?.message || "Failed to add contact";
-      setFormError(msg.includes("DuplicateName") ? "An entry with this name already exists" : msg);
+      resetDialog();
+    } catch (e: unknown) {
+      setFormError(formatAddressBookAddError(e));
     }
   };
 
@@ -135,6 +126,7 @@ export function SenderAddress({ address }: { address: string }) {
               label="Name"
               value={name}
               onChange={(e) => setName(e.target.value)}
+              disabled={addMutation.isPending}
               required
               fullWidth
               autoFocus
@@ -144,6 +136,7 @@ export function SenderAddress({ address }: { address: string }) {
               label="Note (optional)"
               value={note}
               onChange={(e) => setNote(e.target.value)}
+              disabled={addMutation.isPending}
               fullWidth
               multiline
               rows={2}
@@ -151,7 +144,9 @@ export function SenderAddress({ address }: { address: string }) {
           </Stack>
         </DialogContent>
         <DialogActions>
-          <Button onClick={handleClose}>Cancel</Button>
+          <Button onClick={handleClose} disabled={addMutation.isPending}>
+            Cancel
+          </Button>
           <Button onClick={handleSave} variant="contained" disabled={addMutation.isPending}>
             Add
           </Button>

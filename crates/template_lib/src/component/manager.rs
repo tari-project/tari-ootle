@@ -109,8 +109,9 @@ impl ComponentManager {
         });
     }
 
-    /// Updates access rules that determine who can invoke methods in the component
-    /// It will panic if the caller doesn't have permissions for updating access rules
+    /// Replaces the access rules that determine who can invoke methods in the component. It panics unless the
+    /// component's rules updater permits the change: `Locked` never does, `TemplateManaged` and `Owner` require the
+    /// caller to satisfy the owner rule, and `AccessRule(rule)` requires `rule`.
     pub fn set_access_rules(&self, access_rules: ComponentAccessRules) {
         call_engine::<_, InvokeResult>(EngineOp::ComponentInvoke, &ComponentInvokeArg {
             component_ref: ComponentRef::Ref(self.0),
@@ -119,12 +120,12 @@ impl ComponentManager {
         });
     }
 
-    /// Replaces the rule that determines who owns the component. The owner may call every method and change the
-    /// access rules and the owner rule. It will panic if the caller does not satisfy the current owner rule.
+    /// Replaces the rule that determines who owns the component. The owner may call every method. It panics unless
+    /// the component's rules updater permits the change, as for [`Self::set_access_rules`].
     ///
-    /// The new rule may name anyone, so this hands ownership to someone else. Setting
-    /// `SubstateOwnerRule::None` is final: no caller satisfies it, so neither the owner rule nor the access rules
-    /// can change again.
+    /// The new rule may name anyone, so this hands ownership to someone else. Under a `TemplateManaged` or `Owner`
+    /// rules updater, setting `SubstateOwnerRule::None` is final: no caller satisfies it, so neither the owner rule
+    /// nor the access rules can change again.
     pub fn set_owner_rule(&self, owner_rule: SubstateOwnerRule) {
         call_engine::<_, InvokeResult>(EngineOp::ComponentInvoke, &ComponentInvokeArg {
             component_ref: ComponentRef::Ref(self.0),

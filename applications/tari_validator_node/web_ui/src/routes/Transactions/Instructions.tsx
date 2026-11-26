@@ -31,12 +31,18 @@ import { renderJson } from "../../utils/helpers";
 
 interface InstructionsProps {
   data: Instruction[];
-  index?: number;
 }
 interface RowDataProps {
   title: string;
   data: Instruction;
   index: number;
+}
+
+function getInstructionTitle(instruction: Instruction): string {
+  if (typeof instruction === "string") {
+    return instruction;
+  }
+  return Object.keys(instruction)[0] ?? "Unknown";
 }
 function RowData({ title, data, index }: RowDataProps) {
   const [open, setOpen] = useState(false);
@@ -75,7 +81,7 @@ export default function Instructions({ data }: InstructionsProps) {
         <TableBody>
           {data &&
             data.map((item: Instruction, index) => {
-              return <RowData index={index} key={index} title={Object.keys(item)[0]} data={item} />;
+              return <RowData index={index} key={index} title={getInstructionTitle(item)} data={item} />;
             })}
         </TableBody>
       </Table>

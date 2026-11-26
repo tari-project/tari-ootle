@@ -44,7 +44,12 @@ import {
   Typography,
 } from "@mui/material";
 import Grid from "@mui/material/Grid";
-import { convertCborValue, type Component, type SubstateValue } from "@tari-project/ootle-ts-bindings";
+import {
+  convertCborValue,
+  type Component,
+  type ConfidentialOutput,
+  type SubstateValue,
+} from "@tari-project/ootle-ts-bindings";
 import React, { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import CopyToClipboard from "../../Components/CopyToClipboard";
@@ -64,6 +69,7 @@ const SUBSTATE_PREFIXES = [
   "template",
   "vnfp",
   "utxo",
+  "coutput",
 ];
 
 function validateSubstateId(id: string): string | null {
@@ -181,6 +187,8 @@ function renderSubstateByType(type: string, data: unknown): React.ReactNode {
       return <NonFungibleView data={data as any} />;
     case "Utxo":
       return <UtxoView data={data as any} />;
+    case "ConfidentialOutput":
+      return <ConfidentialOutputView data={data as ConfidentialOutput} />;
     case "ClaimedOutputTombstone":
       return <ClaimedOutputTombstoneView data={data as any} />;
     default:
@@ -221,6 +229,10 @@ function ComponentView({ data }: { data: Component }) {
           { label: "Owner Rule", value: <CodeBlock>{renderJson(data.header.owner_rule)}</CodeBlock> },
           { label: "Access Rules", value: <CodeBlock>{renderJson(data.header.access_rules)}</CodeBlock> },
           { label: "Upgrade Rule", value: <CodeBlock>{renderJson(data.header.upgrade_rule)}</CodeBlock> },
+          {
+            label: "Rules Updater",
+            value: <CodeBlock>{renderJson(data.header.rules_updater ?? "TemplateManaged")}</CodeBlock>,
+          },
         ]}
       />
       <Typography variant="subtitle2">State</Typography>
@@ -321,6 +333,17 @@ function UtxoView({ data }: { data: any }) {
       fields={[
         { label: "Frozen", value: data.is_frozen ? "Yes" : "No" },
         { label: "Output", value: data.output ? <CodeBlock>{renderJson(data.output)}</CodeBlock> : "None" },
+      ]}
+    />
+  );
+}
+
+function ConfidentialOutputView({ data }: { data: ConfidentialOutput }) {
+  return (
+    <FieldTable
+      fields={[
+        { label: "Frozen", value: data.is_frozen ? "Yes" : "No" },
+        { label: "Output", value: <CodeBlock>{renderJson(data.output)}</CodeBlock> },
       ]}
     />
   );

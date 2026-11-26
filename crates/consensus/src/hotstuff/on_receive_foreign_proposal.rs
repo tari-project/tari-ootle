@@ -33,7 +33,7 @@ use crate::{
         ProposalValidationError,
         commit_proofs::generate_block_commit_proof,
         error::HotStuffError,
-        pacemaker_handle::PaceMakerHandle,
+        pacemaker_action::PacemakerActions,
     },
     messages::{
         ForeignProposalMessage,
@@ -64,7 +64,6 @@ const PROPOSAL_RESPONSE_TIMEOUT: Duration = REQUEST_TIMEOUT;
 pub struct OnReceiveForeignProposalHandler<TConsensusSpec: ConsensusSpec> {
     store: TConsensusSpec::StateStore,
     epoch_manager: TConsensusSpec::EpochManager,
-    pacemaker: PaceMakerHandle,
     outbound_messaging: TConsensusSpec::OutboundMessaging,
     pending_requests: PendingRequests<TConsensusSpec::Addr>,
     bounded_spawner: PerKeyBoundedSpawn<TConsensusSpec::Addr>,
@@ -76,13 +75,11 @@ where TConsensusSpec: ConsensusSpec
     pub fn new(
         store: TConsensusSpec::StateStore,
         epoch_manager: TConsensusSpec::EpochManager,
-        pacemaker: PaceMakerHandle,
         outbound_messaging: TConsensusSpec::OutboundMessaging,
     ) -> Self {
         Self {
             store,
             epoch_manager,
-            pacemaker,
             outbound_messaging,
             pending_requests: PendingRequests::new(),
             bounded_spawner: PerKeyBoundedSpawn::new(
@@ -101,6 +98,7 @@ where TConsensusSpec: ConsensusSpec
 
     pub async fn handle_received(
         &mut self,
+        pacemaker_actions: &mut PacemakerActions,
         message: ForeignProposalMessage,
         local_committee_info: &CommitteeInfo,
     ) -> Result<(), HotStuffError> {
@@ -129,7 +127,7 @@ where TConsensusSpec: ConsensusSpec
         self.pending_requests.remove(&block_id);
 
         // Foreign proposals to propose
-        self.pacemaker.beat();
+        pacemaker_actions.beat();
         Ok(())
     }
 
@@ -482,7 +480,7 @@ where TConsensusSpec: ConsensusSpec
     pub fn validate_and_save<TTx>(
         &self,
         tx: &mut TTx,
-        proposal: &ForeignProposalRecord,
+        proposal: &mut ForeignProposalRecord,
         local_committee_info: &CommitteeInfo,
     ) -> Result<(), HotStuffError>
     where
@@ -527,15 +525,24 @@ where
     Ok(true)
 }
 
+/// Validates `proposal` and saves it with its commands in the form a proof generated for the local shard group carries
+/// them, so the stored copy is the same whichever peer relayed it.
 fn validate_and_save<TTx>(
     tx: &mut TTx,
-    proposal: &ForeignProposalRecord,
+    proposal: &mut ForeignProposalRecord,
     local_committee_info: &CommitteeInfo,
 ) -> Result<(), HotStuffError>
 where
     TTx: StateStoreWriteTransaction + Deref,
     TTx::Target: StateStoreReadTransaction,
 {
+    proposal
+        .prune_for_shard_group(local_committee_info.shard_group())
+        .map_err(|e| ProposalValidationError::ForeignProposalInvalid {
+            block_id: *proposal.block_id(),
+            shard_group: proposal.proposal().shard_group_unchecked(),
+            details: e.into(),
+        })?;
     if let Err(err) = validate_foreign_proposal(proposal.proposal(), local_committee_info) {
         // TODO: handle this case. Perhaps, by aborting all transactions that are affected by this block (we known
         // the justify QC is valid)
@@ -618,18 +625,28 @@ pub(super) fn validate_foreign_proposal_contents(
         });
     }
     let foreign_shard_group = proposal.shard_group_checked().ok_or_else(|| {
-            warn!(
-                target: LOG_TARGET,
-                "⚠️ FOREIGN PROPOSAL: Invalid proposal: foreign shard group does not match the local shard group. Local Shard Group: {}, Foreign Shard Group: {}",
-                local_shard_group,
-                proposal.shard_group_unchecked(),
-            );
-            ProposalValidationError::ForeignProposalInvalid {
-                block_id: proposal.calculate_block_id(),
-                shard_group: proposal.shard_group_unchecked(),
-                details: anyhow!("Invalid shard group bounds")
-            }
-        })?;
+        warn!(
+            target: LOG_TARGET,
+            "⚠️ FOREIGN PROPOSAL: Invalid proposal: foreign shard group bounds are invalid. Local Shard Group: {}, Foreign Shard Group: {}",
+            local_shard_group,
+            proposal.shard_group_unchecked(),
+        );
+        ProposalValidationError::ForeignProposalInvalid {
+            block_id: proposal.calculate_block_id(),
+            shard_group: proposal.shard_group_unchecked(),
+            details: anyhow!("Invalid shard group bounds"),
+        }
+    })?;
+    if foreign_shard_group == local_shard_group {
+        warn!(
+            target: LOG_TARGET,
+            "⚠️ FOREIGN PROPOSAL: Invalid proposal: foreign shard group {foreign_shard_group} equals the local shard group {local_shard_group}",
+        );
+        return Err(ProposalValidationError::ForeignProposalFromLocalShardGroup {
+            block_id: proposal.calculate_block_id(),
+            shard_group: foreign_shard_group,
+        });
+    }
     let protocol_version =
         proposal
             .protocol_version()
@@ -1345,7 +1362,10 @@ mod tests {
         }
 
         fn proposal(epoch: Epoch, commands: Vec<CommandOrHash>) -> ForeignProposalRecord {
-            let shard_group = foreign_shard_group();
+            proposal_from(foreign_shard_group(), epoch, commands)
+        }
+
+        fn proposal_from(shard_group: ShardGroup, epoch: Epoch, commands: Vec<CommandOrHash>) -> ForeignProposalRecord {
             let metadata = BlockHeaderMetadata {
                 total_leader_fee: 0,
                 timestamp: 0,
@@ -1470,6 +1490,30 @@ mod tests {
             let stored = stored.unwrap();
             assert_eq!(stored.status(), ForeignProposalStatus::New);
             assert!(check_foreign_proposal_record(&stored.to_atom(), &stored).is_none());
+        }
+
+        #[test]
+        fn a_proposal_from_the_local_shard_group_is_rejected_and_leaves_no_record() {
+            let local_sg = local_committee_info().shard_group();
+            let self_proposal = proposal_from(local_sg, LOCAL_EPOCH, one_command());
+            let expected_block_id = *self_proposal.block_id();
+
+            let err = validate_foreign_proposal_contents(self_proposal.proposal(), local_sg).unwrap_err();
+            assert!(
+                matches!(
+                    err,
+                    ProposalValidationError::ForeignProposalFromLocalShardGroup {
+                        block_id,
+                        shard_group,
+                    } if block_id == expected_block_id && shard_group == local_sg
+                ),
+                "{err:?}"
+            );
+            assert!(err.rejects_message_not_block());
+
+            let (is_recorded, stored) = record(self_proposal);
+            assert!(!is_recorded);
+            assert!(stored.is_none(), "{stored:?}");
         }
     }
 }

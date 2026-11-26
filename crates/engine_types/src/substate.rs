@@ -691,9 +691,9 @@ impl FromStr for SubstateId {
                 let addr = ResourceAddress::from_hex(addr).map_err(|_| InvalidSubstateIdFormat(s.to_string()))?;
                 Ok(SubstateId::Resource(addr))
             },
-            Some((address_prefixes::NON_FUNGIBLE, rest)) => {
+            Some((address_prefixes::NON_FUNGIBLE, _)) => {
                 // nft_{resource_hex}_{id_type}_{id}
-                let addr = NonFungibleAddress::from_str(rest).map_err(|_| InvalidSubstateIdFormat(s.to_string()))?;
+                let addr = NonFungibleAddress::from_str(s).map_err(|_| InvalidSubstateIdFormat(s.to_string()))?;
                 Ok(SubstateId::NonFungible(addr))
             },
             Some((address_prefixes::VAULT, addr)) => {
@@ -707,25 +707,25 @@ impl FromStr for SubstateId {
             },
             Some((address_prefixes::TRANSACTION_RECEIPT, addr)) => {
                 let tx_receipt_addr =
-                    TransactionReceiptAddress::from_hex(addr).map_err(|_| InvalidSubstateIdFormat(addr.to_string()))?;
+                    TransactionReceiptAddress::from_hex(addr).map_err(|_| InvalidSubstateIdFormat(s.to_string()))?;
                 Ok(SubstateId::TransactionReceipt(tx_receipt_addr))
             },
             Some((address_prefixes::TEMPLATE, addr)) => {
-                let addr = Hash32::from_hex(addr).map_err(|_| InvalidSubstateIdFormat(addr.to_string()))?;
+                let addr = Hash32::from_hex(addr).map_err(|_| InvalidSubstateIdFormat(s.to_string()))?;
                 Ok(SubstateId::Template(addr.into()))
             },
             Some((address_prefixes::VALIDATOR_FEE_POOL, addr)) => {
                 let addr =
-                    ValidatorFeePoolAddress::from_hex(addr).map_err(|_| InvalidSubstateIdFormat(addr.to_string()))?;
+                    ValidatorFeePoolAddress::from_hex(addr).map_err(|_| InvalidSubstateIdFormat(s.to_string()))?;
                 Ok(SubstateId::ValidatorFeePool(addr))
             },
-            Some((address_prefixes::UTXO, addr)) => {
-                let addr = UtxoAddress::from_str(addr).map_err(|_| InvalidSubstateIdFormat(addr.to_string()))?;
+            Some((address_prefixes::UTXO, _)) => {
+                let addr = UtxoAddress::from_str(s).map_err(|_| InvalidSubstateIdFormat(s.to_string()))?;
                 Ok(SubstateId::Utxo(addr))
             },
-            Some((address_prefixes::CONFIDENTIAL_OUTPUT, addr)) => {
+            Some((address_prefixes::CONFIDENTIAL_OUTPUT, _)) => {
                 let addr =
-                    ConfidentialOutputAddress::from_str(addr).map_err(|_| InvalidSubstateIdFormat(addr.to_string()))?;
+                    ConfidentialOutputAddress::from_str(s).map_err(|_| InvalidSubstateIdFormat(s.to_string()))?;
                 Ok(SubstateId::ConfidentialOutput(addr))
             },
             Some(_) | None => Err(InvalidSubstateIdFormat(s.to_string())),
@@ -1221,6 +1221,22 @@ mod tests {
             check(
                 "utxo_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff",
             );
+            check(
+                "coutput_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff",
+            );
+        }
+
+        #[test]
+        fn rejects_double_prefixed_substate_ids_and_preserves_full_input_in_error() {
+            for malformed in [
+                "nft_nft_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff_str_SpecialNft",
+                "utxo_utxo_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff",
+                "coutput_coutput_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff_7cbfe29101c24924b1b6ccefbfff98986d648622272ae24f7585dab5ffffffff",
+                "template_not_hex",
+            ] {
+                let err = SubstateId::from_str(malformed).unwrap_err();
+                assert_eq!(err.0, malformed);
+            }
         }
     }
 

@@ -567,6 +567,7 @@ mod tests {
                 }
             },
         ] {
+            let response = serde_json::to_value(response).unwrap();
             let router = Router::new().route(
                 "/utxos/fetch",
                 post(move || {

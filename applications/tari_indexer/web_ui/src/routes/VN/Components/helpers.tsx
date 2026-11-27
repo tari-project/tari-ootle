@@ -29,7 +29,7 @@ class U256 {
     if (n.length > 64) {
       throw new Error("U256 input is larger than 64 characters");
     }
-    this.n = n.padStart(64, "0");
+    this.n = n.toLowerCase().padStart(64, "0");
   }
 
   inc() {
@@ -117,7 +117,16 @@ function fromHexString(hexString: string) {
 }
 
 function shortenString(string: string, start: number = 8, end: number = 8) {
-  return string.substring(0, start) + "..." + string.slice(-end);
+  if (!string) {
+    return "";
+  }
+  const safeStart = Math.max(0, start);
+  const safeEnd = Math.max(0, end);
+  if (string.length <= safeStart + safeEnd) {
+    return string;
+  }
+  const suffix = safeEnd > 0 ? string.slice(-safeEnd) : "";
+  return string.substring(0, safeStart) + "..." + suffix;
 }
 
 export { U256, compare, fromHexString, shortenString, toHexString };

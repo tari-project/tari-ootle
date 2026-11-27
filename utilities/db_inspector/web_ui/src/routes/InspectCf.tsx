@@ -6,7 +6,7 @@ import { Box, Button, Divider, Grid, TextField, Typography } from "@mui/material
 import { useTheme } from "@mui/material/styles";
 import { DataGrid, GridColDef, GridPaginationModel } from "@mui/x-data-grid";
 import prettyBytes from "pretty-bytes";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link as RouterLink, useParams } from "react-router-dom";
 import { Params } from "../client.ts";
 import { client } from "../store/databases.ts";
@@ -36,11 +36,14 @@ function estimateWidth(labelLength: number, data: Row[], getter: (row: Row) => a
     2000,
     data.reduce((acc, row) => {
       const value = getter(row);
+      if (value === null || value === undefined) {
+        return acc;
+      }
       if (typeof value === "string") {
         return Math.max(acc, value.length * 8);
       }
 
-      return Math.max(acc, value.toString().length * 8);
+      return Math.max(acc, String(value).length * 8);
     }, labelLength * 15),
   );
 }
@@ -92,26 +95,50 @@ export default function InspectCf() {
   const [pagination, setPagination] = useState<PaginationModel>({ page: 0, pageSize: 20 });
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const requestIdRef = useRef(0);
+  const isMountedRef = useRef(true);
 
-  const fetch = () => {
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  const fetchItems = useCallback(() => {
+    if (!dbName || !cfName) {
+      return;
+    }
+    const requestId = ++requestIdRef.current;
     setError(null);
     setIsLoading(true);
 
     const query = { limit: pagination.pageSize, page: pagination.page, query: pagination.query || "", desc: true };
     client
-      .listCfItems(dbName!, cfName!, query as Params)
+      .listCfItems(dbName, cfName, query as Params)
       .then((res) => {
+        if (!isMountedRef.current || requestId !== requestIdRef.current) {
+          return;
+        }
         setData(res);
       })
       .catch((err) => {
-        setError(err.message);
+        if (!isMountedRef.current || requestId !== requestIdRef.current) {
+          return;
+        }
+        setError(err instanceof Error ? err.message : String(err));
       })
       .finally(() => {
+        if (!isMountedRef.current || requestId !== requestIdRef.current) {
+          return;
+        }
         setIsLoading(false);
       });
-  };
+  }, [dbName, cfName, pagination]);
 
-  useEffect(fetch, [dbName, cfName, pagination]);
+  useEffect(() => {
+    fetchItems();
+  }, [fetchItems]);
 
   const columns = data ? generateColumns(data) : [];
   // Following lines are here to prevent `rowCount` from being undefined during the loading
@@ -141,8 +168,13 @@ export default function InspectCf() {
               paddingBottom: theme.spacing(2),
             }}
           >
-            <RouterLink to={`/databases/${dbName}`}>{dbName}</RouterLink> - {cfName}
-            <Button variant="outlined" color="primary" onClick={() => fetch()} style={{ marginLeft: theme.spacing(2) }}>
+            <RouterLink to={`/databases/${encodeURIComponent(dbName ?? "")}`}>{dbName}</RouterLink> - {cfName}
+            <Button
+              variant="outlined"
+              color="primary"
+              onClick={() => fetchItems()}
+              style={{ marginLeft: theme.spacing(2) }}
+            >
               <Refresh />
             </Button>
             <TextField
@@ -153,7 +185,7 @@ export default function InspectCf() {
               onChange={(e) => {
                 const hex = e.target.value;
                 setQueryString(hex);
-                setPagination({ ...pagination, page: 0, query: e.target.value });
+                setPagination((prev) => ({ ...prev, page: 0, query: hex }));
               }}
               value={queryString}
               placeholder="Enter a key prefix in hex"
@@ -163,7 +195,7 @@ export default function InspectCf() {
               color="secondary"
               onClick={() => {
                 setQueryString("");
-                setPagination({ ...pagination, page: 0, query: "" });
+                setPagination((prev) => ({ ...prev, page: 0, query: "" }));
               }}
               style={{ marginLeft: theme.spacing(2) }}
               disabled={!queryString}
@@ -194,7 +226,7 @@ export default function InspectCf() {
           <Grid size={12}>
             <Typography variant="h6">
               Total value bytes: {prettyBytes(data.total_bytes)} (avg:{" "}
-              {prettyBytes(data.total_bytes / data.rows.length)})
+              {data.rows.length > 0 ? prettyBytes(data.total_bytes / data.rows.length) : "--"})
             </Typography>
           </Grid>
         </Grid>
@@ -220,15 +252,9 @@ export default function InspectCf() {
           columns={columns}
           loading={isLoading}
           rowCount={rowCount}
-          initialState={{
-            pagination: {
-              paginationModel: {
-                pageSize: pagination.pageSize,
-              },
-            },
-          }}
+          paginationModel={{ page: pagination.page, pageSize: pagination.pageSize }}
           paginationMode="server"
-          onPaginationModelChange={(p) => setPagination({ ...pagination, ...p })}
+          onPaginationModelChange={(p) => setPagination((prev) => ({ ...prev, ...p }))}
           sortingOrder={["desc", "asc", null]}
           checkboxSelection
         />

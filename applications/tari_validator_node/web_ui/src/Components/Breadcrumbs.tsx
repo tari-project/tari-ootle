@@ -38,12 +38,18 @@ interface BreadcrumbsProps {
 const BreadcrumbsComponent: React.FC<BreadcrumbsProps> = ({ items }) => {
   const breadcrumbs = useBreadcrumbs(items);
 
-  const links = breadcrumbs.map(({ match, breadcrumb }: any) => {
-    const breadcrumbLabel = breadcrumb.props.children;
-    const { label, path, dynamic } = match.route;
+  const links = breadcrumbs.map(({ match, breadcrumb }: any, index: number) => {
+    const breadcrumbLabel = breadcrumb?.props?.children;
+    const { label, path, dynamic } = match.route ?? {};
+    const resolvedPath = match.pathname || path || "/";
+    const displayLabel = dynamic
+      ? typeof breadcrumbLabel === "string"
+        ? breadcrumbLabel.toLowerCase()
+        : (breadcrumbLabel ?? label ?? resolvedPath)
+      : (label ?? breadcrumbLabel ?? resolvedPath);
     return (
-      <Link key={breadcrumbLabel} component={RouterLink} to={path} underline="none" color="inherit">
-        {dynamic ? breadcrumbLabel.toLowerCase() : label}
+      <Link key={`${resolvedPath}-${index}`} component={RouterLink} to={resolvedPath} underline="none" color="inherit">
+        {displayLabel}
       </Link>
     );
   });

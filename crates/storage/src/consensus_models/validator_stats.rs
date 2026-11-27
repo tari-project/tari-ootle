@@ -109,7 +109,8 @@ impl LivenessCounters {
     /// costs the network a geometrically decreasing number of them, without ever being excluded for
     /// good.
     fn backoff(&self, thresholds: &LivenessThresholds) -> u64 {
-        1u64 << self.probation_failures.min(thresholds.probation_max_backoff_exp)
+        1u64.checked_shl(self.probation_failures.min(thresholds.probation_max_backoff_exp))
+            .unwrap_or(u64::MAX)
     }
 }
 
@@ -226,21 +227,21 @@ impl ValidatorConsensusStats {
         let state = before.liveness_state(&update.thresholds, committed_height);
 
         if update.is_vote {
-            self.participation_shares += 1;
+            self.participation_shares = self.participation_shares.saturating_add(1);
             // Participation earns a probation slot back. It is counted only while suspended: once
             // the slot is earned the validator has to take it, and a validator in good standing has
             // nothing to earn.
             if state == LivenessState::Suspended {
-                self.votes_since_suspended += 1;
+                self.votes_since_suspended = self.votes_since_suspended.saturating_add(1);
             }
         }
 
         match update.event {
             Some(LivenessEvent::MissedProposal) => {
-                self.missed_proposals += 1;
+                self.missed_proposals = self.missed_proposals.saturating_add(1);
                 if state == LivenessState::Probation {
                     // The slot it was given to prove it is back is the one it just missed.
-                    self.probation_failures += 1;
+                    self.probation_failures = self.probation_failures.saturating_add(1);
                     self.votes_since_suspended = 0;
                 }
                 // The wait for the next probation slot runs from the miss that started it.
@@ -491,5 +492,39 @@ mod tests {
         // A reset of counters that are already zero changes nothing.
         let mut chain = Chain::new();
         assert!(!chain.propose());
+    }
+
+    #[test]
+    fn backoff_saturates_when_exponent_reaches_u64_width() {
+        let thresholds = LivenessThresholds {
+            probation_max_backoff_exp: 64,
+            ..THRESHOLDS
+        };
+        let counters = LivenessCounters {
+            missed_proposals: 5,
+            probation_failures: 64,
+            votes_since_suspended: 0,
+            suspended_at_height: NodeHeight::zero(),
+        };
+        assert_eq!(counters.votes_required_for_probation(&thresholds), u64::MAX);
+        assert_eq!(counters.blocks_required_for_probation(&thresholds), u64::MAX);
+    }
+
+    #[test]
+    fn apply_saturates_counters_at_max() {
+        let mut stats = ValidatorConsensusStats {
+            missed_proposals: u64::MAX,
+            participation_shares: u64::MAX,
+            probation_failures: u32::MAX,
+            votes_since_suspended: 5,
+            suspended_at_height: NodeHeight(1),
+        };
+        let update = ValidatorStatsUpdate::new(&PK, THRESHOLDS)
+            .record_vote()
+            .add_missed_proposal();
+        stats.apply(&update, NodeHeight(2));
+        assert_eq!(stats.participation_shares, u64::MAX);
+        assert_eq!(stats.missed_proposals, u64::MAX);
+        assert_eq!(stats.probation_failures, u32::MAX);
     }
 }

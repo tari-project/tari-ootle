@@ -70,9 +70,9 @@ function skipBalancedBraces(text: string, openIndex: number): number {
 /**
  * Splits tracing's `[<span_1>:<span_2>: ]<module::target>: [<message>]` payload anchored at `rest` start.
  *
- * `tracing-subscriber`'s full format emits each span as `name{fields}:` (or `name:` when fieldless) with no space
- * between nested spans and a single space after the final span before the target. Anchoring here prevents `::`
- * tokens inside message text from hijacking the target when a line has a single-segment target.
+ * `tracing-subscriber`'s full format emits each span as `name{fields}:` (or `name:` when fieldless), joins nested
+ * spans with no space, and writes a single space after the final span before the target. The target must directly
+ * follow the span list, so a `::` token later in the message (`main: failed in std::io: ...`) cannot become it.
  */
 function splitTracingTarget(rest: string): { spans: string; target: string; message: string } | null {
   const direct = TARGET_START_RE.exec(rest);
@@ -80,16 +80,14 @@ function splitTracingTarget(rest: string): { spans: string; target: string; mess
     return { spans: "", target: direct[1], message: direct[2] ?? "" };
   }
 
-  let pos = 0;
-  let spansEnd = 0;
-  while (pos < rest.length) {
-    const nameMatch = SPAN_NAME_RE.exec(rest.slice(pos));
+  let cursor = 0;
+  for (;;) {
+    const nameMatch = SPAN_NAME_RE.exec(rest.slice(cursor));
     if (!nameMatch) {
       return null;
     }
-    let cursor = pos + nameMatch[0].length;
-    const hasFields = rest[cursor] === "{";
-    if (hasFields) {
+    cursor += nameMatch[0].length;
+    if (rest[cursor] === "{") {
       cursor = skipBalancedBraces(rest, cursor);
       if (cursor === -1) {
         return null;
@@ -100,46 +98,26 @@ function splitTracingTarget(rest: string): { spans: string; target: string; mess
     }
     cursor++;
 
-    // Nested tracing spans are separated by `:` with no space (`outer{a=1}:inner{b=2}: target::path: msg`).
+    // Nested tracing spans are joined by `:` with no space (`outer{a=1}:inner{b=2}: target::path: msg`).
     if (cursor < rest.length && !/\s/.test(rest[cursor])) {
-      pos = cursor;
-      spansEnd = cursor;
       continue;
     }
-
-    // After the last span (or between spaced spans), whitespace precedes the target or next span.
-    const afterSpan = cursor;
-    while (cursor < rest.length && /\s/.test(rest[cursor])) {
-      cursor++;
-    }
-    if (cursor === afterSpan) {
-      return null;
-    }
-
-    // Only treat a single fieldless `name: ` prefix as a span if it is followed by another span; otherwise a
-    // single-segment target like `main: failed in std::io: ...` stays un-rewritten rather than hijacking `std::io`.
-    if (!hasFields && spansEnd === 0) {
-      const next = rest.slice(cursor);
-      const nextSpan = SPAN_NAME_RE.exec(next);
-      if (!nextSpan || next[nextSpan[0].length] !== "{") {
-        return null;
-      }
-    }
-
-    spansEnd = afterSpan;
-    const targetMatch = TARGET_START_RE.exec(rest.slice(cursor));
-    if (targetMatch) {
-      return {
-        spans: rest.slice(0, spansEnd).replace(/:$/, "").trim(),
-        target: targetMatch[1],
-        message: targetMatch[2] ?? "",
-      };
-    }
-
-    pos = cursor;
+    break;
   }
 
-  return null;
+  const separator = /^\s+/.exec(rest.slice(cursor));
+  if (!separator) {
+    return null;
+  }
+  const targetMatch = TARGET_START_RE.exec(rest.slice(cursor + separator[0].length));
+  if (!targetMatch) {
+    return null;
+  }
+  return {
+    spans: rest.slice(0, cursor - 1),
+    target: targetMatch[1],
+    message: targetMatch[2] ?? "",
+  };
 }
 
 /**

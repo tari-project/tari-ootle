@@ -505,3 +505,234 @@ async fn locate_dependent_substates_resolves_associated_resources_for_component_
     );
     assert_eq!(by_id.len(), f.expected_ids.len());
 }
+
+struct PrunedComponentFixture {
+    test: TestWithNetwork<CannedSubstateNetworkInterface>,
+    component_id: SubstateId,
+    vault_a_id: SubstateId,
+    resx_a_id: SubstateId,
+    nft_dropped_id: SubstateId,
+    nft_dropped_resx_id: SubstateId,
+    nft_live_id: SubstateId,
+    nft_live_resx_id: SubstateId,
+    transitive_resx_id: SubstateId,
+}
+
+fn pruned_component_references_fixture() -> PrunedComponentFixture {
+    let component_id = SubstateId::from(ComponentAddress::new(ObjectKey::from_array([60; 32])));
+    let vault_a = VaultId::new(ObjectKey::from_array([61; 32]));
+    let vault_a_id = SubstateId::Vault(vault_a);
+    let resx_a = ResourceAddress::new(ObjectKey::from_array([62; 32]));
+    let resx_a_id = SubstateId::Resource(resx_a);
+    let nft_dropped_resx = ResourceAddress::new(ObjectKey::from_array([63; 32]));
+    let nft_dropped_resx_id = SubstateId::Resource(nft_dropped_resx);
+    let nft_dropped_id = SubstateId::from(NonFungibleAddress::new(nft_dropped_resx, NonFungibleId::from_u64(1)));
+    let nft_live_resx = ResourceAddress::new(ObjectKey::from_array([64; 32]));
+    let nft_live_resx_id = SubstateId::Resource(nft_live_resx);
+    let nft_live_id = SubstateId::from(NonFungibleAddress::new(nft_live_resx, NonFungibleId::from_u64(2)));
+    let transitive_resx = ResourceAddress::new(ObjectKey::from_array([65; 32]));
+    let transitive_resx_id = SubstateId::Resource(transitive_resx);
+
+    let live_state = tari_bor::to_value(&(vec![vault_a], nft_live_id.clone())).unwrap();
+    let network = CannedSubstateNetworkInterface::new([
+        (
+            component_id.clone(),
+            SubstateVersion::new(2),
+            create_test_component_value(live_state),
+        ),
+        (
+            vault_a_id.clone(),
+            SubstateVersion::new(3),
+            create_test_vault_value(resx_a, 500),
+        ),
+        (
+            resx_a_id.clone(),
+            SubstateVersion::new(1),
+            create_test_resource_value(ResourceType::Fungible),
+        ),
+        (
+            nft_live_id.clone(),
+            SubstateVersion::new(2),
+            SubstateValue::NonFungible(NonFungibleContainer::no_data()),
+        ),
+        (
+            nft_live_resx_id.clone(),
+            SubstateVersion::new(1),
+            create_test_resource_value(ResourceType::NonFungible),
+        ),
+        (
+            transitive_resx_id.clone(),
+            SubstateVersion::new(4),
+            create_test_resource_value(ResourceType::Fungible),
+        ),
+    ]);
+    let test = TestWithNetwork::without_accounts(network);
+    let substates = test.sdk().substate_api();
+
+    substates
+        .save_root(VersionedSubstateIdRef::new(&component_id, SubstateVersion::ZERO), vec![
+            vault_a_id.clone(),
+            nft_dropped_id.clone(),
+            nft_live_id.clone(),
+        ])
+        .unwrap();
+    substates
+        .save_child(
+            &nft_dropped_resx_id,
+            VersionedSubstateIdRef::new(&nft_dropped_id, SubstateVersion::ZERO),
+            vec![],
+        )
+        .unwrap();
+    substates
+        .save_child(
+            &nft_live_resx_id,
+            VersionedSubstateIdRef::new(&nft_live_id, SubstateVersion::ZERO),
+            vec![transitive_resx_id.clone()],
+        )
+        .unwrap();
+    substates
+        .save_root(
+            VersionedSubstateIdRef::new(&transitive_resx_id, SubstateVersion::ZERO),
+            vec![],
+        )
+        .unwrap();
+
+    PrunedComponentFixture {
+        test,
+        component_id,
+        vault_a_id,
+        resx_a_id,
+        nft_dropped_id,
+        nft_dropped_resx_id,
+        nft_live_id,
+        nft_live_resx_id,
+        transitive_resx_id,
+    }
+}
+
+#[tokio::test]
+async fn locate_dependent_substates_drops_pruned_local_component_references_and_keeps_live_transitive_links() {
+    let f = pruned_component_references_fixture();
+    let substates = f.test.sdk().substate_api();
+
+    let unversioned = substates
+        .locate_dependent_substates(std::slice::from_ref(&f.component_id), true)
+        .await
+        .unwrap();
+    let unversioned_ids = unversioned
+        .into_iter()
+        .map(SubstateRequirement::into_substate_id)
+        .collect::<HashSet<_>>();
+    assert_eq!(
+        unversioned_ids,
+        HashSet::from([
+            f.component_id.clone(),
+            f.vault_a_id.clone(),
+            f.resx_a_id.clone(),
+            f.nft_live_id.clone(),
+            f.nft_live_resx_id.clone(),
+            f.transitive_resx_id.clone(),
+        ])
+    );
+
+    let versioned = substates
+        .locate_dependent_substates(std::slice::from_ref(&f.component_id), false)
+        .await
+        .unwrap();
+    let by_id = versioned
+        .iter()
+        .map(|req| (req.substate_id().clone(), req.version()))
+        .collect::<std::collections::HashMap<_, _>>();
+    assert!(!by_id.contains_key(&f.nft_dropped_id));
+    assert!(!by_id.contains_key(&f.nft_dropped_resx_id));
+    assert_eq!(by_id.get(&f.component_id), Some(&Some(SubstateVersion::new(2))));
+    assert_eq!(by_id.get(&f.vault_a_id), Some(&Some(SubstateVersion::new(3))));
+    assert_eq!(by_id.get(&f.nft_live_id), Some(&Some(SubstateVersion::new(2))));
+    assert_eq!(by_id.get(&f.transitive_resx_id), Some(&Some(SubstateVersion::new(4))));
+    assert_eq!(by_id.len(), 6);
+}
+
+#[tokio::test]
+async fn locate_dependent_substates_omits_spent_substates_referenced_in_component_state() {
+    let component_id = SubstateId::from(ComponentAddress::new(ObjectKey::from_array([70; 32])));
+    let live_utxo_resx = ResourceAddress::new(ObjectKey::from_array([71; 32]));
+    let live_utxo_id = SubstateId::from(UtxoAddress::new(live_utxo_resx, UtxoId::from_array([72; 32])));
+    let spent_utxo_resx = ResourceAddress::new(ObjectKey::from_array([73; 32]));
+    let spent_utxo_id = SubstateId::from(UtxoAddress::new(spent_utxo_resx, UtxoId::from_array([74; 32])));
+    let spent_confidential_resx = ResourceAddress::new(ObjectKey::from_array([75; 32]));
+    let spent_confidential_id = SubstateId::from(ConfidentialOutputAddress::new(
+        spent_confidential_resx,
+        PedersenCommitmentBytes::from_array([76; 32]),
+    ));
+
+    let state = tari_bor::to_value(&(
+        live_utxo_id.clone(),
+        spent_utxo_id.clone(),
+        spent_utxo_id.clone(),
+        spent_confidential_id.clone(),
+    ))
+    .unwrap();
+    let dummy_output = OutputBody {
+        public_nonce: RistrettoPublicKeyBytes::default(),
+        encrypted_data: EncryptedData::try_from(vec![0u8; EncryptedData::min_size()]).unwrap(),
+        minimum_value_promise: 0,
+        viewable_balance: None,
+    };
+    let utxo_value = Utxo::new(UtxoOutput {
+        output: dummy_output,
+        auth: SpendAuthorization::Key(RistrettoPublicKeyBytes::default()),
+        tag: UtxoTag::new(0),
+    });
+
+    let network = CannedSubstateNetworkInterface::new([
+        (
+            component_id.clone(),
+            SubstateVersion::new(1),
+            create_test_component_value(state),
+        ),
+        (
+            live_utxo_id.clone(),
+            SubstateVersion::ZERO,
+            SubstateValue::Utxo(utxo_value),
+        ),
+        (
+            SubstateId::Resource(live_utxo_resx),
+            SubstateVersion::new(2),
+            create_test_resource_value(ResourceType::Stealth),
+        ),
+        (
+            SubstateId::Resource(spent_utxo_resx),
+            SubstateVersion::new(1),
+            create_test_resource_value(ResourceType::Stealth),
+        ),
+        (
+            SubstateId::Resource(spent_confidential_resx),
+            SubstateVersion::new(1),
+            create_test_resource_value(ResourceType::Confidential),
+        ),
+    ]);
+    let network_probe = network.clone();
+    let test = TestWithNetwork::without_accounts(network);
+    let substates = test.sdk().substate_api();
+
+    let versioned = substates
+        .locate_dependent_substates(std::slice::from_ref(&component_id), false)
+        .await
+        .unwrap();
+    let by_id = versioned
+        .iter()
+        .map(|req| (req.substate_id().clone(), req.version()))
+        .collect::<std::collections::HashMap<_, _>>();
+    assert_eq!(by_id.get(&component_id), Some(&Some(SubstateVersion::new(1))));
+    assert_eq!(by_id.get(&live_utxo_id), Some(&Some(SubstateVersion::ZERO)));
+    assert_eq!(
+        by_id.get(&SubstateId::Resource(live_utxo_resx)),
+        Some(&Some(SubstateVersion::new(2)))
+    );
+    assert!(!by_id.contains_key(&spent_utxo_id));
+    assert!(!by_id.contains_key(&SubstateId::Resource(spent_utxo_resx)));
+    assert!(!by_id.contains_key(&spent_confidential_id));
+    assert!(!by_id.contains_key(&SubstateId::Resource(spent_confidential_resx)));
+    assert_eq!(by_id.len(), 3);
+    assert_eq!(network_probe.query_count(&spent_utxo_id), 1);
+}

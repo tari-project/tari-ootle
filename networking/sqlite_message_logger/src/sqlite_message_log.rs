@@ -90,15 +90,24 @@ impl SqliteMessageLogger {
             path.as_ref().to_path_buf()
         };
 
-        let _ = create_dir_all(path.parent().unwrap()).map_err(|e| {
+        if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) &&
+            let Err(e) = create_dir_all(parent)
+        {
             error!(
                 target: LOG_TARGET,
                 "Could not create message_logging_dir directory: {}", e
-            )
-        });
+            );
+        }
 
-        let path = path.to_str().expect("path utf-8 error").to_string();
-        match SqliteConnection::establish(&path) {
+        let Some(path_str) = path.to_str() else {
+            error!(
+                target: LOG_TARGET,
+                "Message log database path is not valid UTF-8: {}",
+                path.display()
+            );
+            return Self { connection: None };
+        };
+        match SqliteConnection::establish(path_str) {
             Ok(mut connection) => {
                 pub const MIGRATIONS: EmbeddedMigrations = embed_migrations!("./migrations");
                 if let Err(err) = connection.run_pending_migrations(MIGRATIONS) {
@@ -133,12 +142,19 @@ impl SqliteMessageLogger {
         message: &T,
     ) {
         if let Some(mut conn) = self.connect() {
+            let message_json = match serde_json::to_string_pretty(message) {
+                Ok(json) => json,
+                Err(e) => {
+                    error!(target: LOG_TARGET, "Failed to serialize outbound message: {}", e);
+                    return;
+                },
+            };
             let _ = diesel::insert_into(outbound_messages::table)
                 .values(NewOutboundMessage {
                     destination_type: destination_type.to_string(),
                     destination_pubkey: destination.to_string(),
                     message_type: message_type.to_string(),
-                    message_json: serde_json::to_string_pretty(message).unwrap(),
+                    message_json,
                     message_tag: message_tag.to_string(),
                 })
                 .execute(&mut *conn)
@@ -156,11 +172,18 @@ impl SqliteMessageLogger {
         message: &T,
     ) {
         if let Some(mut conn) = self.connect() {
+            let message_json = match serde_json::to_string_pretty(message) {
+                Ok(json) => json,
+                Err(e) => {
+                    error!(target: LOG_TARGET, "Failed to serialize inbound message: {}", e);
+                    return;
+                },
+            };
             let _ = diesel::insert_into(inbound_messages::table)
                 .values(NewInboundMessage {
                     from_pubkey: public_key.to_string(),
                     message_type: message_type.to_string(),
-                    message_json: serde_json::to_string_pretty(message).unwrap(),
+                    message_json,
                     message_tag: message_tag.to_string(),
                 })
                 .execute(&mut *conn)
@@ -175,7 +198,7 @@ impl SqliteMessageLogger {
             sql_query(
                 r#"
                 SELECT
-                    "Inbound" as in_out,
+                    'Inbound' as in_out,
                     msg_in.id as id,
                     msg_in.from_pubkey as pubkey,
                     msg_in.message_type as message_type,
@@ -184,9 +207,9 @@ impl SqliteMessageLogger {
                 FROM
                     inbound_messages msg_in
                 WHERE msg_in.message_tag = ?
-                UNION
+                UNION ALL
                 SELECT
-                    "Outbound" as in_out,
+                    'Outbound' as in_out,
                     msg_out.id as id,
                     msg_out.destination_pubkey as pubkey,
                     msg_out.message_type as message_type,
@@ -195,7 +218,7 @@ impl SqliteMessageLogger {
                 FROM
                     outbound_messages msg_out
                 WHERE msg_out.message_tag = ?
-                ORDER BY msg_out.sent_at ASC, msg_in.received_at ASC"#,
+                ORDER BY timestamp ASC, id ASC"#,
             )
             .bind::<diesel::sql_types::Text, _>(message_tag.clone())
             .bind::<diesel::sql_types::Text, _>(message_tag)
@@ -210,12 +233,52 @@ impl SqliteMessageLogger {
     }
 
     fn connect(&self) -> Option<MutexGuard<'_, SqliteConnection>> {
-        Some(self.connection.as_ref()?.lock().unwrap())
+        Some(
+            self.connection
+                .as_ref()?
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()),
+        )
     }
 }
 
 impl Debug for SqliteMessageLogger {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.write_str("SqliteMessageLog")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn logs_and_queries_inbound_and_outbound_messages_by_tag() {
+        let temp_dir = std::env::temp_dir().join(format!("tari_msg_log_test_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        let db_path = temp_dir.join("message_log.sqlite");
+
+        let logger = SqliteMessageLogger::new(&db_path);
+        assert!(logger.is_enabled());
+
+        logger.log_outbound_message("Peer", "peer_pub_1", "Ping", "tag-1", &serde_json::json!({"seq": 1}));
+        logger.log_inbound_message("peer_pub_1", "Pong", "tag-1", &serde_json::json!({"seq": 2}));
+        logger.log_inbound_message("peer_pub_2", "Other", "tag-2", &serde_json::json!({"seq": 3}));
+
+        let messages = logger.get_messages_by_tag("tag-1".to_string());
+        assert_eq!(messages.len(), 2);
+        assert!(
+            messages
+                .iter()
+                .any(|m| m.in_out == "Outbound" && m.pubkey == "peer_pub_1" && m.message_type == "Ping")
+        );
+        assert!(
+            messages
+                .iter()
+                .any(|m| m.in_out == "Inbound" && m.pubkey == "peer_pub_1" && m.message_type == "Pong")
+        );
+
+        drop(logger);
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }

@@ -6,29 +6,35 @@
 
 mod support;
 
+use std::collections::BTreeSet;
+
 use tari_engine_types::{
     component::{Component, ComponentBody, ComponentHeader},
+    non_fungible::NonFungibleContainer,
     resource::Resource,
     resource_container::ResourceContainer,
-    substate::{Substate, SubstateDiff, SubstateValue},
+    substate::{Substate, SubstateDiff, SubstateId, SubstateValue},
     vault::Vault,
 };
 use tari_ootle_common_types::{Epoch, SubstateVersion};
 use tari_ootle_light_client::test_fixtures::ValidatorSetFixture;
 use tari_ootle_transaction::TransactionId;
-use tari_ootle_wallet_sdk::models::{KeyBranch, KeyId};
+use tari_ootle_wallet_sdk::models::{BalanceChangeSource, KeyBranch, KeyId, NonFungibleToken, WalletEvent};
 use tari_ootle_wallet_sdk_services::{account_monitor::AccountScanner, notify::Notify};
 use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib::types::{
     Amount,
     ComponentAddress,
     Metadata,
+    NonFungibleAddress,
+    NonFungibleId,
     ResourceAddress,
     ResourceType,
     SubstateOwnerRule,
     VaultId,
     access_rules::{ComponentAccessRules, ResourceAccessRules},
 };
+use tokio::sync::broadcast;
 
 use crate::support::{ProvingNetwork, Test, TestSdkSpec, TestWithNetwork};
 
@@ -153,4 +159,131 @@ async fn a_finalized_account_holding_only_known_vaults_is_not_read_from_the_netw
         .process_result(TransactionId::default(), &diff_with_account(&[held]), None)
         .await
         .unwrap();
+}
+
+fn nft_id() -> NonFungibleId {
+    NonFungibleId::from_u64(7)
+}
+
+fn nft_address() -> NonFungibleAddress {
+    NonFungibleAddress::new(resource_address(), nft_id())
+}
+
+fn nft_substate(mutable_data: u64) -> Substate {
+    Substate::new(
+        SubstateVersion::new(1),
+        NonFungibleContainer::new(
+            tari_bor::Value::Text("immutable".to_string()),
+            tari_bor::Value::Integer(mutable_data.into()),
+        ),
+    )
+}
+
+fn nft_vault_substate() -> Substate {
+    Substate::new(
+        SubstateVersion::new(1),
+        Vault::new(ResourceContainer::non_fungible(
+            resource_address(),
+            BTreeSet::from([nft_id()]),
+        )),
+    )
+}
+
+/// A wallet whose `held` vault holds the test NFT with mutable data `1`, and a scanner whose events the receiver gets.
+fn wallet_holding_nft(
+    held: VaultId,
+) -> (
+    TestWithNetwork<ProvingNetwork>,
+    AccountScanner<TestSdkSpec<ProvingNetwork>>,
+    broadcast::Receiver<WalletEvent>,
+) {
+    let (_network, test) = wallet_holding(held);
+    test.sdk()
+        .non_fungible_api()
+        .save_nft(&NonFungibleToken {
+            vault_id: held,
+            nft_id: nft_id(),
+            resource_address: resource_address(),
+            data: tari_bor::Value::Text("immutable".to_string()),
+            mutable_data: tari_bor::Value::Integer(1.into()),
+            is_burnt: false,
+        })
+        .unwrap();
+    let notify = Notify::new(8);
+    let events = notify.subscribe();
+    let scanner = AccountScanner::new(notify, test.sdk().clone());
+    (test, scanner, events)
+}
+
+fn assert_nft_updated(
+    test: &TestWithNetwork<ProvingNetwork>,
+    events: &mut broadcast::Receiver<WalletEvent>,
+    mutable_data: u64,
+) {
+    let updated = test.sdk().non_fungible_api().get(resource_address(), nft_id()).unwrap();
+    assert_eq!(updated.mutable_data, tari_bor::Value::Integer(mutable_data.into()));
+    assert!(matches!(
+        events.try_recv().unwrap(),
+        WalletEvent::AccountChangedOnChain(_)
+    ));
+}
+
+#[tokio::test]
+async fn a_standalone_nft_update_updates_the_held_nft_and_notifies_account_changed() {
+    let (test, scanner, mut events) = wallet_holding_nft(vault_id(1));
+    // `UpdateNonFungibleData` ups the NFT substate without its vault.
+    let mut diff = SubstateDiff::new();
+    diff.up(SubstateId::NonFungible(nft_address()), nft_substate(2));
+
+    scanner
+        .process_result(TransactionId::default(), &diff, None)
+        .await
+        .unwrap();
+
+    assert_nft_updated(&test, &mut events, 2);
+}
+
+#[tokio::test]
+async fn an_nft_update_in_an_unchanged_account_vault_updates_the_held_nft_and_notifies_account_changed() {
+    let held = vault_id(1);
+    let (test, scanner, mut events) = wallet_holding_nft(held);
+    // The vault's balance and NFT set match the diff, so only the NFT data changes.
+    test.sdk()
+        .accounts_api()
+        .update_vault_balance_and_record_change(
+            held,
+            SubstateVersion::ZERO,
+            Amount::from(1u64),
+            Amount::zero(),
+            BalanceChangeSource::Scan,
+        )
+        .unwrap();
+    let mut diff = diff_with_account(&[held]);
+    diff.up(SubstateId::Vault(held), nft_vault_substate());
+    diff.up(SubstateId::NonFungible(nft_address()), nft_substate(3));
+
+    scanner
+        .process_result(TransactionId::default(), &diff, None)
+        .await
+        .unwrap();
+
+    assert_nft_updated(&test, &mut events, 3);
+}
+
+#[tokio::test]
+async fn an_nft_update_in_an_unrefreshed_vault_updates_the_held_nft_and_notifies_account_changed() {
+    let held = vault_id(1);
+    let (test, scanner, mut events) = wallet_holding_nft(held);
+    // The diff ups the vault without its account, and the wallet holds no substate record for the vault, so neither
+    // vault loop refreshes it.
+    let mut diff = SubstateDiff::new();
+    diff.up(SubstateId::Vault(held), nft_vault_substate());
+    diff.up(SubstateId::NonFungible(nft_address()), nft_substate(4));
+
+    scanner
+        .process_result(TransactionId::default(), &diff, None)
+        .await
+        .unwrap();
+
+    assert_nft_updated(&test, &mut events, 4);
 }

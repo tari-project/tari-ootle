@@ -50,24 +50,27 @@ export default class FetchRpcTransport implements RpcTransport {
         }, options.timeout_millis)
       : null;
 
-    const response = await fetch(this.url, {
-      method: "POST",
-      body: stringifyRequestBody(data),
-      headers,
-      credentials: this.credentials,
-      signal,
-    });
-    if (timeoutId) {
-      clearTimeout(timeoutId);
-    }
+    try {
+      const response = await fetch(this.url, {
+        method: "POST",
+        body: stringifyRequestBody(data),
+        headers,
+        credentials: this.credentials,
+        signal,
+      });
 
-    // HTTP errors are handled in the transport layer
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`HTTP error ${response.status}: ${errorText}`);
-    }
+      // HTTP errors are handled in the transport layer
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`HTTP error ${response.status}: ${errorText}`);
+      }
 
-    let resp = await response.json();
-    return resp;
+      let resp = await response.json();
+      return resp;
+    } finally {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+    }
   }
 }

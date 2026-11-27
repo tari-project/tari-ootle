@@ -12,15 +12,12 @@ export default class FetchTransport implements HttpTransport {
   private url: string;
 
   constructor(url: string) {
-    this.url = url;
+    this.url = url.endsWith("/") ? url.slice(0, -1) : url;
   }
 
   static new(url: string) {
     if (!url.startsWith("http://") && !url.startsWith("https://")) {
       throw new Error("URL must start with http:// or https://");
-    }
-    if (url.endsWith("/")) {
-      url = url.slice(0, -1);
     }
     return new FetchTransport(url);
   }
@@ -105,22 +102,25 @@ export default class FetchTransport implements HttpTransport {
       fqPath += `?${query.toString()}`;
     }
 
-    const response = await fetch(fqPath, {
-      signal,
-      ...request,
-    });
-    if (timeoutId) {
-      clearTimeout(timeoutId);
+    try {
+      const response = await fetch(fqPath, {
+        signal,
+        ...request,
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        throw new HttpError(response.status, response.statusText, text);
+      }
+      const json = await response.json();
+      if (json.error) {
+        throw new Error(`${json.error.code}: ${json.error.message}`);
+      }
+      return json;
+    } finally {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
     }
-    if (!response.ok) {
-      const text = await response.text();
-      throw new HttpError(response.status, response.statusText, text);
-    }
-    const json = await response.json();
-    if (json.error) {
-      throw new Error(`${json.error.code}: ${json.error.message}`);
-    }
-    return json;
   }
 }
 

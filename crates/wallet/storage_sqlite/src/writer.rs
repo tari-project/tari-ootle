@@ -495,24 +495,20 @@ impl<'a> WriteTransaction<'a> {
     }
 
     /// Records the revealed-balance movement of a finalized spend as a `Transaction`-sourced balance change
-    /// and syncs the wallet vault to it. The vault substate in the finalized diff is the authoritative
-    /// post-transaction revealed balance: the locked amount is only the wallet's reservation, which the
-    /// transaction may not fully (or at all) withdraw from the vault. The row is keyed on the vault's
-    /// post-transaction version so that the account refresh's later record of the same transaction's
-    /// confidential effect merges onto this one row.
+    /// and syncs the wallet vault to it unless the stored vault is already at a newer version; an existing
+    /// scan or recovery row at the post-transaction version is attributed to the transaction. The vault
+    /// substate in the finalized diff is the authoritative post-transaction revealed balance: the locked
+    /// amount is only the wallet's reservation, which the transaction may not fully (or at all) withdraw
+    /// from the vault. The row is keyed on the vault's post-transaction version so that the account
+    /// refresh's later record of the same transaction's confidential effect merges onto this one row.
     fn record_finalized_revealed_spend(
         &mut self,
-        lock_id: WalletLockId,
+        transaction_id: TransactionId,
         vault_address: VaultId,
         revealed_before: Amount,
         diff: &SubstateDiff,
     ) -> Result<(), WalletStorageError> {
-        let Some(transaction_id) = self.lock_transaction_id(lock_id)? else {
-            // No transaction linked to the lock — the spend cannot be attributed, so skip recording.
-            return Ok(());
-        };
-
-        let diff_vault = diff
+        let Some((revealed_after, vault_version)) = diff
             .up_iter()
             .find(|(id, _)| *id == SubstateId::Vault(vault_address))
             .and_then(|(_, substate)| {
@@ -520,15 +516,20 @@ impl<'a> WriteTransaction<'a> {
                     .substate_value()
                     .vault()
                     .map(|vault| (vault.balance(), substate.version()))
-            });
+            })
+        else {
+            // A linked transaction whose finalized diff omits the locked vault (e.g. OnlyFeeAccepted)
+            // left that vault untouched on-chain.
+            return Ok(());
+        };
 
         let vault = self.vaults_get(&vault_address)?;
-        let (revealed_after, vault_version) = match diff_vault {
-            Some((revealed_after, version)) => (revealed_after, version),
-            // A linked transaction whose finalized diff omits the locked vault (e.g. OnlyFeeAccepted)
-            // left that vault untouched on-chain, so restore its pre-lock revealed balance.
-            None => (revealed_before, vault.vault_version),
-        };
+        self.balance_changes_attribute_transaction(&vault_address, vault_version, transaction_id)?;
+        if vault.vault_version > vault_version {
+            // If a refresh jumped straight past `vault_version`, no row exists at `vault_version` and this
+            // transaction's revealed movement remains folded into that newer scan row rather than rewinding the vault.
+            return Ok(());
+        }
         if revealed_after == revealed_before {
             self.vaults_update(vault_address, vault_version, revealed_after, vault.confidential_balance)?;
             return Ok(());
@@ -563,7 +564,7 @@ impl<'a> WriteTransaction<'a> {
     /// nets to zero and is not duplicated.
     fn record_finalized_stealth_spends(
         &mut self,
-        lock_id: WalletLockId,
+        transaction_id: Option<TransactionId>,
         affected_balances: HashSet<(i32, ResourceAddress)>,
         diff: &SubstateDiff,
     ) -> Result<(), WalletStorageError> {
@@ -573,7 +574,7 @@ impl<'a> WriteTransaction<'a> {
         if affected_balances.is_empty() {
             return Ok(());
         }
-        let Some(transaction_id) = self.lock_transaction_id(lock_id)? else {
+        let Some(transaction_id) = transaction_id else {
             // No transaction linked to the lock — the spend cannot be attributed, so skip recording.
             return Ok(());
         };
@@ -636,7 +637,10 @@ impl<'a> WriteTransaction<'a> {
             };
 
             let (vault_address, vault_version) = match maybe_diff_vault {
-                Some((vault_id, version)) => (Some(vault_id), Some(version)),
+                Some((vault_id, version)) => {
+                    self.balance_changes_attribute_transaction(&vault_id, version, transaction_id)?;
+                    (Some(vault_id), Some(version))
+                },
                 None => (None, None),
             };
 
@@ -660,7 +664,7 @@ impl<'a> WriteTransaction<'a> {
             // unchanged balance instead of re-recording this transaction's effect.
             if let Some(vault) = &maybe_vault {
                 let version = maybe_diff_vault
-                    .map(|(_, version)| version)
+                    .map(|(_, version)| vault.vault_version.max(version))
                     .unwrap_or(vault.vault_version);
                 self.vaults_update(vault.id, version, vault.revealed_balance, confidential_after)?;
             }
@@ -2700,14 +2704,17 @@ impl WalletStoreWriter for WriteTransaction<'_> {
     fn locks_unlock_finalized(&mut self, lock_id: WalletLockId, diff: &SubstateDiff) -> Result<(), WalletStorageError> {
         let affected_stealth_balances = self.stealth_outputs_finalize_by_lock_id(lock_id, diff)?;
         self.confidential_outputs_finalize_by_lock_id(lock_id, diff)?;
-        // Capture the revealed spends before vaults_finalized_locked_revealed_funds deletes the vault locks
-        // and decrements the vaults' revealed balances, so the decreases can be recorded as balance changes.
-        let revealed_spends = self.locked_revealed_spend(lock_id)?;
-        self.vaults_finalized_locked_revealed_funds(lock_id).optional()?;
-        for (vault_address, revealed_before) in revealed_spends {
-            self.record_finalized_revealed_spend(lock_id, vault_address, revealed_before, diff)?;
+        let transaction_id = self.lock_transaction_id(lock_id)?;
+        if let Some(transaction_id) = transaction_id {
+            let revealed_spends = self.locked_revealed_spend(lock_id)?;
+            self.vaults_release_lock_revealed_funds(lock_id)?;
+            for (vault_address, revealed_before) in revealed_spends {
+                self.record_finalized_revealed_spend(transaction_id, vault_address, revealed_before, diff)?;
+            }
+        } else {
+            self.vaults_finalized_locked_revealed_funds(lock_id).optional()?;
         }
-        self.record_finalized_stealth_spends(lock_id, affected_stealth_balances, diff)?;
+        self.record_finalized_stealth_spends(transaction_id, affected_stealth_balances, diff)?;
         self.locks_delete(lock_id)?;
         Ok(())
     }

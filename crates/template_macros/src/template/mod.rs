@@ -59,14 +59,17 @@ pub fn generate_template(options: TemplateOptions, input: TokenStream) -> Result
     }
 
     let template_def = generate_template_def(&ast)?;
-    let definition = generate_definition(&ast, &template_def.well_known_checks);
     let dispatcher = generate_dispatcher(&ast)?;
+    let checks = &template_def.well_known_checks;
+    let definition = generate_definition(&ast, &quote! {
+        #checks
+
+        #dispatcher
+    });
     let template_def = template_def.section;
 
     let output = quote! {
         #definition
-
-        #dispatcher
 
         #template_def
     };
@@ -292,5 +295,48 @@ mod tests {
 
         let check = "assert_well_known :: < Bucket > (:: tari_template_lib :: well_known :: WellKnownType :: Bucket ,)";
         assert_eq!(out.matches(check).count(), 1, "{out}");
+    }
+
+    /// The WASM dispatcher lives inside the generated template module so module-local types, `use super::...`
+    /// imports, and raw function/parameter identifiers resolve identically to the template's own items.
+    #[test]
+    fn wasm_and_non_wasm_support_module_types_super_imports_patterns_and_raw_idents() {
+        let src = r#"
+            mod market {
+                use super::shared::Discount;
+
+                pub struct Market {
+                    total: u64,
+                }
+
+                pub struct Order {
+                    pub price: u64,
+                    pub qty: u64,
+                }
+
+                impl Market {
+                    pub fn new() -> Self {
+                        Self { total: 0 }
+                    }
+
+                    pub fn r#match(&mut self, order: Order, discount: Discount, _: u64, (a, b): (u64, u64), r#type: u64) -> u64 {
+                        self.total += order.price * order.qty - discount.bps + a + b + r#type;
+                        self.total
+                    }
+                }
+            }
+        "#;
+
+        let wasm_out = expand(src, TemplateOptions::default());
+        assert!(wasm_out.contains("use super :: shared :: Discount ;"), "{wasm_out}");
+        assert!(wasm_out.contains("decode_exact :: < Order >"), "{wasm_out}");
+        assert!(wasm_out.contains("decode_exact :: < Discount >"), "{wasm_out}");
+        assert!(
+            wasm_out.contains("super :: Market_template :: Market :: r#match"),
+            "{wasm_out}"
+        );
+
+        let non_wasm_out = expand_non_wasm(src, TemplateOptions::default()).unwrap();
+        assert!(non_wasm_out.contains("fn r#match"), "{non_wasm_out}");
     }
 }

@@ -33,40 +33,42 @@ pub fn generate_dispatcher(ast: &TemplateAst) -> Result<TokenStream> {
     let dispatcher_function_name = format_ident!("{}_main", ast.template_name);
     let function_idents = get_function_idents(ast)?;
     let function_blocks = get_function_blocks(ast);
-    let uses = &ast.uses;
 
+    // Emitted inside `#template_mod_name` so every type path in the template's signatures resolves in the
+    // same scope as the template's own items, while `const _` keeps the export out of the module's namespace.
     let output = quote! {
-        #[unsafe(no_mangle)]
-        pub unsafe extern "C" fn #dispatcher_function_name(call_info_ptr: *mut u8, call_info_len: u32) -> *mut u8 {
-            use ::tari_template_lib::template_macro_deps::*;
-            // include all use statements from the template module here as these may be used in the function arguments.
-            #(
-                #[allow(unused_imports)]
-                #uses
-            )*
+        const _: () = {
+            #[unsafe(no_mangle)]
+            pub unsafe extern "C" fn #dispatcher_function_name(
+                call_info_ptr: *mut u8,
+                _call_info_len: u32,
+            ) -> *mut u8 {
+                #[cfg(not(target_arch = "wasm32"))]
+                compile_error!("Must compile template with --target wasm32-unknown-unknown");
 
-            #[cfg(not(target_arch = "wasm32"))]
-            compile_error!("Must compile template with --target wasm32-unknown-unknown");
+                // Custom panic hook that invokes the on_panic host function
+                ::tari_template_lib::template_macro_deps::register_panic_hook();
 
-            // Custom panic hook that invokes the on_panic host function
-            register_panic_hook();
+                if call_info_ptr.is_null() {
+                    panic!("CALLINFO_NULL");
+                }
 
-            if call_info_ptr.is_null() {
-                panic!("CALLINFO_NULL");
+                let owned = unsafe {
+                    ::tari_template_lib::template_macro_deps::OwnedData::owned_from_ptr(call_info_ptr)
+                };
+                let mut call_info =
+                    ::tari_template_lib::template_macro_deps::CallInfo::v1_packed_reader(owned.data());
+                let call_header = call_info.decode_header();
+
+                let result_ptr;
+                match call_header.func {
+                    #( #function_idents => #function_blocks ),*,
+                    _ => panic!("UNKWN_FN {}", call_header.func),
+                };
+
+                result_ptr
             }
-
-            let owned = unsafe { OwnedData::owned_from_ptr(call_info_ptr) };
-            let mut call_info = CallInfo::v1_packed_reader(owned.data());
-            let call_header = call_info.decode_header();
-
-            let result_ptr;
-            match call_header.func {
-                #( #function_idents => #function_blocks ),*,
-                _ => panic!("UNKWN_FN {}", call_header.func),
-            };
-
-            result_ptr
-        }
+        };
     };
 
     Ok(output)
@@ -134,14 +136,17 @@ fn get_function_block(template_ident: &Ident, ast: &FunctionAst, stateless: bool
                 stmts.extend([
                     parse_quote! { let next_arg = call_info.next_arg_unchecked(); },
                     parse_quote! {
-                        let component_address = decode_exact::<::tari_template_lib::types::ComponentAddress>(next_arg)
-                            .unwrap_or_else(|e| panic!(#error_failed_decode_component, e));
+                        let component_address = ::tari_template_lib::template_macro_deps::decode_exact::<
+                            ::tari_template_lib::types::ComponentAddress,
+                        >(next_arg)
+                        .unwrap_or_else(|e| panic!(#error_failed_decode_component, e));
                     },
                     parse_quote! {
-                        let component_manager = engine().component_manager(component_address);
+                        let component_manager =
+                            ::tari_template_lib::template_macro_deps::engine().component_manager(component_address);
                     },
                     parse_quote! {
-                        let mut state = component_manager.get_state::<#template_mod_name::#template_ident>();
+                        let mut state = component_manager.get_state::<super::#template_mod_name::#template_ident>();
                     },
                 ]);
             },
@@ -152,11 +157,14 @@ fn get_function_block(template_ident: &Ident, ast: &FunctionAst, stateless: bool
                     stmts.extend([
                         parse_quote! { let next_arg = call_info.next_arg_unchecked(); },
                         parse_quote! {
-                            let component_address = decode_exact::<::tari_template_lib::types::ComponentAddress>(next_arg)
-                                .unwrap_or_else(|e| panic!(#error_failed_decode_component, e));
+                            let component_address = ::tari_template_lib::template_macro_deps::decode_exact::<
+                                ::tari_template_lib::types::ComponentAddress,
+                            >(next_arg)
+                            .unwrap_or_else(|e| panic!(#error_failed_decode_component, e));
                         },
                         parse_quote! {
-                            let component_manager = engine().component_manager(component_address);
+                            let component_manager =
+                                ::tari_template_lib::template_macro_deps::engine().component_manager(component_address);
                         },
                         parse_quote! {
                             let old_state = component_manager.get_state::<#type_path>();
@@ -168,7 +176,7 @@ fn get_function_block(template_ident: &Ident, ast: &FunctionAst, stateless: bool
                     stmts.extend([
                         parse_quote! { let next_arg = call_info.next_arg_unchecked(); },
                         parse_quote! {
-                            let #arg_ident = decode_exact::<#type_path>(next_arg)
+                            let #arg_ident = ::tari_template_lib::template_macro_deps::decode_exact::<#type_path>(next_arg)
                                 .unwrap_or_else(|e| panic!(#error_failed_decode_arg, e));
                         },
                     ]);
@@ -180,11 +188,14 @@ fn get_function_block(template_ident: &Ident, ast: &FunctionAst, stateless: bool
                     stmts.extend([
                         parse_quote! { let next_arg = call_info.next_arg_unchecked(); },
                         parse_quote! {
-                            let component_address = decode_exact::<::tari_template_lib::types::ComponentAddress>(next_arg)
-                                .unwrap_or_else(|e| panic!(#error_failed_decode_component, e));
+                            let component_address = ::tari_template_lib::template_macro_deps::decode_exact::<
+                                ::tari_template_lib::types::ComponentAddress,
+                            >(next_arg)
+                            .unwrap_or_else(|e| panic!(#error_failed_decode_component, e));
                         },
                         parse_quote! {
-                            let component_manager = engine().component_manager(component_address);
+                            let component_manager =
+                                ::tari_template_lib::template_macro_deps::engine().component_manager(component_address);
                         },
                         parse_quote! {
                             let old_state = component_manager.get_state::<#type_tuple>();
@@ -196,7 +207,7 @@ fn get_function_block(template_ident: &Ident, ast: &FunctionAst, stateless: bool
                     stmts.extend([
                         parse_quote! { let next_arg = call_info.next_arg_unchecked(); },
                         parse_quote! {
-                            let #arg_ident = decode_exact::<#type_tuple>(next_arg)
+                            let #arg_ident = ::tari_template_lib::template_macro_deps::decode_exact::<#type_tuple>(next_arg)
                                 .unwrap_or_else(|e| panic!(#error_failed_decode_arg, e));
                         },
                     ]);
@@ -206,23 +217,23 @@ fn get_function_block(template_ident: &Ident, ast: &FunctionAst, stateless: bool
     }
 
     // call the user defined function in the template
-    let function_ident = Ident::new(&ast.name, Span::call_site());
+    let function_ident = &ast.ident;
     stmts.push(if stateless {
         // Stateless templates expose free functions directly in the generated module, so there is
         // no component struct to qualify the call with.
         parse_quote! {
-            let rtn = #template_mod_name::#function_ident(#(#args),*);
+            let rtn = super::#template_mod_name::#function_ident(#(#args),*);
         }
     } else {
         parse_quote! {
-            let rtn = #template_mod_name::#template_ident::#function_ident(#(#args),*);
+            let rtn = super::#template_mod_name::#template_ident::#function_ident(#(#args),*);
         }
     });
 
     if ast.is_migration {
         stmts.extend([
             // Empty result
-            parse_quote! { result_ptr = alloc_and_encode(&()); },
+            parse_quote! { result_ptr = ::tari_template_lib::template_macro_deps::alloc_and_encode(&()); },
             // Set the state to the return value
             parse_quote! { component_manager.set_state(rtn); },
         ]);
@@ -232,7 +243,7 @@ fn get_function_block(template_ident: &Ident, ast: &FunctionAst, stateless: bool
 
         // encode the result value
         stmts.push(parse_quote! {
-            result_ptr = alloc_and_encode(&rtn);
+            result_ptr = ::tari_template_lib::template_macro_deps::alloc_and_encode(&rtn);
         });
 
         // after user function invocation, update the component state
@@ -277,7 +288,7 @@ fn replace_self_in_single_value(type_path: &TypePath) -> Option<Stmt> {
     if type_ident == "Self" {
         // When we return self we use default rules - which only permit the owner of the component to call methods
         return Some(parse_quote! {
-            let rtn = engine().create_component(
+            let rtn = ::tari_template_lib::template_macro_deps::engine().create_component(
                 rtn,
                 ::tari_template_lib::template_macro_deps::OwnerRule::default(),
                 ::tari_template_lib::template_macro_deps::ComponentAccessRules::new(),
@@ -323,7 +334,7 @@ fn replace_self_in_tuple_expr(base_expr: Expr, type_tuple: &TypeTuple) -> Expr {
                         // When we return self we use default rules - which only permit the owner of the component to
                         // call methods
                         parse_quote! {
-                            engine().create_component(
+                            ::tari_template_lib::template_macro_deps::engine().create_component(
                                 #field_expr,
                                 ::tari_template_lib::template_macro_deps::OwnerRule::default(),
                                 ::tari_template_lib::template_macro_deps::ComponentAccessRules::new(),

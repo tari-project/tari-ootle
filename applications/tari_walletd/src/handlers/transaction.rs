@@ -13,11 +13,15 @@ use tari_ootle_common_types::{
     Epoch,
     InputDeclaration,
     SubstateRequirement,
-    engine_types::substate::{SubstateDiff, SubstateId},
+    engine_types::{
+        component::derive_component_address_from_public_key,
+        substate::{SubstateDiff, SubstateId},
+    },
     optional::Optional,
     response_status::ResponseErrorStatus,
 };
 use tari_ootle_transaction::{
+    Instruction,
     Transaction,
     TransactionId,
     TransactionSignature,
@@ -66,6 +70,7 @@ use tari_ootle_walletd_client::{
         TransactionWaitResultResponse,
     },
 };
+use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
 use tari_template_lib_types::ComponentAddress;
 use tari_transaction_manifest::{ManifestInstructions, parse_manifest};
 use tokio::{sync::broadcast, task, time};
@@ -221,27 +226,7 @@ async fn submit_inner(
     ensure_transaction_signers(sdk, &req.seal_signer, &req.other_signers)?;
     reject_detect_inputs_with_signatures(req.detect_inputs, &req.signatures)?;
     let detected_inputs = if req.detect_inputs {
-        // If we are not overriding inputs, we will use inputs that we know about in the local substate id db
-        let substates = req.transaction.to_referenced_substates()?;
-        let substates = substates
-            .into_iter()
-            .chain(
-                req.transaction
-                    .inputs()
-                    .into_iter()
-                    .map(|req| req.substate_id().clone()),
-            )
-            .collect::<Vec<_>>();
-        let loaded_substates = sdk
-            .substate_api()
-            .locate_dependent_substates(&substates, req.detect_inputs_use_unversioned)
-            .await
-            .or_jrpc_not_found()?;
-        let declared = req.transaction.inputs().clone();
-        loaded_substates
-            .into_iter()
-            .map(|input| declare_detected_input(input, &declared, req.detect_inputs_use_unversioned))
-            .collect()
+        detect_transaction_inputs(sdk, &req.transaction, req.detect_inputs_use_unversioned).await?
     } else {
         vec![]
     };
@@ -494,19 +479,7 @@ pub async fn handle_detect_inputs(
     validate_epoch_bounds(&req.transaction)?;
     let sdk = context.wallet_sdk();
 
-    let substates = req.transaction.to_referenced_substates()?;
-    let substates = substates
-        .into_iter()
-        .chain(req.transaction.inputs().iter().map(|r| r.substate_id().clone()))
-        .collect::<Vec<_>>();
-    let detected = sdk
-        .substate_api()
-        .locate_dependent_substates(&substates, req.use_unversioned)
-        .await
-        .or_jrpc_not_found()?
-        .into_iter()
-        .map(|input| declare_detected_input(input, req.transaction.inputs(), req.use_unversioned))
-        .collect::<Vec<_>>();
+    let detected = detect_transaction_inputs(sdk, &req.transaction, req.use_unversioned).await?;
 
     let transaction = context
         .transaction_builder_from_unsigned(req.transaction)
@@ -544,22 +517,7 @@ async fn submit_dry_run_inner(
     reject_detect_inputs_with_signatures(req.detect_inputs, &req.signatures)?;
 
     let detected_inputs = if req.detect_inputs {
-        // If we are not overriding inputs, we will use inputs that we know about in the local substate id db
-        let substates = req.transaction.to_referenced_substates()?;
-        let substates = substates
-            .into_iter()
-            .chain(req.transaction.inputs().iter().map(|r| r.substate_id().clone()))
-            .collect::<Vec<_>>();
-        let dependencies = sdk
-            .substate_api()
-            .locate_dependent_substates(&substates, req.detect_inputs_use_unversioned)
-            .await
-            .or_jrpc_not_found()?;
-        let declared = req.transaction.inputs().clone();
-        dependencies
-            .into_iter()
-            .map(|input| declare_detected_input(input, &declared, req.detect_inputs_use_unversioned))
-            .collect()
+        detect_transaction_inputs(sdk, &req.transaction, req.detect_inputs_use_unversioned).await?
     } else {
         vec![]
     };
@@ -689,17 +647,7 @@ pub async fn handle_submit_manifest(
             .map_err(|e| invalid_params("blobs", Some(e.to_string())))?;
     }
 
-    // Detect inputs
-    let substates = transaction.to_referenced_substates()?.into_iter().collect::<Vec<_>>();
-    let dependencies = sdk
-        .substate_api()
-        .locate_dependent_substates(&substates, true)
-        .await
-        .or_jrpc_not_found()?;
-    let inputs = dependencies
-        .into_iter()
-        .map(|input| InputDeclaration::write(input.into_substate_id()));
-
+    let inputs = detect_transaction_inputs(sdk, &transaction, true).await?;
     let unsigned = transaction.with_inputs(inputs);
     let component_upgrades = component_upgrades(unsigned.fee_instructions(), unsigned.instructions());
     let component_rules_changes = component_rules_changes(unsigned.fee_instructions(), unsigned.instructions());
@@ -1100,6 +1048,58 @@ fn authorize_with_wallet_keys(
         .authorize(&seal_signer_pk, keys, stealth_keys, transaction)?)
 }
 
+/// Resolves the substate inputs `transaction` depends on and merges them with any declarations
+/// already carried on `transaction`.
+///
+/// `Instruction::CreateAccount` is idempotent create-or-deposit: its derived `Account` component
+/// exists on-chain only when the account has already been created, so derived addresses not
+/// already referenced are probed in a batch and included only when live.
+async fn detect_transaction_inputs(
+    sdk: &WalletSdk,
+    transaction: &UnsignedTransaction,
+    use_unversioned: bool,
+) -> Result<Vec<InputDeclaration>, anyhow::Error> {
+    let mut substates = transaction.to_referenced_substates()?;
+    for req in transaction.inputs() {
+        substates.insert(req.substate_id().clone());
+    }
+
+    let mut create_account_candidates = Vec::new();
+    let mut seen_candidates = HashSet::new();
+    for instruction in transaction.fee_instructions().iter().chain(transaction.instructions()) {
+        if let Instruction::CreateAccount { owner_public_key, .. } = instruction {
+            let derived = SubstateId::Component(derive_component_address_from_public_key(
+                &ACCOUNT_TEMPLATE_ADDRESS,
+                owner_public_key,
+            ));
+            if !substates.contains(&derived) && seen_candidates.insert(derived.clone()) {
+                create_account_candidates.push(derived);
+            }
+        }
+    }
+
+    if !create_account_candidates.is_empty() {
+        let existing = sdk
+            .substate_api()
+            .get_substates_from_network(&create_account_candidates)
+            .await
+            .or_jrpc_not_found()?;
+        substates.extend(existing.into_keys());
+    }
+
+    let top_level = substates.into_iter().collect::<Vec<_>>();
+    let dependencies = sdk
+        .substate_api()
+        .locate_dependent_substates(&top_level, use_unversioned)
+        .await
+        .or_jrpc_not_found()?;
+    let declared = transaction.inputs();
+    Ok(dependencies
+        .into_iter()
+        .map(|input| declare_detected_input(input, declared, use_unversioned))
+        .collect())
+}
+
 /// Turns a detected dependency into a declaration, deferring to what the transaction already said
 /// about that substate.
 ///
@@ -1142,7 +1142,7 @@ mod tests {
     use tari_crypto::ristretto::RistrettoSecretKey;
     use tari_ootle_address::Network;
     use tari_ootle_common_types::{SubstateVersion, signature::Sr25519SignatureBytes};
-    use tari_ootle_transaction::{ComponentReference, Instruction, TransactionBuilder};
+    use tari_ootle_transaction::{ComponentReference, TransactionBuilder};
     use tari_ootle_wallet_sdk::{
         apis::key_manager::KeyManagerApiError,
         models::{AuthLoginRequestEvent, KeyBranch, WalletLock, WalletTransactionUpdate},
@@ -2016,5 +2016,369 @@ mod tests {
             .unwrap();
         assert!(!resp.timed_out);
         assert_eq!(resp.status, TransactionStatus::InvalidTransaction);
+    }
+
+    fn account_component_substate(
+        version: u64,
+        vaults: &[tari_template_lib_types::VaultId],
+    ) -> tari_engine_types::substate::Substate {
+        use tari_engine_types::{
+            component::{Component, ComponentBody, ComponentHeader},
+            substate::{Substate, SubstateValue},
+        };
+        use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
+        use tari_template_lib_types::{
+            EntityId,
+            SubstateOwnerRule,
+            access_rules::{RulesUpdater, UpdateRule},
+        };
+
+        Substate::new(
+            version,
+            SubstateValue::Component(Component {
+                header: ComponentHeader {
+                    template_address: ACCOUNT_TEMPLATE_ADDRESS,
+                    owner_rule: SubstateOwnerRule::None,
+                    access_rules: ComponentAccessRules::new(),
+                    entity_id: EntityId::default(),
+                    upgrade_rule: UpdateRule::Locked,
+                    rules_updater: Some(RulesUpdater::TemplateManaged),
+                },
+                body: ComponentBody::from_cbor_value(
+                    tari_engine_types::indexed_value::IndexedValue::from_type(vaults)
+                        .unwrap()
+                        .into_value(),
+                ),
+            }),
+        )
+    }
+
+    fn fungible_vault_substate(
+        version: u64,
+        resource_address: tari_template_lib_types::ResourceAddress,
+        amount: u64,
+    ) -> tari_engine_types::substate::Substate {
+        use tari_engine_types::{resource_container::ResourceContainer, substate::Substate, vault::Vault};
+
+        Substate::new(
+            version,
+            Vault::new(ResourceContainer::public_fungible(resource_address, amount)),
+        )
+    }
+
+    fn resource_substate(version: u64) -> tari_engine_types::substate::Substate {
+        use tari_engine_types::{
+            resource::Resource,
+            substate::{Substate, SubstateValue},
+        };
+        use tari_template_lib_types::{Metadata, ResourceType, SubstateOwnerRule, access_rules::ResourceAccessRules};
+
+        Substate::new(
+            version,
+            SubstateValue::Resource(Box::new(Resource::new(
+                ResourceType::Fungible,
+                SubstateOwnerRule::None,
+                ResourceAccessRules::new(),
+                Metadata::new(),
+                None,
+                None,
+                6,
+                false,
+            ))),
+        )
+    }
+
+    #[tokio::test]
+    async fn detect_inputs_includes_existing_create_account_component_and_vaults_and_skips_new_accounts() {
+        use tari_crypto::{keys::PublicKey as _, ristretto::RistrettoPublicKey};
+        use tari_engine_types::component::derive_component_address_from_public_key;
+        use tari_ootle_wallet_sdk::IndexerTrust;
+        use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
+        use tari_template_lib_types::{ObjectKey, ResourceAddress, VaultId, constants::TARI_TOKEN};
+
+        use crate::handlers::test_support::FakeIndexer;
+
+        let indexer = FakeIndexer::spawn().await;
+        indexer.claim_current_epoch(Epoch(10));
+
+        let existing_pk = RistrettoPublicKey::from_secret_key(&RistrettoSecretKey::from(11u64)).to_byte_type();
+        let fresh_pk = RistrettoPublicKey::from_secret_key(&RistrettoSecretKey::from(12u64)).to_byte_type();
+        let existing_account_addr = derive_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, &existing_pk);
+        let fresh_account_addr = derive_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, &fresh_pk);
+
+        let existing_vault = VaultId::new(ObjectKey::from_array([0x41; 32]));
+        let custom_resource = ResourceAddress::new(ObjectKey::from_array([0x42; 32]));
+        indexer.insert_substate(
+            SubstateId::Component(existing_account_addr),
+            account_component_substate(2, &[existing_vault]),
+        );
+        indexer.insert_substate(
+            SubstateId::Vault(existing_vault),
+            fungible_vault_substate(3, custom_resource, 500),
+        );
+        indexer.insert_substate(SubstateId::Resource(custom_resource), resource_substate(1));
+        indexer.insert_substate(SubstateId::Resource(TARI_TOKEN), resource_substate(0));
+
+        let daemon = TestDaemon::start_with_indexer(&indexer, IndexerTrust::Trust).await;
+        let local_unconfirmed = daemon
+            .context
+            .wallet_sdk()
+            .accounts_api()
+            .create_next_account(Some("local-unconfirmed"), false)
+            .unwrap();
+        let local_unconfirmed_pk = *local_unconfirmed.owner_public_key();
+
+        let unsigned = TransactionBuilder::new(Network::LocalNet.as_byte(), Epoch(100))
+            .without_auto_fill_inputs()
+            .create_account(existing_pk)
+            .create_account(fresh_pk)
+            .create_account(local_unconfirmed_pk)
+            .build_unsigned();
+
+        let versioned = handle_detect_inputs(&daemon.context, Some(&daemon.session), TransactionDetectInputsRequest {
+            transaction: unsigned.clone(),
+            use_unversioned: false,
+        })
+        .await
+        .unwrap()
+        .transaction;
+
+        let inputs = versioned.inputs();
+        assert_eq!(
+            inputs.get(&SubstateId::Component(existing_account_addr)),
+            Some(&InputDeclaration::new(
+                SubstateId::Component(existing_account_addr),
+                Some(SubstateVersion::new(2)),
+                true
+            ))
+        );
+        assert_eq!(
+            inputs.get(&SubstateId::Vault(existing_vault)),
+            Some(&InputDeclaration::new(
+                SubstateId::Vault(existing_vault),
+                Some(SubstateVersion::new(3)),
+                true
+            ))
+        );
+        assert_eq!(
+            inputs.get(&SubstateId::Resource(custom_resource)),
+            Some(&InputDeclaration::new(
+                SubstateId::Resource(custom_resource),
+                Some(SubstateVersion::new(1)),
+                true
+            ))
+        );
+        assert!(!inputs.contains(&SubstateId::Component(fresh_account_addr)));
+        assert!(!inputs.contains(&SubstateId::Component(*local_unconfirmed.component_address())));
+
+        let with_read = unsigned.with_inputs([InputDeclaration::read(SubstateId::Component(existing_account_addr))]);
+        let unversioned =
+            handle_detect_inputs(&daemon.context, Some(&daemon.session), TransactionDetectInputsRequest {
+                transaction: with_read,
+                use_unversioned: true,
+            })
+            .await
+            .unwrap()
+            .transaction;
+
+        assert!(
+            unversioned
+                .inputs()
+                .get(&SubstateId::Component(existing_account_addr))
+                .unwrap()
+                .is_read()
+        );
+        assert!(unversioned.inputs().contains(&SubstateId::Vault(existing_vault)));
+        assert!(
+            !unversioned
+                .inputs()
+                .contains(&SubstateId::Component(fresh_account_addr))
+        );
+    }
+
+    struct CreateAccountSubmissionFixture {
+        indexer: crate::handlers::test_support::FakeIndexer,
+        daemon: TestDaemon,
+        default_account: tari_ootle_wallet_sdk::models::AccountWithAddress,
+        existing_pk: RistrettoPublicKeyBytes,
+        fresh_pk: RistrettoPublicKeyBytes,
+        existing_account_addr: ComponentAddress,
+        fresh_account_addr: ComponentAddress,
+        recipient_vault: tari_template_lib_types::VaultId,
+    }
+
+    async fn setup_create_account_submission_fixture() -> CreateAccountSubmissionFixture {
+        use tari_crypto::{keys::PublicKey as _, ristretto::RistrettoPublicKey};
+        use tari_ootle_wallet_sdk::IndexerTrust;
+        use tari_template_lib_types::{ObjectKey, VaultId, constants::TARI_TOKEN};
+
+        use crate::handlers::test_support::FakeIndexer;
+
+        let indexer = FakeIndexer::spawn().await;
+        indexer.claim_current_epoch(Epoch(10));
+
+        let daemon = TestDaemon::start_with_indexer_and_transaction_service(&indexer, IndexerTrust::Trust).await;
+        let default_account = daemon
+            .context
+            .wallet_sdk()
+            .accounts_api()
+            .create_next_account(Some("default"), true)
+            .unwrap();
+        let fee_vault = VaultId::new(ObjectKey::from_array([0x51; 32]));
+        indexer.insert_substate(
+            SubstateId::Component(*default_account.component_address()),
+            account_component_substate(1, &[fee_vault]),
+        );
+        indexer.insert_substate(
+            SubstateId::Vault(fee_vault),
+            fungible_vault_substate(1, TARI_TOKEN, 100_000),
+        );
+        indexer.insert_substate(SubstateId::Resource(TARI_TOKEN), resource_substate(0));
+
+        let existing_pk = RistrettoPublicKey::from_secret_key(&RistrettoSecretKey::from(21u64)).to_byte_type();
+        let fresh_pk = RistrettoPublicKey::from_secret_key(&RistrettoSecretKey::from(22u64)).to_byte_type();
+        let existing_account_addr = derive_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, &existing_pk);
+        let fresh_account_addr = derive_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, &fresh_pk);
+        let recipient_vault = VaultId::new(ObjectKey::from_array([0x52; 32]));
+        indexer.insert_substate(
+            SubstateId::Component(existing_account_addr),
+            account_component_substate(4, &[recipient_vault]),
+        );
+        indexer.insert_substate(
+            SubstateId::Vault(recipient_vault),
+            fungible_vault_substate(2, TARI_TOKEN, 1_000),
+        );
+
+        CreateAccountSubmissionFixture {
+            indexer,
+            daemon,
+            default_account,
+            existing_pk,
+            fresh_pk,
+            existing_account_addr,
+            fresh_account_addr,
+            recipient_vault,
+        }
+    }
+
+    #[tokio::test]
+    async fn submit_manifest_detects_existing_create_account_inputs() {
+        let f = setup_create_account_submission_fixture().await;
+
+        handle_submit_manifest(
+            &f.daemon.context,
+            Some(&f.daemon.session),
+            TransactionSubmitManifestRequest {
+                manifest: r#"
+                    fn main() {
+                        let existing_pk = var!["existing_pk"];
+                        let fresh_pk = var!["fresh_pk"];
+                        create_account!(existing_pk);
+                        create_account!(fresh_pk);
+                    }
+                "#
+                .to_string(),
+                variables: HashMap::from([
+                    ("existing_pk".to_string(), f.existing_pk.to_string()),
+                    ("fresh_pk".to_string(), f.fresh_pk.to_string()),
+                ]),
+                seal_signer_key_id: None,
+                signing_key_ids: vec![],
+                max_fee: 1_000,
+                dry_run: true,
+                blobs: HashMap::new(),
+            },
+        )
+        .await
+        .unwrap();
+
+        let dry_runs = f.indexer.take_dry_run_transactions();
+        assert_eq!(dry_runs.len(), 1);
+        let manifest_inputs = dry_runs[0].inputs();
+        assert!(manifest_inputs.contains(&SubstateId::Component(f.existing_account_addr)));
+        assert!(manifest_inputs.contains(&SubstateId::Vault(f.recipient_vault)));
+        assert!(!manifest_inputs.contains(&SubstateId::Component(f.fresh_account_addr)));
+    }
+
+    #[tokio::test]
+    async fn submit_and_dry_run_detect_existing_create_account_inputs() {
+        let f = setup_create_account_submission_fixture().await;
+        let unsigned = TransactionBuilder::new(Network::LocalNet.as_byte(), Epoch(100))
+            .without_auto_fill_inputs()
+            .pay_fee_from_component(*f.default_account.component_address(), 1_000u64)
+            .create_account(f.existing_pk)
+            .create_account(f.fresh_pk)
+            .build_unsigned();
+        let owner_key_id = f.default_account.owner_key_id().unwrap();
+
+        handle_submit_dry_run(
+            &f.daemon.context,
+            Some(&f.daemon.session),
+            TransactionSubmitDryRunRequest {
+                transaction: unsigned.clone(),
+                seal_signer: owner_key_id,
+                other_signers: vec![],
+                signatures: vec![],
+                detect_inputs: true,
+                detect_inputs_use_unversioned: false,
+                lock_ids: vec![],
+            },
+        )
+        .await
+        .unwrap();
+        let dry_runs = f.indexer.take_dry_run_transactions();
+        assert_eq!(dry_runs.len(), 1);
+        assert_eq!(
+            dry_runs[0]
+                .inputs()
+                .get(&SubstateId::Component(f.existing_account_addr)),
+            Some(&InputDeclaration::new(
+                SubstateId::Component(f.existing_account_addr),
+                Some(SubstateVersion::new(4)),
+                true
+            ))
+        );
+        assert!(
+            !dry_runs[0]
+                .inputs()
+                .contains(&SubstateId::Component(f.fresh_account_addr))
+        );
+
+        handle_submit(&f.daemon.context, Some(&f.daemon.session), TransactionSubmitRequest {
+            transaction: unsigned,
+            seal_signer: owner_key_id,
+            other_signers: vec![],
+            signatures: vec![],
+            detect_inputs: true,
+            detect_inputs_use_unversioned: false,
+            lock_ids: vec![],
+        })
+        .await
+        .unwrap();
+        let submitted = f.indexer.take_submitted_transactions();
+        assert_eq!(submitted.len(), 1);
+        assert_eq!(
+            submitted[0]
+                .inputs()
+                .get(&SubstateId::Component(f.existing_account_addr)),
+            Some(&InputDeclaration::new(
+                SubstateId::Component(f.existing_account_addr),
+                Some(SubstateVersion::new(4)),
+                true
+            ))
+        );
+        assert_eq!(
+            submitted[0].inputs().get(&SubstateId::Vault(f.recipient_vault)),
+            Some(&InputDeclaration::new(
+                SubstateId::Vault(f.recipient_vault),
+                Some(SubstateVersion::new(2)),
+                true
+            ))
+        );
+        assert!(
+            !submitted[0]
+                .inputs()
+                .contains(&SubstateId::Component(f.fresh_account_addr))
+        );
     }
 }

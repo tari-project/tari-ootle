@@ -31,21 +31,42 @@ import { permissionToString, type Permission } from "@tari-project/ootle-ts-bind
 import React, { useEffect, useState } from "react";
 import "./Permissions.css";
 
+interface OptionalPermissionItem {
+  id: number;
+  name: string;
+  checked: boolean;
+}
+
+function buildOptionalPermissions(names: string[]): OptionalPermissionItem[] {
+  return names.map((name, index) => ({ id: index, name, checked: true }));
+}
+
 export default function Permissions(props: {
   requiredPermissions: Permission[];
   optionalPermissions: Permission[];
-  setOptionalPermissions: any;
+  setOptionalPermissions: (permissions: boolean[]) => void;
 }) {
   const { requiredPermissions, optionalPermissions, setOptionalPermissions } = props;
-  const [permissions, setPermissions] = useState(
-    optionalPermissions.map((permission, index) => {
-      return { id: index, name: permissionToString(permission), checked: true };
-    }),
+  const optionalPermissionsKey = JSON.stringify(
+    optionalPermissions.map((permission) => permissionToString(permission)),
+  );
+  const [permissions, setPermissions] = useState<OptionalPermissionItem[]>(() =>
+    buildOptionalPermissions(JSON.parse(optionalPermissionsKey)),
   );
 
+  useEffect(() => {
+    const nextNames: string[] = JSON.parse(optionalPermissionsKey);
+    setPermissions((prev) => {
+      if (prev.length === nextNames.length && prev.every((item, index) => item.name === nextNames[index])) {
+        return prev;
+      }
+      return buildOptionalPermissions(nextNames);
+    });
+  }, [optionalPermissionsKey]);
+
   const handleChange = (index: number) => {
-    setPermissions(
-      permissions.map((item) => {
+    setPermissions((prev) =>
+      prev.map((item) => {
         if (item.id === index) {
           return {
             ...item,
@@ -57,7 +78,9 @@ export default function Permissions(props: {
     );
   };
 
-  useEffect(() => setOptionalPermissions(permissions.map((item) => item.checked)), [permissions]);
+  useEffect(() => {
+    setOptionalPermissions(permissions.map((item) => item.checked));
+  }, [permissions, setOptionalPermissions]);
 
   return (
     <>
@@ -75,7 +98,6 @@ export default function Permissions(props: {
                   control={<Switch checked={true} disabled={true} />}
                   label={label}
                   labelPlacement="start"
-                  key={label}
                   className="permissions-switch"
                 />
                 <Divider />
@@ -84,13 +106,12 @@ export default function Permissions(props: {
           })}
         </FormGroup>
         <FormGroup>
-          {permissions.map(({ checked, name, id }, i) => (
-            <React.Fragment key={i}>
+          {permissions.map(({ checked, name, id }) => (
+            <React.Fragment key={id}>
               <FormControlLabel
                 control={<Switch checked={checked} onChange={() => handleChange(id)} name={name} value={name} />}
                 label={name}
                 labelPlacement="start"
-                key={id}
                 className="permissions-switch"
               />
               <Divider />

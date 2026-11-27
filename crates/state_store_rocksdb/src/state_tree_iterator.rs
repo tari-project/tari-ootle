@@ -68,6 +68,11 @@ impl<'a, R: RocksReader> LatestSubstateStateTreeIterator<'a, R> {
             value_filters,
         }
     }
+
+    fn finish(&mut self) -> Option<<Self as Iterator>::Item> {
+        self.state.put(IterState::Done);
+        None
+    }
 }
 
 impl<R: RocksReader> Iterator for LatestSubstateStateTreeIterator<'_, R> {
@@ -176,19 +181,60 @@ impl<R: RocksReader> Iterator for LatestSubstateStateTreeIterator<'_, R> {
                             continue;
                         },
                         None => {
-                            self.state.put(IterState::Done);
                             trace!(target: LOG_TARGET, "StateTreeIterator completed");
-                            return None;
+                            return self.finish();
                         },
                     }
                 },
                 IterState::Error(err) => {
-                    self.state = IterState::Done;
+                    self.state.put(IterState::Done);
                     return Some(Err(err));
                 },
-                IterState::Done => return None,
+                IterState::Done => return self.finish(),
                 IterState::Taken => unreachable!("IterState::take() called twice in succession"),
             }
         }
+    }
+}
+
+impl<R: RocksReader> std::iter::FusedIterator for LatestSubstateStateTreeIterator<'_, R> {}
+
+#[cfg(test)]
+mod tests {
+    use tari_ootle_common_types::shard::Shard;
+    use tari_ootle_storage::{StateStore, StateStoreReadTransaction, consensus_models::SubstateValueFilterFlags};
+
+    use super::*;
+    use crate::{DatabaseOptions, RocksDbStateStore};
+
+    #[test]
+    fn iterator_remains_done_on_repeated_next_after_exhaustion_and_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let store: RocksDbStateStore<String> =
+            RocksDbStateStore::open(dir.path().join("db"), DatabaseOptions::default()).unwrap();
+
+        store
+            .with_read_tx(|tx| {
+                let mut iter = tx.substate_tree_iter(Shard::first(), 0, SubstateValueFilterFlags::all_substates())?;
+                assert!(iter.next().is_none());
+                assert!(iter.next().is_none());
+                assert!(iter.next().is_none());
+
+                let mut err_iter = LatestSubstateStateTreeIterator::new(
+                    tx.db().cf(state_tree::ByShardStateVersionQuery)?,
+                    tx.db().cf(substate::SubstateCf)?,
+                    Shard::first(),
+                    0,
+                    SubstateValueFilterFlags::all_substates(),
+                );
+                err_iter.state = IterState::Error(StorageError::DataInconsistency {
+                    details: "synthetic error".to_string(),
+                });
+                assert!(matches!(err_iter.next(), Some(Err(_))));
+                assert!(err_iter.next().is_none());
+                assert!(err_iter.next().is_none());
+                Ok::<_, StorageError>(())
+            })
+            .unwrap();
     }
 }

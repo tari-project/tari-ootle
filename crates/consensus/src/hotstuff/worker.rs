@@ -1878,15 +1878,11 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             return Ok(());
         }
 
-        // The parent of the next block must be a block every honest node provably shares: either the
-        // HighQC's justified block, or a deterministic dummy chain extending it. `OnPropose::build_next_block`
-        // always anchors the proposal's parent chain on `justify_block` (HighPC) rather than `highest_block`.
-        // When `highest_block` is a locally seen but uncertified block above `HighPC` (`highest_block.height >
-        // high_pc.height()`) and a subsequent proposal is triggered via a non-timeout beat (`is_timeout == false`,
-        // e.g. `on_beat`, `on_force_beat(None)`, or after catch-up/restart), `next_height > highest_block.height + 1`
-        // can be false even though `next_height > justify_block.height() + 1`. Checking against `HighPc.height()` and
-        // `HighTc.height()` directly ensures the proposal always carries the timeout certificate for `next_height - 1`
-        // and fills any height gap above `justify_block` with dummy blocks.
+        // The parent of the next block must be a block every honest node provably shares: the HighPC's justified
+        // block, or a deterministic dummy chain extending it (`OnPropose::build_next_block` parents on one of the
+        // two). A block seen above the HighPC carries no certificate, so whenever `next_height` sits more than one
+        // view above the HighPC the gap is filled with dummy blocks, and the proposal carries the HighTC for
+        // `next_height - 1`, which is the chain validators recompute from the proposal's certificates.
         let ProposalRecoveryContext {
             highest_block,
             propose_high_tc,
@@ -2753,8 +2749,8 @@ fn apply_epoch_changed(
 
 /// Resolves the block ID justified by `high_pc` in `epoch`.
 ///
-/// A zero-block `HighPc` (`PcId::zero()` at the start of an epoch) justifies the epoch's genesis block; any other
-/// `HighPc` directly carries the justified block's ID.
+/// A `HighPc` whose `block_id` is zero justifies the epoch's zero block, and resolves to the epoch's genesis block;
+/// any other `HighPc` directly carries the justified block's ID.
 fn justified_block_id_for_high_pc<TTx: StateStoreReadTransaction>(
     tx: &TTx,
     epoch: Epoch,

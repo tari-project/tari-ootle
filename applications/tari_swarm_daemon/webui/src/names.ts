@@ -23,7 +23,7 @@ export function distinguish(names: string[]): (name: string) => string {
   // Cut back to a word boundary so a shared prefix never lops off half a token. A "#"
   // stays with the number it marks; separators belong to the prefix and are dropped.
   const boundary = prefix.search(/#?[A-Za-z0-9]+$/);
-  if (boundary > 0) {
+  if (boundary >= 0) {
     prefix = prefix.slice(0, boundary);
   }
 
@@ -31,5 +31,5 @@ export function distinguish(names: string[]): (name: string) => string {
   if (prefix.length < 3 || names.some((name) => name.length - prefix.length < 2)) {
     return (name) => name;
   }
-  return (name) => name.slice(prefix.length);
+  return (name) => (name.startsWith(prefix) ? name.slice(prefix.length) : name);
 }

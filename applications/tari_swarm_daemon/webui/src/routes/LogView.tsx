@@ -94,6 +94,10 @@ export default function LogView() {
   const [loadingOlder, setLoadingOlder] = useState(false);
   const view = useRef<HTMLDivElement>(null);
   const loadingRef = useRef(false);
+  const mountedRef = useRef(true);
+  const pathGenRef = useRef(0);
+  const followRef = useRef(follow);
+  followRef.current = follow;
   /**
    * Line to hold still across a buffer trim, which removes rendered lines above the viewport. `from` records the
    * oldest offset at capture time, so an anchor left behind by a load that never committed is discarded rather
@@ -102,6 +106,43 @@ export default function LogView() {
   const anchor = useRef<{ n: number; top: number; from: number } | null>(null);
 
   const atStartOfFile = chunks !== null && chunks[chunks.length - 1]?.start === 0;
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  // Reset buffered chunks and invalidate any in-flight loadOlder when switching log files.
+  useEffect(() => {
+    pathGenRef.current += 1;
+    loadingRef.current = false;
+    anchor.current = null;
+    setChunks(null);
+    setFetchError(null);
+    setLoadingOlder(false);
+
+    if (!path || followRef.current) {
+      return;
+    }
+    let cancelled = false;
+    void fetchChunk(path, null)
+      .then((chunk) => {
+        if (!cancelled && !followRef.current) {
+          setChunks([chunk]);
+          setFetchError(null);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled && !followRef.current) {
+          setFetchError(describeError(err));
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [path]);
 
   // Entering follow mode starts a fresh window at the tail; leaving it keeps whatever is on screen.
   useEffect(() => {
@@ -158,20 +199,24 @@ export default function LogView() {
     if (!path || !oldest || loadingRef.current || oldest.start === 0) {
       return;
     }
+    const gen = pathGenRef.current;
     loadingRef.current = true;
     setLoadingOlder(true);
 
     // The oldest rendered line survives any trim, so it can hold the view still if one happens.
     const rendered = view.current?.querySelectorAll<HTMLElement>(".logline");
     const oldestRendered = rendered?.length ? rendered[rendered.length - 1] : undefined;
-    const anchorN = oldestRendered?.dataset.n;
+    const parsedN = oldestRendered?.dataset.n !== undefined ? Number(oldestRendered.dataset.n) : NaN;
     anchor.current =
-      oldestRendered && anchorN !== undefined
-        ? { n: Number(anchorN), top: oldestRendered.getBoundingClientRect().top, from: oldest.start }
+      oldestRendered && Number.isFinite(parsedN)
+        ? { n: parsedN, top: oldestRendered.getBoundingClientRect().top, from: oldest.start }
         : null;
 
     try {
       const chunk = await fetchChunk(path, oldest.start);
+      if (!mountedRef.current || pathGenRef.current !== gen) {
+        return;
+      }
       setChunks((current) => {
         // Follow mode may have replaced the buffer while the request was in flight.
         if (!current || current[current.length - 1]?.start !== oldest.start) {
@@ -181,10 +226,14 @@ export default function LogView() {
       });
       setFetchError(null);
     } catch (err) {
-      setFetchError(describeError(err));
+      if (mountedRef.current && pathGenRef.current === gen) {
+        setFetchError(describeError(err));
+      }
     } finally {
-      loadingRef.current = false;
-      setLoadingOlder(false);
+      if (mountedRef.current && pathGenRef.current === gen) {
+        loadingRef.current = false;
+        setLoadingOlder(false);
+      }
     }
   }, [path, chunks, countVisible]);
 
@@ -237,10 +286,18 @@ export default function LogView() {
   // Level filters can leave too few lines to fill the view, which would strand it with nothing to scroll.
   useEffect(() => {
     const el = view.current;
-    if (el && !follow && !loadingOlder && !atStartOfFile && !scanExhausted && el.scrollHeight <= el.clientHeight) {
+    if (
+      el &&
+      !error &&
+      !follow &&
+      !loadingOlder &&
+      !atStartOfFile &&
+      !scanExhausted &&
+      el.scrollHeight <= el.clientHeight
+    ) {
       void loadOlder();
     }
-  }, [visible, follow, loadingOlder, atStartOfFile, scanExhausted, loadOlder]);
+  }, [visible, error, follow, loadingOlder, atStartOfFile, scanExhausted, loadOlder]);
 
   /** Bytes the buffer currently spans, which is what the filters have been applied to. */
   const scannedBytes = chunks && chunks.length ? chunks[0].end - chunks[chunks.length - 1].start : 0;

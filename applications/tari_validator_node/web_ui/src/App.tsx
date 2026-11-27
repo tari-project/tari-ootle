@@ -119,52 +119,91 @@ export default function App() {
   const [epoch, setEpoch] = useState<GetEpochManagerStatsResponse | undefined>(undefined);
   const [identity, setIdentity] = useState<VNGetIdentityResponse | undefined>(undefined);
   const [shardKey, setShardKey] = useState<string | null>(null);
-  const [error, setError] = useState("");
+  const [epochError, setEpochError] = useState("");
+  const [identityError, setIdentityError] = useState("");
+  const [shardKeyError, setShardKeyError] = useState("");
+  const error = epochError || identityError || shardKeyError;
 
-  // Refresh every 2 minutes
-  const refreshEpoch = (epoch: GetEpochManagerStatsResponse | undefined) => {
-    getEpochManagerStats()
-      .then((response) => {
-        console.log("getEpochManagerStats", response);
-        if (response.current_epoch !== epoch?.current_epoch) {
-          setEpoch(response);
-        }
-      })
-      .catch((reason) => {
-        console.error(reason);
-        setError("Json RPC error, please check console");
-      });
-  };
+  // Initial fetch and 2-minute epoch stats poll
   useEffect(() => {
-    const id = window.setInterval(() => refreshEpoch(epoch), 2 * 60 * 1000);
-    return () => {
-      window.clearInterval(id);
+    let cancelled = false;
+
+    const refreshEpoch = () => {
+      getEpochManagerStats()
+        .then((response) => {
+          if (cancelled) {
+            return;
+          }
+          setEpochError("");
+          setEpoch((prev) =>
+            prev &&
+            prev.current_epoch === response.current_epoch &&
+            prev.current_block_height === response.current_block_height &&
+            prev.current_block_hash === response.current_block_hash &&
+            prev.is_valid === response.is_valid
+              ? prev
+              : response,
+          );
+        })
+        .catch((reason) => {
+          if (cancelled) {
+            return;
+          }
+          console.error(reason);
+          setEpochError("Json RPC error, please check console");
+        });
     };
-  }, [epoch]);
-  // Initial fetch
-  useEffect(() => {
-    refreshEpoch(undefined);
+
+    refreshEpoch();
     getIdentity()
       .then((response) => {
+        if (cancelled) {
+          return;
+        }
+        setIdentityError("");
         setIdentity(response);
       })
       .catch((reason) => {
-        console.log(reason);
-        setError("Json RPC error, please check console");
+        if (cancelled) {
+          return;
+        }
+        console.error(reason);
+        setIdentityError("Json RPC error, please check console");
       });
+
+    const id = window.setInterval(refreshEpoch, 2 * 60 * 1000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
   }, []);
+
   // Get shard key.
   useEffect(() => {
-    if (epoch !== undefined && identity !== undefined) {
-      // The *10 is from the hardcoded constant in VN.
-      getShardKey({
-        epoch: epoch.current_epoch,
-        public_key: identity.public_key,
-      }).then((response) => {
-        setShardKey(response.shard_key);
-      });
+    if (epoch === undefined || identity === undefined) {
+      return;
     }
-  }, [epoch, identity]);
+    let cancelled = false;
+    getShardKey({
+      epoch: epoch.current_epoch,
+      public_key: identity.public_key,
+    })
+      .then((response) => {
+        if (!cancelled) {
+          setShardKeyError("");
+          setShardKey(response.shard_key);
+        }
+      })
+      .catch((reason) => {
+        if (!cancelled) {
+          console.error(reason);
+          setShardKeyError("Json RPC error, please check console");
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [epoch?.current_epoch, identity?.public_key]);
 
   return (
     <>

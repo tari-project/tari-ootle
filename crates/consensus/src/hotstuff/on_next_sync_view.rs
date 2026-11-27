@@ -9,6 +9,7 @@ use tari_consensus_types::{
     LastSentNewView,
     LastSentVote,
     ProposalCertificate,
+    SignedTimeout,
     TimeoutVote,
     TimeoutVoteMessage,
     ValidatorSignatureBytes,
@@ -16,6 +17,7 @@ use tari_consensus_types::{
 use tari_ootle_common_types::{Epoch, NodeHeight, committee::Committee, displayable::Displayable, optional::Optional};
 use tari_ootle_storage::{StateStore, StateStoreReadTransaction, StorageError, consensus_models::BookkeepingModel};
 use tari_ootle_transaction::Network;
+use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
 use crate::{
     hotstuff::{HotStuffError, HotstuffConfig, LeaderSkipSet},
@@ -31,12 +33,11 @@ pub struct OnNextSyncViewHandler<TConsensusSpec: ConsensusSpec> {
     outbound_messaging: TConsensusSpec::OutboundMessaging,
     leader_strategy: TConsensusSpec::LeaderStrategy,
     signer_service: TConsensusSpec::SignerService,
-    /// The timeout votes this node sent for the view it last named.
-    last_sent: Option<SentTimeoutVotes>,
 }
 
 /// The timeout votes sent for one view. Each is re-sent unchanged for as long as it still applies, so a member that
-/// already holds it can tell a re-send from a vote signed again.
+/// already holds it can tell a re-send from a vote signed again. They are stored in [`LastSentNewView`], so a restart
+/// keeps them too.
 #[derive(Debug, Clone)]
 struct SentTimeoutVotes {
     /// The vote first signed for the view, sent to every member other than the leader. Those members count it for
@@ -61,7 +62,6 @@ impl<TConsensusSpec: ConsensusSpec> OnNextSyncViewHandler<TConsensusSpec> {
             outbound_messaging,
             leader_strategy,
             signer_service,
-            last_sent: None,
         }
     }
 
@@ -74,7 +74,7 @@ impl<TConsensusSpec: ConsensusSpec> OnNextSyncViewHandler<TConsensusSpec> {
         timeout_floor: NodeHeight,
         local_committee: &Committee<TConsensusSpec::Addr>,
     ) -> Result<NodeHeight, HotStuffError> {
-        let (next_leader, high_pc, last_sent_vote, timeout_height) = self.store.with_read_tx(|tx| {
+        let (next_leader, high_pc, last_sent_vote, timeout_height, last_sent) = self.store.with_read_tx(|tx| {
             let timeout_height = next_timeout_height(tx, epoch, current_height, timeout_floor)?;
             let high_pc = HighPc::get(tx, epoch)?;
             let high_pc = ProposalCertificate::get(tx, epoch, high_pc.id())?;
@@ -101,8 +101,9 @@ impl<TConsensusSpec: ConsensusSpec> OnNextSyncViewHandler<TConsensusSpec> {
             let last_sent_vote = LastSentVote::get(tx, epoch)
                 .optional()?
                 .filter(|vote| high_pc.height() < vote.block_height());
+            let last_sent = LastSentNewView::get(tx, epoch).optional()?;
 
-            Ok::<_, HotStuffError>((next_leader, high_pc, last_sent_vote, timeout_height))
+            Ok::<_, HotStuffError>((next_leader, high_pc, last_sent_vote, timeout_height, last_sent))
         })?;
 
         info!(
@@ -115,13 +116,34 @@ impl<TConsensusSpec: ConsensusSpec> OnNextSyncViewHandler<TConsensusSpec> {
         );
 
         let high_pc_height = high_pc.height();
-        let sent = self.timeout_votes(epoch, timeout_height, high_pc_height);
-        self.last_sent = Some(sent.clone());
+        let local_public_key = self.signer_service.public_key().to_byte_type();
+        let sent = match sent_timeout_votes(last_sent.as_ref(), epoch, timeout_height, local_public_key) {
+            Some(sent) if sent.to_leader.high_pc_height == high_pc_height => sent,
+            Some(sent) => SentTimeoutVotes {
+                to_leader: self.sign_timeout(epoch, timeout_height, high_pc_height),
+                ..sent
+            },
+            None => {
+                let vote = self.sign_timeout(epoch, timeout_height, high_pc_height);
+                SentTimeoutVotes {
+                    to_members: vote.clone(),
+                    to_leader: vote,
+                }
+            },
+        };
+        self.store.with_write_tx(|tx| {
+            LastSentNewView {
+                epoch,
+                height: timeout_height,
+                to_members: Some(sent.to_members.as_signed_timeout()),
+                to_leader: Some(sent.to_leader.as_signed_timeout()),
+            }
+            .set(tx)
+        })?;
         let SentTimeoutVotes {
             to_members: timeout,
             to_leader: leader_timeout,
         } = sent;
-        let local_public_key = timeout.signature.public_key;
         let message = NewViewMessage {
             high_pc,
             last_vote: last_sent_vote.map(|vote| vote.vote),
@@ -154,44 +176,33 @@ impl<TConsensusSpec: ConsensusSpec> OnNextSyncViewHandler<TConsensusSpec> {
                 .await?;
         }
 
-        self.store.with_write_tx(|tx| {
-            LastSentNewView {
-                epoch,
-                height: timeout_height,
-            }
-            .set(tx)
-        })?;
-
         Ok(timeout_height)
-    }
-
-    /// The votes to send for view `height`, reusing those already sent for it while they still apply.
-    fn timeout_votes(&self, epoch: Epoch, height: NodeHeight, high_pc_height: NodeHeight) -> SentTimeoutVotes {
-        let Some(sent) = self
-            .last_sent
-            .as_ref()
-            .filter(|sent| sent.to_members.epoch == epoch && sent.to_members.height == height)
-        else {
-            let vote = self.sign_timeout(epoch, height, high_pc_height);
-            return SentTimeoutVotes {
-                to_members: vote.clone(),
-                to_leader: vote,
-            };
-        };
-        let to_leader = if sent.to_leader.high_pc_height == high_pc_height {
-            sent.to_leader.clone()
-        } else {
-            self.sign_timeout(epoch, height, high_pc_height)
-        };
-        SentTimeoutVotes {
-            to_members: sent.to_members.clone(),
-            to_leader,
-        }
     }
 
     fn sign_timeout(&self, epoch: Epoch, height: NodeHeight, high_pc_height: NodeHeight) -> TimeoutVote {
         sign_timeout_vote(&self.signer_service, self.config.network, epoch, height, high_pc_height)
     }
+}
+
+/// The votes `last_sent` records for view `height`, signed by `public_key`. `None` when it records another view, or
+/// no votes.
+fn sent_timeout_votes(
+    last_sent: Option<&LastSentNewView>,
+    epoch: Epoch,
+    height: NodeHeight,
+    public_key: RistrettoPublicKeyBytes,
+) -> Option<SentTimeoutVotes> {
+    let last_sent = last_sent.filter(|last_sent| last_sent.epoch == epoch && last_sent.height == height)?;
+    let vote = |signed: &SignedTimeout| TimeoutVote {
+        epoch,
+        height,
+        high_pc_height: signed.high_pc_height,
+        signature: ValidatorSignatureBytes::new(public_key, signed.signature),
+    };
+    Some(SentTimeoutVotes {
+        to_members: vote(last_sent.to_members.as_ref()?),
+        to_leader: vote(last_sent.to_leader.as_ref()?),
+    })
 }
 
 /// This node's timeout vote for view `height`, reporting a high certificate at `high_pc_height`.
@@ -283,6 +294,8 @@ mod tests {
                 LastSentNewView {
                     epoch: EPOCH,
                     height: NodeHeight(12),
+                    to_members: None,
+                    to_leader: None,
                 }
                 .set(tx)
             })
@@ -321,6 +334,72 @@ mod tests {
             timeout_height(dir.path(), NodeHeight(10), NodeHeight(30)),
             NodeHeight(30)
         );
+    }
+
+    fn signed(high_pc_height: u64, byte: u8) -> SignedTimeout {
+        SignedTimeout {
+            high_pc_height: NodeHeight(high_pc_height),
+            signature: tari_template_lib_types::crypto::SchnorrSignatureBytes::from_bytes(&[byte; 64]).unwrap(),
+        }
+    }
+
+    fn record(height: u64) -> LastSentNewView {
+        LastSentNewView {
+            epoch: EPOCH,
+            height: NodeHeight(height),
+            to_members: Some(signed(5, 1)),
+            to_leader: Some(signed(7, 2)),
+        }
+    }
+
+    #[test]
+    fn the_stored_votes_for_the_view_are_re_sent_as_signed() {
+        let public_key = RistrettoPublicKeyBytes::zero();
+        let sent = sent_timeout_votes(Some(&record(12)), EPOCH, NodeHeight(12), public_key).unwrap();
+
+        assert_eq!(sent.to_members.height, NodeHeight(12));
+        assert_eq!(sent.to_members.as_signed_timeout(), signed(5, 1));
+        assert_eq!(sent.to_members.signature.public_key, public_key);
+        assert_eq!(sent.to_leader.as_signed_timeout(), signed(7, 2));
+    }
+
+    #[test]
+    fn stored_votes_for_another_view_are_not_re_sent() {
+        let public_key = RistrettoPublicKeyBytes::zero();
+        assert!(sent_timeout_votes(Some(&record(12)), EPOCH, NodeHeight(13), public_key).is_none());
+        assert!(sent_timeout_votes(Some(&record(12)), Epoch(2), NodeHeight(12), public_key).is_none());
+        assert!(sent_timeout_votes(None, EPOCH, NodeHeight(12), public_key).is_none());
+    }
+
+    #[test]
+    fn a_record_without_votes_is_signed_again() {
+        let without_votes = LastSentNewView {
+            to_members: None,
+            to_leader: None,
+            ..record(12)
+        };
+        assert!(
+            sent_timeout_votes(
+                Some(&without_votes),
+                EPOCH,
+                NodeHeight(12),
+                RistrettoPublicKeyBytes::zero()
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn stored_votes_survive_a_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        open(dir.path()).with_write_tx(|tx| record(12).set(tx)).unwrap();
+
+        let reopened = open(dir.path())
+            .with_read_tx(|tx| LastSentNewView::get(tx, EPOCH))
+            .unwrap();
+        let sent = sent_timeout_votes(Some(&reopened), EPOCH, NodeHeight(12), RistrettoPublicKeyBytes::zero()).unwrap();
+        assert_eq!(sent.to_members.as_signed_timeout(), signed(5, 1));
+        assert_eq!(sent.to_leader.as_signed_timeout(), signed(7, 2));
     }
 
     #[test]

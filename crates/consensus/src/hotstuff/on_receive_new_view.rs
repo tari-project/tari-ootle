@@ -8,7 +8,6 @@ use tari_consensus_types::{HighPc, LeafBlock, ProposalCertificate, SignedMessage
 use tari_ootle_common_types::{Epoch, NodeHeight, committee::Committee, optional::Optional};
 use tari_ootle_storage::{
     StateStore,
-    StateStoreWriteTransaction,
     consensus_models::{Block, BookkeepingModel},
 };
 use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
@@ -245,8 +244,6 @@ where TConsensusSpec: ConsensusSpec
             info!(target: LOG_TARGET, "🌟✅ NEWVIEW height {} (high_tc: {}) has reached quorum ({}/{})", timeout_height, high_tc, timeout_certificate.num_signatures(), threshold.value());
             if timeout_certificate.calculate_id() == *high_tc.id() {
                 info!(target: LOG_TARGET, "🕒️ New HIGH TC {}", timeout_certificate);
-                // Clear the last sent new view since we have a new certificate
-                self.store.with_write_tx(|tx| tx.last_sent_new_view_clear())?;
                 pacemaker_actions.force_beat(high_tc.height());
             } else {
                 info!(target: LOG_TARGET, "❓️ New TC from votes {} but it is not the highest TC {}", timeout_certificate, high_tc);

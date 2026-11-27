@@ -23,6 +23,8 @@ import { authCreateApiKey, authListApiKeys, authRevokeApiKey } from "@utils/json
 
 const API_KEYS_LIST_QUERY_KEY = ["api_keys_list"];
 
+const refetchApiKeys = () => queryClient.invalidateQueries({ queryKey: API_KEYS_LIST_QUERY_KEY });
+
 export const useListApiKeys = (includeRevoked: boolean = false) => {
   return useQuery({
     // Include the toggle in the query key so React Query treats the two
@@ -40,9 +42,7 @@ export const useCreateApiKey = (onSuccess: (response: AuthCreateApiKeyResponse) 
     onError: (error: ApiError) => {
       console.error("authCreateApiKey failed", error);
     },
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: API_KEYS_LIST_QUERY_KEY });
-    },
+    onSettled: refetchApiKeys,
   });
 };
 
@@ -52,8 +52,6 @@ export const useRevokeApiKey = () => {
     onError: (error: ApiError) => {
       console.error("authRevokeApiKey failed", error);
     },
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: API_KEYS_LIST_QUERY_KEY });
-    },
+    onSettled: refetchApiKeys,
   });
 };

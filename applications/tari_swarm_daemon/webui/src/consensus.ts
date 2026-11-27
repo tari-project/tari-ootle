@@ -68,6 +68,35 @@ export function readChannels(validators: ValidatorNode[], details: Record<number
   return { channels, tipEpoch, tipHeight, inStep };
 }
 
+/** A lagging validator's progress back to the tip, measured from the largest deficit seen since it fell behind. */
+export interface CatchUp {
+  epoch: number;
+  /** The most blocks the validator has been behind the tip since it fell behind in this epoch. */
+  from: number;
+  /** How many blocks it is behind now. */
+  behind: number;
+}
+
+/**
+ * Updates `previous` with this poll's deficits. A validator that is no longer behind by blocks drops out, and one that
+ * fell further behind, or behind in a new epoch, restarts its measure from the new deficit.
+ */
+export function trackCatchUp(previous: Record<number, CatchUp>, channels: Channel[]): Record<number, CatchUp> {
+  const next: Record<number, CatchUp> = {};
+  for (const c of channels) {
+    if (c.deficit.kind !== "blocks" || c.epoch === null) {
+      continue;
+    }
+    const prior = previous[c.vn.instance_id];
+    const from = prior && prior.epoch === c.epoch ? Math.max(prior.from, c.deficit.n) : c.deficit.n;
+    next[c.vn.instance_id] = { epoch: c.epoch, from, behind: c.deficit.n };
+  }
+  return next;
+}
+
+/** Consensus states in which a validator syncs without a block height to measure progress by. */
+export const SYNC_STATES = new Set(["CheckSync", "Syncing", "Presyncing"]);
+
 export function deficitLabel(deficit: Deficit): string | null {
   switch (deficit.kind) {
     case "blocks":

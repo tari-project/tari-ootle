@@ -2,7 +2,17 @@
 //  SPDX-License-Identifier: BSD-3-Clause
 
 import { createContext, useContext } from "react";
-import { Indexer, Instance, LogFile, StdoutFile, ValidatorNode, VnDetail, WalletDaemon } from "../types";
+import { CatchUp } from "../consensus";
+import {
+  Indexer,
+  IndexerSyncStats,
+  Instance,
+  LogFile,
+  StdoutFile,
+  ValidatorNode,
+  VnDetail,
+  WalletDaemon,
+} from "../types";
 
 export interface InstanceLogs {
   logs: LogFile[];
@@ -21,6 +31,10 @@ export interface Swarm {
   indexers: Indexer[];
   /** Validator detail keyed by instance id. */
   details: Record<number, VnDetail>;
+  /** How far each lagging validator has caught up since it fell behind, keyed by instance id. */
+  catchUp: Record<number, CatchUp>;
+  /** Each running indexer's sync status, keyed by instance id; null while it does not answer. */
+  indexerSync: Record<number, IndexerSyncStats | null>;
   /** Logs keyed by instance id. */
   logs: Record<number, InstanceLogs>;
   baseNodeHeight: number | null;

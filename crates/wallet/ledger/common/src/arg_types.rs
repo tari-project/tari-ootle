@@ -6,6 +6,8 @@
 
 use borsh::{BorshDeserialize, BorshSerialize};
 
+use crate::OotleStatusWord;
+
 /// Key-derivation branch for [`GetPublicKeyRequest`] and [`SignTransactionHeader`].
 ///
 /// Mirrors `tari_ootle_wallet_sdk::models::KeyBranch` variant-for-variant so host and device
@@ -244,4 +246,150 @@ pub struct SignTransactionHeader {
 pub struct SignTransactionResponse {
     pub public_key: [u8; 32],
     pub signature: [u8; 64],
+}
+
+/// Summary fields extracted from the fixed-offset prefix of the streamed preimage.
+///
+/// `SchemaVersion` and `Network` have exact byte lengths, so `network` and the leading `u32`
+/// count of `FeeInstructions` sit at fixed offsets in the unframed preimage.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct TxDisplay {
+    pub network: u8,
+    pub fee_instruction_count: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ActiveSegment {
+    field: SigningField,
+    expected_len: Option<usize>,
+    bytes_seen: usize,
+}
+
+/// Validates the field order and prefix byte bounds of a streamed `SignTransaction` preimage and
+/// extracts its [`TxDisplay`] summary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SignStreamState {
+    mode: SignMode,
+    field_cursor: usize,
+    in_field: Option<ActiveSegment>,
+    display: TxDisplay,
+}
+
+/// The only transaction schema the device signs. Mirrors
+/// `tari_ootle_transaction::SchemaVersion::CURRENT`, which a test in the ledger client crate
+/// asserts.
+pub const EXPECTED_SCHEMA_VERSION: u16 = 2;
+/// Borsh encoding of `RistrettoPublicKeyBytes`: a `u32` length prefix followed by the 32-byte
+/// compressed key.
+const SEAL_SIGNER_SEGMENT_LEN: usize = 4 + 32;
+
+impl SignStreamState {
+    pub const fn new(mode: SignMode) -> Self {
+        Self {
+            mode,
+            field_cursor: 0,
+            in_field: None,
+            display: TxDisplay {
+                network: 0,
+                fee_instruction_count: 0,
+            },
+        }
+    }
+
+    pub fn accept_segment(&mut self, p1: u8, data: &[u8]) -> Result<(), OotleStatusWord> {
+        let is_last = (p1 & SEGMENT_LAST_CHUNK) != 0;
+        let field = SigningField::try_from(p1 & !SEGMENT_LAST_CHUNK).map_err(|_| OotleStatusWord::BadRequest)?;
+        let seq = self.mode.expected_fields();
+
+        let mut segment = match self.in_field {
+            None => {
+                let expected = seq
+                    .get(self.field_cursor)
+                    .copied()
+                    .ok_or(OotleStatusWord::SignStreamError)?;
+                if field != expected {
+                    return Err(OotleStatusWord::SignStreamError);
+                }
+                let expected_len = begin_segment(&mut self.display, field, data)?;
+                ActiveSegment {
+                    field,
+                    expected_len,
+                    bytes_seen: 0,
+                }
+            },
+            Some(current) => {
+                if field != current.field {
+                    return Err(OotleStatusWord::SignStreamError);
+                }
+                current
+            },
+        };
+
+        segment.bytes_seen = segment
+            .bytes_seen
+            .checked_add(data.len())
+            .ok_or(OotleStatusWord::BadRequest)?;
+        if let Some(expected) = segment.expected_len {
+            if is_last && segment.bytes_seen != expected {
+                return Err(OotleStatusWord::BadRequest);
+            }
+            if !is_last && segment.bytes_seen >= expected {
+                return Err(OotleStatusWord::BadRequest);
+            }
+        }
+
+        if is_last {
+            self.field_cursor += 1;
+            self.in_field = None;
+        } else {
+            self.in_field = Some(segment);
+        }
+        Ok(())
+    }
+
+    pub fn finish(self) -> Result<TxDisplay, OotleStatusWord> {
+        if self.in_field.is_some() || self.field_cursor != self.mode.expected_fields().len() {
+            return Err(OotleStatusWord::SignStreamError);
+        }
+        Ok(self.display)
+    }
+}
+
+fn begin_segment(display: &mut TxDisplay, field: SigningField, data: &[u8]) -> Result<Option<usize>, OotleStatusWord> {
+    match field {
+        SigningField::SchemaVersion => {
+            if read_u16(data)? != EXPECTED_SCHEMA_VERSION {
+                return Err(OotleStatusWord::BadRequest);
+            }
+            Ok(Some(2))
+        },
+        SigningField::SealSigner => Ok(Some(SEAL_SIGNER_SEGMENT_LEN)),
+        SigningField::Network => {
+            display.network = *data.first().ok_or(OotleStatusWord::BadRequest)?;
+            Ok(Some(1))
+        },
+        SigningField::FeeInstructions => {
+            display.fee_instruction_count = read_u32(data)?;
+            Ok(None)
+        },
+        _ => Ok(None),
+    }
+}
+
+fn read_u16(data: &[u8]) -> Result<u16, OotleStatusWord> {
+    let bytes: [u8; 2] = data
+        .get(..2)
+        .ok_or(OotleStatusWord::BadRequest)?
+        .try_into()
+        .map_err(|_| OotleStatusWord::BadRequest)?;
+    Ok(u16::from_le_bytes(bytes))
+}
+
+fn read_u32(data: &[u8]) -> Result<u32, OotleStatusWord> {
+    let bytes: [u8; 4] = data
+        .get(..4)
+        .ok_or(OotleStatusWord::BadRequest)?
+        .try_into()
+        .map_err(|_| OotleStatusWord::BadRequest)?;
+    Ok(u32::from_le_bytes(bytes))
 }

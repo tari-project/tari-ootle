@@ -107,6 +107,9 @@ impl From<&HotstuffMessage> for proto::consensus::HotStuffMessage {
     fn from(source: &HotstuffMessage) -> Self {
         let message = match source {
             HotstuffMessage::NewView(msg) => proto::consensus::hot_stuff_message::Message::NewView((&**msg).into()),
+            HotstuffMessage::TimeoutVote(vote) => {
+                proto::consensus::hot_stuff_message::Message::TimeoutVote(vote.into())
+            },
             HotstuffMessage::Proposal(msg) => proto::consensus::hot_stuff_message::Message::Proposal((&**msg).into()),
             HotstuffMessage::ForeignProposal(msg) => {
                 proto::consensus::hot_stuff_message::Message::ForeignProposal(msg.into())
@@ -145,6 +148,9 @@ impl TryFrom<proto::consensus::HotStuffMessage> for HotstuffMessage {
         let message = value.message.ok_or_else(|| anyhow!("Message is missing"))?;
         Ok(match message {
             proto::consensus::hot_stuff_message::Message::NewView(msg) => HotstuffMessage::new_newview(msg.try_into()?),
+            proto::consensus::hot_stuff_message::Message::TimeoutVote(vote) => {
+                HotstuffMessage::TimeoutVote(vote.try_into()?)
+            },
             proto::consensus::hot_stuff_message::Message::Proposal(msg) => {
                 HotstuffMessage::new_proposal(msg.try_into()?)
             },

@@ -5,6 +5,7 @@ import { useEffect } from "react";
 import { NavLink, useNavigate, useParams } from "react-router-dom";
 import { swarmRpc } from "../api/rpc";
 import { InstanceControls, LogLinks, Running } from "../components/NodeCard";
+import { ValidatorSync } from "../components/SyncProgress";
 import { readChannels } from "../consensus";
 import { distinguish } from "../names";
 import { useSwarm } from "../state/context";
@@ -128,6 +129,7 @@ export default function Validators() {
                   </span>
                 </span>
                 <span className="count">{c.height === null ? "—" : `h${c.height}`}</span>
+                <ValidatorSync channel={c} catchUp={swarm.catchUp[c.vn.instance_id]} compact />
               </NavLink>
             ))}
           </nav>
@@ -205,6 +207,7 @@ export default function Validators() {
                         {`  ${channel.deficit.n} epoch${channel.deficit.n > 1 ? "s" : ""} behind the tip`}
                       </span>
                     )}
+                    <ValidatorSync channel={channel} catchUp={swarm.catchUp[channel.vn.instance_id]} />
                   </dd>
 
                   <dt>Shard group</dt>

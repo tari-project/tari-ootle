@@ -1223,3 +1223,59 @@ td.nowrap,
     display: none;
   }
 }
+
+/* Sync progress */
+
+.sync {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.progress {
+  position: relative;
+  height: 6px;
+  min-width: 80px;
+  overflow: hidden;
+  border-radius: var(--pill);
+  background: var(--lag-soft);
+}
+
+.progress-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--lag);
+  transition: width 0.4s ease;
+}
+
+.progress.indeterminate .progress-fill {
+  width: 35%;
+  animation: progress-slide 1.4s ease-in-out infinite;
+}
+
+@keyframes progress-slide {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(290%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .progress.indeterminate .progress-fill {
+    width: 100%;
+    animation: none;
+    opacity: 0.5;
+  }
+}
+
+.nav a:has(> .sync) {
+  flex-wrap: wrap;
+}
+
+.nav a > .sync {
+  flex-basis: 100%;
+  margin-top: 2px;
+}

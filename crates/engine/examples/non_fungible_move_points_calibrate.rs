@@ -1,12 +1,12 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-//! Prices moving non-fungible ids between containers in metering points.
+//! Prices moving non-fungible ids and confidential commitments between containers in metering points.
 //!
 //! Taking from a bucket or vault, joining or depositing, and locking ids into a proof and unlocking
 //! them again all move every id they carry, one at a time, on the host. Each round trip below moves
-//! [`IDS`] ids out of a container and back, in each id shape, and the slowest shape bounds
-//! `PER_NON_FUNGIBLE_ID_MOVED`. The ids are converted to points at the same WASM
+//! [`IDS`] items out of a container and back, in each id shape and as commitments, and the slowest
+//! shape bounds `PER_NON_FUNGIBLE_ID_MOVED`. The ids are converted to points at the same WASM
 //! points-per-millisecond rate `native_points_calibrate` derives, and by the same method, so the
 //! figures are comparable.
 //!
@@ -20,7 +20,12 @@ use tari_engine_types::{
     resource_container::ResourceContainer,
 };
 use tari_ootle_transaction::{Epoch, Transaction, args};
-use tari_template_lib::types::{NonFungibleId, constants::NFT_FAUCET_RESOURCE_ADDRESS};
+use tari_template_lib::types::{
+    Amount,
+    NonFungibleId,
+    constants::NFT_FAUCET_RESOURCE_ADDRESS,
+    crypto::PedersenCommitmentBytes,
+};
 use tari_template_test_tooling::TemplateTest;
 
 const CRATE_PATH: &str = env!("CARGO_MANIFEST_DIR");
@@ -60,6 +65,17 @@ fn id_shapes(count: usize) -> Vec<(&'static str, BTreeSet<NonFungibleId>)> {
                 .collect(),
         ),
     ]
+}
+
+/// `count` distinct confidential commitments, ordered as a vault holds them.
+fn commitments(count: usize) -> Vec<PedersenCommitmentBytes> {
+    (0..count as u64)
+        .map(|i| {
+            let mut bytes = [0u8; 32];
+            bytes[24..].copy_from_slice(&i.to_be_bytes());
+            PedersenCommitmentBytes::from_array(bytes)
+        })
+        .collect()
 }
 
 /// The fastest of [`TRIALS`] runs of `f`, in milliseconds.
@@ -166,6 +182,32 @@ fn main() {
             }),
         );
     }
+
+    // A withdraw proof also takes commitments out of a container, but it names each one as an input priced on its
+    // own, so the moves timed here are those charged by the commitment count alone.
+    let commitments = commitments(2 * IDS);
+    let mut container = ResourceContainer::confidential(address, commitments.iter().take(IDS).copied(), Amount::zero());
+    report(
+        "commitment",
+        "lock all, then unlock",
+        best_ms(|| {
+            let locked = container.lock_all().unwrap();
+            container.unlock(black_box(locked)).unwrap();
+        }),
+    );
+    // Every other commitment stays behind, as for the ids above.
+    let moved = commitments.iter().step_by(2).copied().collect::<BTreeSet<_>>();
+    let mut container = ResourceContainer::confidential(address, commitments.iter().copied(), Amount::zero());
+    report(
+        "commitment",
+        "recall, deposit held",
+        best_ms(|| {
+            let recalled = container
+                .recall_confidential_commitments(&moved, Amount::zero())
+                .unwrap();
+            container.deposit(black_box(recalled)).unwrap();
+        }),
+    );
 
     println!(
         "\nPER_NON_FUNGIBLE_ID_MOVED = {}. The last column is what that charges over what was measured.",

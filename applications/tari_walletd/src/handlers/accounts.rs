@@ -1275,6 +1275,7 @@ pub async fn handle_transfer(
 
                     // Found it
                     found_dest_vault = Some(*vault_id);
+                    break;
                 },
             }
         }
@@ -1526,26 +1527,8 @@ pub async fn handle_stealth_transfer(
         ));
     };
 
-    // The sender's own address keys (account public key + view public key), used when an output opts in to
-    // attaching the sender address as its memo. Network is omitted; the recipient implies it from its own wallet.
-    let owner_addr = owner_account.address();
-    let sender_account_key: [u8; 32] = owner_addr
-        .account_public_key()
-        .as_bytes()
-        .try_into()
-        .map_err(|_| invalid_params("owner_account", Some("invalid account public key length")))?;
-    let sender_view_key: [u8; 32] = owner_addr
-        .view_only_key()
-        .as_bytes()
-        .try_into()
-        .map_err(|_| invalid_params("owner_account", Some("invalid view public key length")))?;
-    let owner_fallback_destination_tag: Vec<u8> = owner_addr
-        .destination_tag()
-        .map(|p| p.as_bytes().to_vec())
-        .unwrap_or_default();
-
     // Link the source account, plus any recipients that are the wallet's own accounts. Resolved before
-    // `req.transfers` is consumed below and before `owner_account` is moved into the transfer task.
+    // `req` is consumed below and before `owner_account` is moved into the transfer task.
     let mut linked_accounts = vec![*owner_account.component_address()];
     for transfer in &req.transfers {
         if let Some(acc) = sdk
@@ -1557,98 +1540,8 @@ pub async fn handle_stealth_transfer(
         }
     }
 
-    let outputs = req
-        .transfers
-        .into_iter()
-        .map(|transfer| {
-            // Resolve the effective destination tag for this transfer. The explicit `destination_tag` request field
-            // wins when present; an explicit empty string disables any destination tag. When the field is
-            // unset, fall back to the destination address's bech32-embedded destination tag so non-frontend
-            // callers keep the historical behaviour.
-            let effective_destination_tag: Option<Vec<u8>> = match transfer.destination_tag.as_deref() {
-                Some("") => None,
-                Some(s) => Some(s.as_bytes().to_vec()),
-                None => transfer
-                    .destination_address
-                    .destination_tag()
-                    .map(|p| p.as_bytes().to_vec()),
-            };
-
-            if transfer.attach_sender_address {
-                let destination_tag_bytes = effective_destination_tag
-                    .as_deref()
-                    .unwrap_or(owner_fallback_destination_tag.as_slice());
-                let memo = Memo::new_sender_address(sender_account_key, sender_view_key, destination_tag_bytes)
-                    .ok_or_else(|| {
-                        invalid_params("destination_tag", Some("destination tag too long (max 64 bytes)"))
-                    })?;
-                return Ok(TransferOutput {
-                    address: transfer.destination_address,
-                    blinded_amount: transfer.blinded_output_amount,
-                    revealed_amount: transfer.revealed_output_amount,
-                    memo: Some(memo),
-                    pay_to: transfer.pay_to,
-                });
-            }
-
-            match effective_destination_tag {
-                Some(destination_tag) => {
-                    let memo = transfer.output_memo.unwrap_or_else(|| Memo::new_message("").unwrap());
-                    if memo.as_destination_tag().is_some() {
-                        warn!(
-                            target: LOG_TARGET,
-                            "❗️ Overwriting existing destination tag in memo for transfer to address {}",
-                            transfer.destination_address
-                        );
-                    }
-
-                    let memo_bytes = memo
-                        .as_memo_message()
-                        .map(|s| s.as_bytes())
-                        .or_else(|| memo.as_memo_bytes())
-                        .ok_or_else(|| {
-                            invalid_params(
-                                "destination_tag",
-                                Some("can only include destination tag in message memo"),
-                            )
-                        })?;
-                    let memo = Memo::new_destination_tag_and_bytes_truncate(&destination_tag, memo_bytes).ok_or_else(
-                        || invalid_params("destination_tag", Some("destination tag too long (max 64 bytes)")),
-                    )?;
-
-                    Ok(TransferOutput {
-                        address: transfer.destination_address,
-                        blinded_amount: transfer.blinded_output_amount,
-                        revealed_amount: transfer.revealed_output_amount,
-                        memo: Some(memo),
-                        pay_to: transfer.pay_to,
-                    })
-                },
-                None => Ok(TransferOutput {
-                    address: transfer.destination_address,
-                    blinded_amount: transfer.blinded_output_amount,
-                    revealed_amount: transfer.revealed_output_amount,
-                    memo: transfer.output_memo,
-                    pay_to: transfer.pay_to,
-                }),
-            }
-        })
-        .collect::<anyhow::Result<_>>()?;
-
-    let mut params = StealthTransferParams {
-        max_epoch: context.transaction_max_epoch().await?,
-        fee_params: req.fee_params,
-        input_selection: req.input_selection,
-        inputs: req.inputs,
-        resource_address: req.resource_address,
-        max_fee: req.max_fee,
-        badge_usage: req.badge_usage,
-        outputs,
-        is_dry_run: req.dry_run,
-    };
-    if let Err(err) = params.validate(network) {
-        return Err(invalid_params("params", Some(err)));
-    }
+    let max_epoch = context.transaction_max_epoch().await?;
+    let mut params = prepare_stealth_transfer_params(&owner_account, req, network, max_epoch)?;
 
     let transaction_service = context.transaction_service().clone();
 
@@ -1686,7 +1579,7 @@ pub async fn handle_stealth_transfer(
             // account that funded the earlier one, and the failure needs to say which fee did it.
             // The cause is interpolated rather than added as context: `anyhow::Error` renders only
             // its outermost layer under `{}`, which is what the caller and the log see.
-            let (lock, transfer) = if req.dry_run {
+            let (lock, transfer) = if params.is_dry_run {
                 build.map_err(|e| {
                     anyhow!(
                         "building the transfer at a max fee of {max_fee_this_round} (fee estimate round {}): {e}",
@@ -1713,7 +1606,7 @@ pub async fn handle_stealth_transfer(
             // Sign and seal the final transaction
             let transaction = sdk.signer_api().sign(transfer.main_signer.key_id, transaction)?;
 
-            if req.dry_run {
+            if params.is_dry_run {
                 // Price the shape this build produced and rebuild until the price agrees with the
                 // fee the build was made at. Rebuilding costs local proof generation and nothing
                 // else, so the fixed point is reached without a round trip.
@@ -1875,6 +1768,125 @@ pub async fn handle_stealth_transfer(
         }
     })
     .await?
+}
+
+fn prepare_stealth_transfer_params(
+    owner_account: &AccountWithAddress,
+    req: StealthTransferRequest,
+    network: tari_ootle_address::Network,
+    max_epoch: Epoch,
+) -> anyhow::Result<StealthTransferParams> {
+    // The sender's own address keys (account public key + view public key), used when an output opts in to
+    // attaching the sender address as its memo. Network is omitted; the recipient implies it from its own wallet.
+    let owner_addr = owner_account.address();
+    let sender_account_key: [u8; 32] = owner_addr
+        .account_public_key()
+        .as_bytes()
+        .try_into()
+        .map_err(|_| invalid_params("owner_account", Some("invalid account public key length")))?;
+    let sender_view_key: [u8; 32] = owner_addr
+        .view_only_key()
+        .as_bytes()
+        .try_into()
+        .map_err(|_| invalid_params("owner_account", Some("invalid view public key length")))?;
+    let owner_fallback_destination_tag: Vec<u8> = owner_addr
+        .destination_tag()
+        .map(|p| p.as_bytes().to_vec())
+        .unwrap_or_default();
+
+    let outputs = req
+        .transfers
+        .into_iter()
+        .map(|transfer| {
+            // Resolve the effective destination tag for this transfer. The explicit `destination_tag` request field
+            // wins when present; an explicit empty string disables any destination tag. When the field is
+            // unset, fall back to the destination address's bech32-embedded destination tag so non-frontend
+            // callers keep the historical behaviour.
+            let effective_destination_tag: Option<Vec<u8>> = match transfer.destination_tag.as_deref() {
+                Some("") => None,
+                Some(s) => Some(s.as_bytes().to_vec()),
+                None => transfer
+                    .destination_address
+                    .destination_tag()
+                    .map(|p| p.as_bytes().to_vec()),
+            };
+
+            if transfer.attach_sender_address {
+                let destination_tag_bytes = effective_destination_tag
+                    .as_deref()
+                    .unwrap_or(owner_fallback_destination_tag.as_slice());
+                let memo = Memo::new_sender_address(sender_account_key, sender_view_key, destination_tag_bytes)
+                    .ok_or_else(|| {
+                        invalid_params("destination_tag", Some("destination tag too long (max 64 bytes)"))
+                    })?;
+                return Ok(TransferOutput {
+                    address: transfer.destination_address,
+                    blinded_amount: transfer.blinded_output_amount,
+                    revealed_amount: transfer.revealed_output_amount,
+                    memo: Some(memo),
+                    pay_to: transfer.pay_to,
+                });
+            }
+
+            match effective_destination_tag {
+                Some(destination_tag) => {
+                    let memo = transfer.output_memo.unwrap_or_else(|| Memo::new_message("").unwrap());
+                    if memo.as_destination_tag().is_some() {
+                        warn!(
+                            target: LOG_TARGET,
+                            "❗️ Overwriting existing destination tag in memo for transfer to address {}",
+                            transfer.destination_address
+                        );
+                    }
+
+                    let memo_bytes = memo
+                        .as_memo_message()
+                        .map(|s| s.as_bytes())
+                        .or_else(|| memo.as_memo_bytes())
+                        .ok_or_else(|| {
+                            invalid_params(
+                                "destination_tag",
+                                Some("can only include destination tag in message memo"),
+                            )
+                        })?;
+                    let memo = Memo::new_destination_tag_and_bytes_truncate(&destination_tag, memo_bytes).ok_or_else(
+                        || invalid_params("destination_tag", Some("destination tag too long (max 64 bytes)")),
+                    )?;
+
+                    Ok(TransferOutput {
+                        address: transfer.destination_address,
+                        blinded_amount: transfer.blinded_output_amount,
+                        revealed_amount: transfer.revealed_output_amount,
+                        memo: Some(memo),
+                        pay_to: transfer.pay_to,
+                    })
+                },
+                None => Ok(TransferOutput {
+                    address: transfer.destination_address,
+                    blinded_amount: transfer.blinded_output_amount,
+                    revealed_amount: transfer.revealed_output_amount,
+                    memo: transfer.output_memo,
+                    pay_to: transfer.pay_to,
+                }),
+            }
+        })
+        .collect::<anyhow::Result<_>>()?;
+
+    let params = StealthTransferParams {
+        max_epoch,
+        fee_params: req.fee_params,
+        input_selection: req.input_selection,
+        inputs: req.inputs,
+        resource_address: req.resource_address,
+        max_fee: req.max_fee.max(1),
+        badge_usage: req.badge_usage,
+        outputs,
+        is_dry_run: req.dry_run,
+    };
+    if let Err(err) = params.validate(network) {
+        return Err(invalid_params("params", Some(err)));
+    }
+    Ok(params)
 }
 
 /// How many times the static estimate may rebuild before giving up and letting the dry-run rounds
@@ -3822,6 +3834,64 @@ mod create_stealth_transfer_statement_handler_tests {
         assert!(
             assert_invalid_params(&err).to_string().contains("view-only account"),
             "{err}"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn stealth_transfer_dry_run_clamps_zero_max_fee_to_one() {
+        use tari_ootle_wallet_crypto::pay_to::PayTo;
+        use tari_ootle_wallet_sdk::apis::{
+            confidential_transfer::UtxoInputSelection,
+            stealth_transfer::{BadgeUsage, TransferFeeParams},
+        };
+        use tari_ootle_walletd_client::types::StealthTransfer;
+
+        let test = setup().await;
+        let owner_account = test
+            .context
+            .wallet_sdk()
+            .accounts_api()
+            .get_account_by_address(&test.account)
+            .unwrap();
+        let req = StealthTransferRequest {
+            owner_account: test.account.into(),
+            fee_params: TransferFeeParams::new(UtxoInputSelection::PreferRevealed),
+            input_selection: UtxoInputSelection::PreferRevealed,
+            inputs: None,
+            resource_address: test.stealth_resource,
+            badge_usage: BadgeUsage::None,
+            transfers: vec![StealthTransfer {
+                destination_address: owner_account.address().clone(),
+                blinded_output_amount: 100,
+                revealed_output_amount: Amount::zero(),
+                output_memo: None,
+                pay_to: PayTo::StealthPublicKey,
+                attach_sender_address: false,
+                destination_tag: None,
+            }],
+            max_fee: 0,
+            dry_run: true,
+        };
+        let params = prepare_stealth_transfer_params(&owner_account, req, Network::LocalNet, Epoch(10)).unwrap();
+        assert_eq!(params.max_fee, 1);
+
+        let Err(err) = test
+            .context
+            .wallet_sdk()
+            .stealth_transfer_api()
+            .transfer(owner_account, params)
+            .await
+        else {
+            panic!("zero-balance account cannot fund the clamped 1-unit fee");
+        };
+        assert!(
+            matches!(
+                err,
+                StealthTransferApiError::OutputsApi(
+                    tari_ootle_wallet_sdk::apis::stealth_outputs::StealthOutputsApiError::InsufficientFunds
+                ) | StealthTransferApiError::InsufficientFunds { .. }
+            ),
+            "expected InsufficientFunds from clamped max_fee = 1, got: {err}"
         );
     }
 }

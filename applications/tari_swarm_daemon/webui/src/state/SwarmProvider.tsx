@@ -3,11 +3,13 @@
 
 import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { describeError, nodeRpc, swarmRpc } from "../api/rpc";
+import { CatchUp, readChannels, trackCatchUp } from "../consensus";
 import {
   ConsensusStatus,
   EpochManagerStats,
   Identity,
   Indexer,
+  IndexerSyncStats,
   Instance,
   InstanceType,
   LogFile,
@@ -56,37 +58,90 @@ function assignToInstances(logFiles: LogFile[], stdoutFiles: StdoutFile[]): Reco
   return byInstance;
 }
 
+const DEFAULT_INTERVAL_MS = 2000;
+
+function readStoredInterval(): number {
+  try {
+    const raw = localStorage.getItem("swarm.interval");
+    if (raw === null || raw.trim() === "") {
+      return DEFAULT_INTERVAL_MS;
+    }
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : DEFAULT_INTERVAL_MS;
+  } catch {
+    return DEFAULT_INTERVAL_MS;
+  }
+}
+
 export function SwarmProvider({ children }: { children: ReactNode }) {
   const [instances, setInstances] = useState<Instance[]>([]);
   const [validators, setValidators] = useState<ValidatorNode[]>([]);
   const [wallets, setWallets] = useState<WalletDaemon[]>([]);
   const [indexers, setIndexers] = useState<Indexer[]>([]);
   const [details, setDetails] = useState<Record<number, VnDetail>>({});
+  const [catchUp, setCatchUp] = useState<Record<number, CatchUp>>({});
+  const [indexerSync, setIndexerSync] = useState<Record<number, IndexerSyncStats | null>>({});
   const [logs, setLogs] = useState<Record<number, InstanceLogs>>({});
   const [baseNodeHeight, setBaseNodeHeight] = useState<number | null>(null);
   const [isMining, setIsMining] = useState(false);
   const [loaded, setLoaded] = useState(false);
-  const [intervalMs, setIntervalMsState] = useState(() => Number(localStorage.getItem("swarm.interval") ?? 2000));
+  const [intervalMs, setIntervalMsState] = useState(readStoredInterval);
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   // Identities never change for the life of an instance, so they are fetched once.
   const identities = useRef<Record<number, Identity>>({});
+  const catchUpRef = useRef<Record<number, CatchUp>>({});
   const nextToastId = useRef(0);
+  const toastTimers = useRef<Map<number, number>>(new Map());
   const pollNow = useRef<() => void>(() => {});
 
   const report = useCallback((message: string) => {
     const id = (nextToastId.current += 1);
-    setToasts((current) => [...current.slice(-3), { id, message }]);
-    setTimeout(() => setToasts((current) => current.filter((t) => t.id !== id)), 8000);
+    setToasts((current) => {
+      const dropped = current.length >= 4 ? current.slice(0, current.length - 3) : [];
+      for (const item of dropped) {
+        const droppedTimer = toastTimers.current.get(item.id);
+        if (droppedTimer !== undefined) {
+          window.clearTimeout(droppedTimer);
+          toastTimers.current.delete(item.id);
+        }
+      }
+      return [...current.slice(-3), { id, message }];
+    });
+    const timerId = window.setTimeout(() => {
+      toastTimers.current.delete(id);
+      setToasts((current) => current.filter((t) => t.id !== id));
+    }, 8000);
+    toastTimers.current.set(id, timerId);
   }, []);
 
   const dismiss = useCallback((id: number) => {
+    const existing = toastTimers.current.get(id);
+    if (existing !== undefined) {
+      window.clearTimeout(existing);
+      toastTimers.current.delete(id);
+    }
     setToasts((current) => current.filter((t) => t.id !== id));
   }, []);
 
+  useEffect(() => {
+    const timers = toastTimers.current;
+    return () => {
+      for (const timerId of timers.values()) {
+        window.clearTimeout(timerId);
+      }
+      timers.clear();
+    };
+  }, []);
+
   const setIntervalMs = useCallback((ms: number) => {
-    localStorage.setItem("swarm.interval", String(ms));
-    setIntervalMsState(ms);
+    const next = Number.isFinite(ms) && ms >= 0 ? ms : DEFAULT_INTERVAL_MS;
+    try {
+      localStorage.setItem("swarm.interval", String(next));
+    } catch {
+      // Ignore storage errors in restricted browsing contexts.
+    }
+    setIntervalMsState(next);
   }, []);
 
   const pollValidator = useCallback(async (vn: ValidatorNode): Promise<VnDetail> => {
@@ -149,8 +204,24 @@ export function SwarmProvider({ children }: { children: ReactNode }) {
       setBaseNodeHeight(null);
     }
 
-    const detailList = await Promise.all(vnList.nodes.map(pollValidator));
-    setDetails(Object.fromEntries(vnList.nodes.map((vn, i) => [vn.instance_id, detailList[i]])));
+    const [detailList, syncList] = await Promise.all([
+      Promise.all(vnList.nodes.map(pollValidator)),
+      Promise.all(
+        indexerList.nodes.map((indexer) =>
+          indexer.is_running
+            ? settle<IndexerSyncStats | null>(
+                fetch(new URL("network/stats", indexer.api_url)).then((r) => (r.ok ? r.json() : null)),
+                null,
+              )
+            : Promise.resolve(null),
+        ),
+      ),
+    ]);
+    const nextDetails = Object.fromEntries(vnList.nodes.map((vn, i) => [vn.instance_id, detailList[i]]));
+    setDetails(nextDetails);
+    catchUpRef.current = trackCatchUp(catchUpRef.current, readChannels(vnList.nodes, nextDetails).channels);
+    setCatchUp(catchUpRef.current);
+    setIndexerSync(Object.fromEntries(indexerList.nodes.map((indexer, i) => [indexer.instance_id, syncList[i]])));
 
     const logResults = await Promise.all(
       LOGGED_TYPES.map((instance_type) =>
@@ -171,24 +242,46 @@ export function SwarmProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let cancelled = false;
+    let inFlight = false;
+    let rerunRequested = false;
     let timer: number | undefined;
 
     // A recursive timeout rather than setInterval: a slow round never stacks on itself.
     const run = async () => {
+      if (inFlight) {
+        rerunRequested = true;
+        return;
+      }
+      window.clearTimeout(timer);
+      timer = undefined;
+      inFlight = true;
       try {
         await poll();
       } catch (err) {
         if (!cancelled) {
           report(describeError(err));
         }
+      } finally {
+        inFlight = false;
       }
-      if (!cancelled && intervalMs > 0) {
+      if (cancelled) {
+        return;
+      }
+      if (rerunRequested) {
+        rerunRequested = false;
+        void run();
+      } else if (intervalMs > 0) {
         timer = window.setTimeout(run, intervalMs);
       }
     };
 
     pollNow.current = () => {
+      if (inFlight) {
+        rerunRequested = true;
+        return;
+      }
       window.clearTimeout(timer);
+      timer = undefined;
       void run();
     };
     void run();
@@ -220,6 +313,8 @@ export function SwarmProvider({ children }: { children: ReactNode }) {
       wallets,
       indexers,
       details,
+      catchUp,
+      indexerSync,
       logs,
       baseNodeHeight,
       isMining,
@@ -238,6 +333,8 @@ export function SwarmProvider({ children }: { children: ReactNode }) {
       wallets,
       indexers,
       details,
+      catchUp,
+      indexerSync,
       logs,
       baseNodeHeight,
       isMining,

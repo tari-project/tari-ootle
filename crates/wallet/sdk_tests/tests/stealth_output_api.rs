@@ -21,11 +21,13 @@ use tari_ootle_wallet_sdk::{
         stealth_outputs::StealthOutputsApiError,
         stealth_transfer::{
             BadgeUsage,
+            InputSelection,
             PayFeeWithSwapParams,
             StealthTransferApiError,
             StealthTransferParams,
             TransferFeeParams,
             TransferOutput,
+            TransferStatementSpec,
         },
     },
     crypto::pay_to::PayTo,
@@ -1385,4 +1387,348 @@ async fn merged_fallback_with_prefer_revealed_locks_only_recipient_amount_for_tr
         .get_vault_by_resource(account.component_address(), &TARI_TOKEN)
         .unwrap();
     assert_eq!(vault.locked_revealed_balance, Amount::from(300u64));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn fee_statement_with_prefer_revealed_includes_revealed_input_in_change_calculation() {
+    let test = Test::new();
+    let sdk = test.sdk();
+    let account = sdk
+        .accounts_api()
+        .get_account_by_address(&Test::test_account_address())
+        .unwrap();
+    test.store()
+        .with_write_tx(|tx| {
+            tx.vaults_update(
+                Test::test_vault_address(),
+                SubstateVersion::ZERO,
+                500u64.into(),
+                0u64.into(),
+            )
+        })
+        .unwrap();
+    add_owned_stealth_output(&test, &account, STEALTH_TARI_RESOURCE_ADDRESS, 800);
+
+    let transfer_resource = resource_address_from_seed(7);
+    sdk.resources_api()
+        .upsert_resource(
+            &transfer_resource,
+            &Resource::new(
+                ResourceType::Stealth,
+                SubstateOwnerRule::None,
+                ResourceAccessRules::new(),
+                Metadata::new(),
+                None,
+                None,
+                6,
+                false,
+            ),
+        )
+        .unwrap();
+    add_owned_stealth_output(&test, &account, transfer_resource, 500);
+
+    let (lock, output) = sdk
+        .stealth_transfer_api()
+        .transfer(account.clone(), StealthTransferParams {
+            fee_params: TransferFeeParams::new(UtxoInputSelection::PreferRevealed),
+            input_selection: UtxoInputSelection::ConfidentialOnly,
+            inputs: None,
+            outputs: vec![TransferOutput {
+                address: account.address().clone(),
+                revealed_amount: Amount::zero(),
+                blinded_amount: 500,
+                memo: None,
+                pay_to: PayTo::StealthPublicKey,
+            }],
+            badge_usage: BadgeUsage::None,
+            resource_address: transfer_resource,
+            max_fee: 1000,
+            max_epoch: Epoch(10),
+            is_dry_run: false,
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(output.fee_inputs.revealed, Amount::from(500u64));
+    assert_eq!(output.fee_inputs.inputs.len(), 1);
+    let fee_stealth_stmt = output
+        .transaction
+        .fee_instructions()
+        .iter()
+        .find_map(|instruction| match instruction {
+            Instruction::StealthTransfer { statement, .. } => Some(statement),
+            _ => None,
+        })
+        .expect("fee instructions must include StealthTransfer");
+    assert_eq!(fee_stealth_stmt.revealed_input_amount(), Amount::from(500u64));
+    assert_eq!(fee_stealth_stmt.inputs_statement.inputs.len(), 1);
+    assert_eq!(fee_stealth_stmt.outputs_statement.outputs.len(), 1);
+    assert_eq!(fee_stealth_stmt.revealed_output_amount(), Amount::from(1000u64));
+    lock.release();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[allow(clippy::too_many_lines)]
+async fn stealth_transfer_with_badge_authorizes_proof_around_stealth_transfer() {
+    let test = Test::new();
+    let sdk = test.sdk();
+    let owner_account = sdk
+        .accounts_api()
+        .get_account_by_address(&Test::test_account_address())
+        .unwrap();
+
+    add_owned_stealth_output(&test, &owner_account, STEALTH_TARI_RESOURCE_ADDRESS, 5_000);
+    let badge_resource = resource_address_from_seed(8);
+    let badge_vault_id: VaultId = "vault_0dc41b5cc74b36d696c7b140323a40a2f98b71df5d60e5a6bf4c1a07fffffffe"
+        .parse()
+        .unwrap();
+    sdk.accounts_api()
+        .add_vault(
+            Test::test_account_address(),
+            badge_vault_id,
+            SubstateVersion::ZERO,
+            badge_resource,
+            ResourceType::Fungible,
+            Some("BDG".to_string()),
+            0,
+        )
+        .unwrap();
+
+    let blinded_output = || TransferOutput {
+        address: owner_account.address().clone(),
+        revealed_amount: Amount::zero(),
+        blinded_amount: 100,
+        memo: None,
+        pay_to: PayTo::StealthPublicKey,
+    };
+
+    // Standard path (4 blinded outputs prevent merging into fee intent).
+    let (std_lock, std_tx) = sdk
+        .stealth_transfer_api()
+        .transfer(owner_account.clone(), StealthTransferParams {
+            fee_params: TransferFeeParams::new(UtxoInputSelection::ConfidentialOnly),
+            input_selection: UtxoInputSelection::ConfidentialOnly,
+            inputs: None,
+            outputs: vec![blinded_output(), blinded_output(), blinded_output(), blinded_output()],
+            badge_usage: BadgeUsage::Resource(badge_resource),
+            resource_address: STEALTH_TARI_RESOURCE_ADDRESS,
+            max_fee: 100,
+            max_epoch: Epoch(10),
+            is_dry_run: true,
+        })
+        .await
+        .unwrap();
+
+    let instructions = std_tx.transaction.instructions();
+    let auth_idx = instructions
+        .iter()
+        .position(|i| matches!(i, Instruction::AuthorizeProof { .. }))
+        .expect("badge transfer must authorize proof");
+    let stealth_idx = instructions
+        .iter()
+        .position(|i| matches!(i, Instruction::StealthTransfer { .. }))
+        .expect("standard transfer must emit StealthTransfer");
+    let drop_auth_idx = instructions
+        .iter()
+        .position(|i| matches!(i, Instruction::DropProofAuthorization { .. }))
+        .expect("badge transfer must drop proof authorization");
+    assert!(
+        auth_idx < stealth_idx && stealth_idx < drop_auth_idx,
+        "proof authorization must wrap StealthTransfer on the standard path"
+    );
+    std_lock.release();
+
+    // Merged path (1 blinded output in TARI).
+    let (merged_lock, merged_tx) = sdk
+        .stealth_transfer_api()
+        .transfer(owner_account.clone(), StealthTransferParams {
+            fee_params: TransferFeeParams::new(UtxoInputSelection::ConfidentialOnly),
+            input_selection: UtxoInputSelection::ConfidentialOnly,
+            inputs: None,
+            outputs: vec![blinded_output()],
+            badge_usage: BadgeUsage::Resource(badge_resource),
+            resource_address: STEALTH_TARI_RESOURCE_ADDRESS,
+            max_fee: 100,
+            max_epoch: Epoch(10),
+            is_dry_run: true,
+        })
+        .await
+        .unwrap();
+
+    let fee_instructions = merged_tx.transaction.fee_instructions();
+    let m_auth_idx = fee_instructions
+        .iter()
+        .position(|i| matches!(i, Instruction::AuthorizeProof { .. }))
+        .expect("merged badge transfer must authorize proof");
+    let m_stealth_idx = fee_instructions
+        .iter()
+        .position(|i| matches!(i, Instruction::StealthTransfer { .. }))
+        .expect("merged transfer must emit StealthTransfer");
+    let m_put_idx = fee_instructions
+        .iter()
+        .rposition(|i| matches!(i, Instruction::PutLastInstructionOutputOnWorkspace { .. }))
+        .expect("merged transfer must store revealed bucket on workspace");
+    let m_drop_auth_idx = fee_instructions
+        .iter()
+        .position(|i| matches!(i, Instruction::DropProofAuthorization { .. }))
+        .expect("merged badge transfer must drop proof authorization");
+    let m_pay_fee_idx = fee_instructions
+        .iter()
+        .position(|i| matches!(i, Instruction::PayFeeFromBucket { .. }))
+        .expect("merged transfer must pay fee from revealed bucket");
+    assert!(
+        m_auth_idx < m_stealth_idx &&
+            m_stealth_idx < m_drop_auth_idx &&
+            m_drop_auth_idx < m_put_idx &&
+            m_put_idx < m_pay_fee_idx,
+        "merged badge authorization must wrap StealthTransfer before DropProofAuthorization"
+    );
+    merged_lock.release();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn create_transfer_statements_selection_adds_and_tracks_change_output() {
+    let sets = [ValidatorSetFixture::new(1)];
+    let network = ProvingNetwork::new(&sets, 0);
+    let test = TestWithNetwork::with_network(network);
+    let sdk = test.sdk();
+    let sender = sdk
+        .accounts_api()
+        .get_account_by_address(&Test::test_account_address())
+        .unwrap();
+
+    let stealth_resource = resource_address_from_seed(9);
+    sdk.resources_api()
+        .upsert_resource(
+            &stealth_resource,
+            &Resource::new(
+                ResourceType::Stealth,
+                SubstateOwnerRule::None,
+                ResourceAccessRules::new(),
+                Metadata::new(),
+                None,
+                None,
+                6,
+                false,
+            ),
+        )
+        .unwrap();
+    add_owned_stealth_output(&test, &sender, stealth_resource, 100);
+
+    let (_, recipient_pk) = random_keypair();
+    let (_, recipient_view_pk) = random_keypair();
+    let recipient = tari_ootle_address::OotleAddress::new(
+        sender.address().network(),
+        recipient_view_pk.to_byte_type(),
+        recipient_pk.to_byte_type(),
+    );
+
+    let lock = sdk.locks_api().create_lock().unwrap();
+    let built = sdk
+        .stealth_transfer_api()
+        .create_transfer_statements(lock.id(), &[TransferStatementSpec {
+            sender: sender.clone(),
+            resource_address: stealth_resource,
+            input_selection: InputSelection::Selection(UtxoInputSelection::PreferConfidential),
+            outputs: vec![TransferOutput {
+                address: recipient,
+                revealed_amount: Amount::zero(),
+                blinded_amount: 40,
+                memo: None,
+                pay_to: PayTo::StealthPublicKey,
+            }],
+        }])
+        .await
+        .unwrap();
+
+    assert_eq!(built.statements.len(), 1);
+    let outputs = &built.statements[0].outputs_statement.outputs;
+    assert_eq!(outputs.len(), 2, "must include recipient output and change output");
+
+    let unspent_and_locked = sdk
+        .stealth_outputs_api()
+        .utxos_get_many(&stealth_resource, Some(sender.component_address()), None)
+        .unwrap();
+    let change = unspent_and_locked
+        .iter()
+        .find(|o| &o.commitment == outputs[1].commitment())
+        .expect("change output must be recorded as unconfirmed output under the lock");
+    assert_eq!(change.value, 60);
+    assert_eq!(change.status, OutputStatus::LockedUnconfirmed);
+    assert_eq!(change.lock_id, Some(lock.id()));
+    lock.release();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn create_transfer_statements_selection_rejects_excess_outputs_with_change() {
+    let sets = [ValidatorSetFixture::new(1)];
+    let network = ProvingNetwork::new(&sets, 0);
+    let test = TestWithNetwork::with_network(network);
+    let sdk = test.sdk();
+    let sender = sdk
+        .accounts_api()
+        .get_account_by_address(&Test::test_account_address())
+        .unwrap();
+
+    let stealth_resource = resource_address_from_seed(10);
+    sdk.resources_api()
+        .upsert_resource(
+            &stealth_resource,
+            &Resource::new(
+                ResourceType::Stealth,
+                SubstateOwnerRule::None,
+                ResourceAccessRules::new(),
+                Metadata::new(),
+                None,
+                None,
+                6,
+                false,
+            ),
+        )
+        .unwrap();
+    add_owned_stealth_output(&test, &sender, stealth_resource, 100);
+
+    let (_, recipient_pk) = random_keypair();
+    let (_, recipient_view_pk) = random_keypair();
+    let recipient = tari_ootle_address::OotleAddress::new(
+        sender.address().network(),
+        recipient_view_pk.to_byte_type(),
+        recipient_pk.to_byte_type(),
+    );
+
+    let outputs = (0..16)
+        .map(|_| TransferOutput {
+            address: recipient.clone(),
+            revealed_amount: Amount::zero(),
+            blinded_amount: 5,
+            memo: None,
+            pay_to: PayTo::StealthPublicKey,
+        })
+        .collect();
+
+    let lock = sdk.locks_api().create_lock().unwrap();
+    let Err(err) = sdk
+        .stealth_transfer_api()
+        .create_transfer_statements(lock.id(), &[TransferStatementSpec {
+            sender,
+            resource_address: stealth_resource,
+            input_selection: InputSelection::Selection(UtxoInputSelection::PreferConfidential),
+            outputs,
+        }])
+        .await
+    else {
+        panic!("expected InvalidParameter for outputs exceeding MAX_STEALTH_OUTPUTS with change");
+    };
+
+    assert!(
+        matches!(
+            err,
+            tari_ootle_wallet_sdk::apis::stealth_transfer::StealthTransferApiError::InvalidParameter {
+                param: "outputs",
+                ..
+            }
+        ),
+        "expected InvalidParameter for outputs exceeding MAX_STEALTH_OUTPUTS with change, got: {err}"
+    );
+    lock.release();
 }

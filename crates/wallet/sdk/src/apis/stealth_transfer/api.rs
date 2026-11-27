@@ -24,7 +24,7 @@ use tari_template_lib::{
         ResourceAddress,
         UtxoAddress,
         constants::TARI_TOKEN,
-        stealth::{RevealedOutput, StealthTransferStatement},
+        stealth::{MAX_STEALTH_OUTPUTS, RevealedOutput, StealthTransferStatement},
     },
 };
 use tokio::{sync::Semaphore, task::block_in_place};
@@ -141,8 +141,9 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
     /// Builds one stealth transfer statement per spec, in order, locking the inputs each one spends under `lock_id`.
     ///
     /// Every spec is checked before any input is locked. An output paying a wallet account with a plain key-path spend
-    /// is recorded as `LockedUnconfirmed` under `lock_id` once every statement is built, so each statement spends only
-    /// outputs already on chain: input selection counts same-lock unconfirmed outputs as spendable.
+    /// — including any surplus change output created for [`InputSelection::Selection`] — is recorded as
+    /// `LockedUnconfirmed` under `lock_id` once every statement is built, so each statement spends only outputs already
+    /// on chain: input selection counts same-lock unconfirmed outputs as spendable.
     ///
     /// On error, the inputs already locked and any outputs already recorded stay under `lock_id`; releasing the lock
     /// undoes both.
@@ -162,7 +163,8 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
         let mut wallet_outputs = Vec::new();
         for (spec, checked) in specs.iter().zip(checked) {
             let sender_key_id = checked.sender_key_id;
-            let (statement, signing_key_id, inputs) = self.build_transfer_statement(lock_id, spec, checked)?;
+            let (statement, signing_key_id, inputs, change_amount) =
+                self.build_transfer_statement(lock_id, spec, checked)?;
 
             let blinded_outputs = spec.outputs.iter().filter(|o| o.blinded_amount > 0);
             for (requested, created) in blinded_outputs.zip(&statement.outputs_statement.outputs) {
@@ -170,8 +172,25 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                     continue;
                 }
                 if let Some(account) = self.accounts_api.find_account_paid_by(&requested.address)? {
-                    wallet_outputs.push((spec.resource_address, account, created.clone(), requested));
+                    wallet_outputs.push((
+                        spec.resource_address,
+                        account,
+                        created.clone(),
+                        requested.blinded_amount,
+                        requested.memo.clone(),
+                    ));
                 }
+            }
+            if change_amount > 0 &&
+                let Some(created) = statement.outputs_statement.outputs.last()
+            {
+                wallet_outputs.push((
+                    spec.resource_address,
+                    spec.sender.clone(),
+                    created.clone(),
+                    change_amount,
+                    None,
+                ));
             }
 
             if !signing_keys.contains(&signing_key_id) {
@@ -190,15 +209,9 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
             statements.push(statement);
         }
 
-        for (resource_address, account, output, requested) in wallet_outputs {
-            self.outputs_api.add_unconfirmed_output(
-                lock_id,
-                &account,
-                resource_address,
-                &output,
-                requested.blinded_amount,
-                requested.memo.clone(),
-            )?;
+        for (resource_address, account, output, amount, memo) in wallet_outputs {
+            self.outputs_api
+                .add_unconfirmed_output(lock_id, &account, resource_address, &output, amount, memo)?;
         }
 
         Ok(TransferStatements {
@@ -270,14 +283,15 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
         })
     }
 
-    /// Locks the inputs `spec` selects and builds its statement, returning the statement, the key that signs it and
-    /// the inputs it spends.
+    /// Locks the inputs `spec` selects and builds its statement, returning the statement, the key that signs it, the
+    /// inputs it spends, and the change amount (if any).
+    #[allow(clippy::too_many_lines)]
     fn build_transfer_statement(
         &self,
         lock_id: WalletLockId,
         spec: &TransferStatementSpec,
         checked: CheckedStatementSpec,
-    ) -> Result<(StealthTransferStatement, KeyId, InputsToSpend), StealthTransferApiError> {
+    ) -> Result<(StealthTransferStatement, KeyId, InputsToSpend, u64), StealthTransferApiError> {
         let sender = &spec.sender;
         let inputs = match &spec.input_selection {
             InputSelection::Specific { utxo_addresses } => {
@@ -330,12 +344,57 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                 param: "input_revealed_amount",
                 reason: "input revealed amount overflowed or was negative".to_string(),
             })?;
-        let outputs = spec
+        let change_amount = if matches!(spec.input_selection, InputSelection::Selection(_)) {
+            inputs
+                .total_amount()
+                .checked_sub(checked.total_amount)
+                .ok_or_else(|| StealthTransferApiError::InvariantViolation {
+                    details: format!(
+                        "Total input amount {} is less than output amount {}",
+                        inputs.total_amount(),
+                        checked.total_amount
+                    ),
+                })?
+                .to_u64_checked()
+                .ok_or_else(|| StealthTransferApiError::InvariantViolation {
+                    details: "Change amount exceeds u64".to_string(),
+                })?
+        } else {
+            0
+        };
+
+        let mut outputs = spec
             .outputs
             .iter()
             .filter(|o| o.blinded_amount > 0)
             .map(TryInto::try_into)
             .collect::<Result<Vec<StealthOutputToCreate<'_>>, _>>()?;
+        let total_outputs = outputs.len() + usize::from(change_amount > 0);
+        if total_outputs > MAX_STEALTH_OUTPUTS {
+            return Err(StealthTransferApiError::InvalidParameter {
+                param: "outputs",
+                reason: format!(
+                    "Statement has {total_outputs} blinded outputs (including change), which exceeds the maximum of \
+                     {MAX_STEALTH_OUTPUTS}",
+                ),
+            });
+        }
+        if change_amount > 0 {
+            let change_address =
+                sender
+                    .address()
+                    .try_from_byte_type()
+                    .map_err(|e| StealthTransferApiError::InvalidParameter {
+                        param: "sender",
+                        reason: format!("Invalid sender address: {e}"),
+                    })?;
+            outputs.push(StealthOutputToCreate {
+                owner_address: change_address,
+                amount: change_amount,
+                memo: None,
+                pay_to: PayTo::StealthPublicKey,
+            });
+        }
 
         let statement = self.outputs_api.generate_transfer_statement(TransferStatementParams {
             view_only_key_id: sender.view_only_key_id(),
@@ -348,7 +407,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
                 .then(|| RevealedOutput::new(checked.revealed_amount, signing_public_key.public_key().to_byte_type())),
         })?;
 
-        Ok((statement, signing_key_id, inputs))
+        Ok((statement, signing_key_id, inputs, change_amount))
     }
 
     fn lock_inputs_within_budget(
@@ -637,7 +696,7 @@ impl<'a, TSpec: WalletSdkSpec> StealthTransferApi<'a, TSpec> {
         };
 
         let fee_stealth_change_amt = fee_inputs_to_spend
-            .total_stealth_input_amount()
+            .total_amount()
             .saturating_sub(fee_amount_to_spend)
             .to_u64_checked()
             .ok_or_else(|| {
@@ -1357,33 +1416,14 @@ fn generate_transfer_transaction(
                 }
             })
             .then(|builder| {
-                // When there are no stealth inputs or outputs, skip the stealth transfer instruction
-                // and use a standard withdraw instead. A stealth transfer would still work correctly,
-                // but a plain withdraw is more fee-efficient.
-                let has_no_inputs_or_outputs = transfer_statement.outputs_statement.outputs.is_empty() && transfer_statement.inputs_statement.inputs.is_empty();
-                if has_no_inputs_or_outputs {
-                    return withdraw_from_account(
-                        builder,
-                        *owner_account.component_address(),
-                        params.resource_address,
-                        revealed_input_amount,
-                        &params.badge_usage,
-                    );
-                }
-
-                if revealed_input_amount.is_positive() {
-                    withdraw_from_account(
-                        builder,
-                        owner_account.account.component_address,
-                        params.resource_address,
-                        revealed_input_amount,
-                        &params.badge_usage,
-                    )
-                        .put_last_instruction_output_on_workspace("input_bucket")
-                        .stealth_transfer_with_input_bucket(params.resource_address, transfer_statement, "input_bucket")
-                } else {
-                    builder.stealth_transfer(params.resource_address, transfer_statement)
-                }
+                execute_transfer_with_optional_badge(
+                    builder,
+                    *owner_account.component_address(),
+                    params.resource_address,
+                    revealed_input_amount,
+                    transfer_statement,
+                    &params.badge_usage,
+                )
             })
             .then(|builder| {
                 // revealed_to_account may be Some, but we only use it if revealed_output_amount is greater than zero.
@@ -1460,38 +1500,14 @@ fn generate_merged_transfer_transaction(
                             .put_last_instruction_output_on_workspace("proof"),
                     })
                     .then(|b| {
-                        // When there are no stealth inputs or outputs, skip the stealth transfer
-                        // instruction and use a standard withdraw instead. A stealth transfer would still
-                        // work correctly, but a plain withdraw is more fee-efficient.
-                        let has_no_inputs_or_outputs = transfer_statement.outputs_statement.outputs.is_empty() &&
-                            transfer_statement.inputs_statement.inputs.is_empty();
-                        if has_no_inputs_or_outputs {
-                            return withdraw_from_account(
-                                b,
-                                account_address,
-                                params.resource_address,
-                                revealed_input_amount,
-                                &params.badge_usage,
-                            );
-                        }
-
-                        if revealed_input_amount.is_positive() {
-                            withdraw_from_account(
-                                b,
-                                account_address,
-                                params.resource_address,
-                                revealed_input_amount,
-                                &params.badge_usage,
-                            )
-                            .put_last_instruction_output_on_workspace("input_bucket")
-                            .stealth_transfer_with_input_bucket(
-                                params.resource_address,
-                                transfer_statement,
-                                "input_bucket",
-                            )
-                        } else {
-                            b.stealth_transfer(params.resource_address, transfer_statement)
-                        }
+                        execute_transfer_with_optional_badge(
+                            b,
+                            account_address,
+                            params.resource_address,
+                            revealed_input_amount,
+                            transfer_statement,
+                            &params.badge_usage,
+                        )
                     })
                     .put_last_instruction_output_on_workspace("revealed_bucket")
                     .then(|b| {
@@ -1554,21 +1570,37 @@ struct CheckedStatementSpec {
     resource_view_key: Option<RistrettoPublicKey>,
 }
 
-/// Withdraws `amount` of `resource` from the owner's account. When a badge is in use, the call runs inside an
-/// authorization window over the workspace proof `proof`, which lends the badge to the account's withdraw rule.
-fn withdraw_from_account<D>(
+/// Executes the account withdraw and/or stealth transfer. When a badge is in use, the call runs inside an
+/// authorization window over the workspace proof `proof`, which lends the badge to the account's withdraw rule
+/// and the stealth transfer's resource/input access rules.
+fn execute_transfer_with_optional_badge<D>(
     builder: TransactionBuilder<D>,
     account: ComponentAddress,
     resource: ResourceAddress,
-    amount: Amount,
+    revealed_input_amount: Amount,
+    transfer_statement: StealthTransferStatement,
     badge_usage: &BadgeUsage,
 ) -> TransactionBuilder<D> {
+    // When there are no stealth inputs or outputs, skip the stealth transfer instruction
+    // and use a standard withdraw instead. A stealth transfer would still work correctly,
+    // but a plain withdraw is more fee-efficient.
+    let has_no_inputs_or_outputs = transfer_statement.outputs_statement.outputs.is_empty() &&
+        transfer_statement.inputs_statement.inputs.is_empty();
+    let apply = |b: TransactionBuilder<D>| {
+        if has_no_inputs_or_outputs {
+            b.call_method(account, "withdraw", args![resource, revealed_input_amount])
+        } else if revealed_input_amount.is_positive() {
+            b.call_method(account, "withdraw", args![resource, revealed_input_amount])
+                .put_last_instruction_output_on_workspace("input_bucket")
+                .stealth_transfer_with_input_bucket(resource, transfer_statement, "input_bucket")
+        } else {
+            b.stealth_transfer(resource, transfer_statement)
+        }
+    };
     if badge_usage.is_none() {
-        builder.call_method(account, "withdraw", args![resource, amount])
+        apply(builder)
     } else {
-        builder.with_authorized_proof("proof", |builder| {
-            builder.call_method(account, "withdraw", args![resource, amount])
-        })
+        builder.with_authorized_proof("proof", apply)
     }
 }
 

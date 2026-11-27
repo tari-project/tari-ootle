@@ -103,6 +103,16 @@ impl Bucket {
         self.resource_container.non_fungible_token_ids()
     }
 
+    /// See [`ResourceContainer::discrete_items_held`].
+    pub fn discrete_items_held(&self) -> usize {
+        self.resource_container.discrete_items_held()
+    }
+
+    /// See [`ResourceContainer::discrete_items_in_amount`].
+    pub fn discrete_items_in_amount(&self, amount: Amount) -> usize {
+        self.resource_container.discrete_items_in_amount(amount)
+    }
+
     pub fn contains_non_fungible_id(&self, id: &NonFungibleId) -> bool {
         self.resource_container.non_fungible_token_ids().contains(id)
     }

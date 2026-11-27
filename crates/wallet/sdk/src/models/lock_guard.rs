@@ -47,13 +47,28 @@ where TStore: WriteableWalletStore
             return;
         };
         match store.create_write_tx() {
-            Ok(mut tx) => {
-                if let Err(e) = tx.locks_release(self.lock_id) {
+            Ok(mut tx) => match tx.locks_release(self.lock_id) {
+                Ok(()) => {
+                    if let Err(e) = tx.commit() {
+                        log::error!(
+                            target: LOG_TARGET,
+                            "Failed to commit unlock for wallet lock {:?}: {}",
+                            self.lock_id,
+                            e
+                        );
+                    }
+                },
+                Err(e) => {
                     log::error!(target: LOG_TARGET, "Failed to unlock wallet lock {:?}: {}", self.lock_id, e);
-                }
-                if let Err(e) = tx.commit() {
-                    log::error!(target: LOG_TARGET, "Failed to commit unlock for wallet lock {:?}: {}", self.lock_id, e);
-                }
+                    if let Err(err) = tx.rollback() {
+                        log::error!(
+                            target: LOG_TARGET,
+                            "Failed to rollback unlock for wallet lock {:?}: {}",
+                            self.lock_id,
+                            err
+                        );
+                    }
+                },
             },
             Err(e) => {
                 log::error!(

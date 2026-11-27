@@ -19,6 +19,8 @@ const LOG_TARGET: &str = "tari::ootle::consensus::hotstuff::pacemaker";
 const MAX_DELTA: Duration = Duration::from_secs(300);
 /// Propose a block OFFSET_BLOCK_TIME sooner than the required block time
 const OFFSET_BLOCK_TIME: Duration = Duration::from_secs(1);
+/// Fixed network latency allowance added to every leader timeout deadline.
+const AVG_LATENCY: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum PacemakerEvent {
@@ -49,6 +51,11 @@ pub(crate) struct PaceMaker {
     /// A forced beat requested by a handler, returned before any timer event. Timer-forced beats are returned as soon
     /// as the block timer elapses, so they never overwrite this.
     pending_forced_height: Option<NodeHeight>,
+    /// The lowest view a NEWVIEW may name, raised by the timeouts this node counts or joins. Applies only in its own
+    /// epoch.
+    timeout_floor: View,
+    /// The view named by the last NEWVIEW this node sent.
+    last_timeout_sent: View,
 }
 
 impl PaceMaker {
@@ -65,6 +72,8 @@ impl PaceMaker {
             leader_timeout: Box::pin(tokio::time::sleep_until(far_future())),
             is_beat_pending: false,
             pending_forced_height: None,
+            timeout_floor: View::default(),
+            last_timeout_sent: View::default(),
         }
     }
 
@@ -78,6 +87,20 @@ impl PaceMaker {
 
     pub fn current_height(&self) -> NodeHeight {
         self.view.height
+    }
+
+    /// The lowest view a NEWVIEW sent now may name.
+    pub fn timeout_floor(&self) -> NodeHeight {
+        if self.timeout_floor.epoch == self.view.epoch {
+            self.timeout_floor.height
+        } else {
+            NodeHeight::zero()
+        }
+    }
+
+    /// Records the view the NEWVIEW just sent names.
+    pub fn record_timeout_sent(&mut self, height: NodeHeight) {
+        self.last_timeout_sent = View::new(self.view.epoch, height);
     }
 
     /// A read-only view that follows this pacemaker's view.
@@ -171,12 +194,51 @@ impl PaceMaker {
                 } => self.enter_view(epoch, height, high_pc_height),
                 PacemakerAction::ResetLeaderTimeout { high_pc_height } => self.reset(high_pc_height, false),
                 PacemakerAction::SetEpoch { epoch } => self.set_epoch(epoch),
+                PacemakerAction::ViewTimedOut { epoch, height } => self.on_view_timed_out(epoch, height),
+                PacemakerAction::JoinTimeoutView { epoch, height } => self.join_timeout_view(epoch, height),
             }
         }
     }
 
     fn force_beat(&mut self, forced_height: NodeHeight) {
         self.pending_forced_height = Some(forced_height);
+    }
+
+    fn on_view_timed_out(&mut self, epoch: Epoch, height: NodeHeight) {
+        if !self.is_timeout_view(epoch, height) ||
+            !self.raise_timeout_floor(epoch, height.saturating_add(NodeHeight(1)))
+        {
+            return;
+        }
+        info!(target: LOG_TARGET, "🧿 PACEMAKER: view {epoch}/{height} timed out");
+        self.reset(self.high_pc_height, false);
+    }
+
+    fn join_timeout_view(&mut self, epoch: Epoch, height: NodeHeight) {
+        if !self.is_timeout_view(epoch, height) || !self.raise_timeout_floor(epoch, height) || !self.is_started {
+            return;
+        }
+        if self.last_timeout_sent >= View::new(epoch, height) {
+            return;
+        }
+        info!(target: LOG_TARGET, "🧿 PACEMAKER: joining timeout view {epoch}/{height}");
+        self.leader_timeout.as_mut().reset(Instant::now());
+    }
+
+    /// Whether a NEWVIEW sent from the current view could name `(epoch, height)`. The lowest it names is two above
+    /// the current height, so timeout votes for lower views come from members that have not yet seen the block this
+    /// node entered its view on.
+    fn is_timeout_view(&self, epoch: Epoch, height: NodeHeight) -> bool {
+        epoch == self.view.epoch && height >= self.view.height.saturating_add(NodeHeight(2))
+    }
+
+    /// Raises the timeout floor to `height` in `epoch`, the current epoch, and reports whether it moved.
+    fn raise_timeout_floor(&mut self, epoch: Epoch, height: NodeHeight) -> bool {
+        if epoch != self.view.epoch || View::new(epoch, height) <= self.timeout_floor {
+            return false;
+        }
+        self.timeout_floor = View::new(epoch, height);
+        true
     }
 
     /// Enters `(epoch, height)` and restarts both timers if it is later than the current view, otherwise does
@@ -229,11 +291,15 @@ impl PaceMaker {
         self.block_timer.as_mut().reset(deadline);
     }
 
+    /// Lower bound on the interval between two [`PacemakerEvent::LeaderTimeout`] events at `block_time`.
+    pub const fn min_leader_timeout_interval(block_time: Duration) -> Duration {
+        block_time.saturating_add(AVG_LATENCY)
+    }
+
     /// The leader timeout is block_time + delta + latency, so it always elapses after the block timer.
     fn reset_leader_timeout_timer(&mut self) {
         // TODO: get real avg latency
-        let avg_latency = Duration::from_secs(2);
-        let deadline = Instant::now() + self.block_time + self.delta_time() + avg_latency;
+        let deadline = Instant::now() + self.block_time + self.delta_time() + AVG_LATENCY;
         self.leader_timeout.as_mut().reset(deadline);
     }
 
@@ -389,6 +455,86 @@ mod tests {
         assert_eq!(pacemaker.current_view(), View::new(Epoch(2), NodeHeight(3)));
         assert!(matches!(ready_event(&mut pacemaker).await, Some(PacemakerEvent::Beat)));
         assert!(actions.drain().next().is_none());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_timed_out_view_raises_the_floor_past_it_and_restarts_the_count() {
+        let mut pacemaker = started(Duration::from_secs(2)).await;
+        assert_eq!(next_leader_timeout(&mut pacemaker).await, 1);
+
+        let mut actions = PacemakerActions::new();
+        actions.view_timed_out(Epoch(1), NodeHeight(5));
+        pacemaker.apply(&mut actions);
+
+        assert_eq!(pacemaker.timeout_floor(), NodeHeight(6));
+        assert_eq!(next_leader_timeout(&mut pacemaker).await, 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn joining_a_view_not_yet_named_times_out_at_once() {
+        let mut pacemaker = started(Duration::from_secs(5)).await;
+        pacemaker.record_timeout_sent(NodeHeight(3));
+
+        let mut actions = PacemakerActions::new();
+        actions.join_timeout_view(Epoch(1), NodeHeight(10));
+        pacemaker.apply(&mut actions);
+
+        assert_eq!(pacemaker.timeout_floor(), NodeHeight(10));
+        assert!(matches!(
+            ready_event(&mut pacemaker).await,
+            Some(PacemakerEvent::LeaderTimeout { num_timeouts: 1 })
+        ));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn joining_a_view_already_named_waits_for_the_leader_timeout() {
+        let mut pacemaker = started(Duration::from_secs(5)).await;
+        pacemaker.record_timeout_sent(NodeHeight(10));
+
+        let mut actions = PacemakerActions::new();
+        actions.join_timeout_view(Epoch(1), NodeHeight(10));
+        pacemaker.apply(&mut actions);
+
+        assert_eq!(pacemaker.timeout_floor(), NodeHeight(10));
+        assert!(ready_event(&mut pacemaker).await.is_none());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn timeouts_of_views_below_the_next_timeout_view_are_ignored() {
+        let mut pacemaker = started(Duration::from_secs(5)).await;
+        pacemaker.enter_view(Epoch(1), NodeHeight(9), NodeHeight(9));
+
+        let mut actions = PacemakerActions::new();
+        actions.join_timeout_view(Epoch(1), NodeHeight(10));
+        actions.view_timed_out(Epoch(1), NodeHeight(10));
+        pacemaker.apply(&mut actions);
+
+        assert_eq!(pacemaker.timeout_floor(), NodeHeight::zero());
+        assert!(ready_event(&mut pacemaker).await.is_none());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_timeout_from_another_epoch_leaves_the_floor() {
+        let mut pacemaker = started(Duration::from_secs(5)).await;
+
+        let mut actions = PacemakerActions::new();
+        actions.join_timeout_view(Epoch(2), NodeHeight(10));
+        actions.view_timed_out(Epoch(0), NodeHeight(10));
+        pacemaker.apply(&mut actions);
+
+        assert_eq!(pacemaker.timeout_floor(), NodeHeight::zero());
+        assert!(ready_event(&mut pacemaker).await.is_none());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_floor_does_not_carry_into_the_next_epoch() {
+        let mut pacemaker = started(Duration::from_secs(5)).await;
+        let mut actions = PacemakerActions::new();
+        actions.view_timed_out(Epoch(1), NodeHeight(10));
+        actions.set_epoch(Epoch(2));
+        pacemaker.apply(&mut actions);
+
+        assert_eq!(pacemaker.timeout_floor(), NodeHeight::zero());
     }
 
     #[tokio::test]

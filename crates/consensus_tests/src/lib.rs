@@ -5,6 +5,8 @@ mod catch_up_no_vote;
 #[cfg(test)]
 mod catch_up_on_proposal_ahead;
 #[cfg(test)]
+mod catch_up_page_cursor;
+#[cfg(test)]
 mod catch_up_relay;
 #[cfg(test)]
 mod catch_up_rewind;
@@ -57,6 +59,8 @@ mod presync;
 #[cfg(test)]
 mod proposal_certificate_signatures;
 #[cfg(test)]
+mod quorum_loss_recovery;
+#[cfg(test)]
 mod safe_node_predicate;
 #[cfg(test)]
 mod stale_qc_carry_forward;
@@ -72,6 +76,8 @@ mod template_visibility;
 mod timeout_certificate;
 #[cfg(test)]
 mod timeout_certificate_signatures;
+#[cfg(test)]
+mod timeout_pacing;
 #[cfg(test)]
 mod unexecuted_block_commit;
 #[cfg(test)]

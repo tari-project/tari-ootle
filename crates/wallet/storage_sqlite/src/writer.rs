@@ -144,6 +144,40 @@ impl<'a> WriteTransaction<'a> {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
+    fn apply_merged_balance_change(
+        &mut self,
+        id: i32,
+        revealed_before: &str,
+        existing_revealed_after: &str,
+        merged_revealed_after: &str,
+        confidential_before: &str,
+        existing_confidential_after: &str,
+        merged_confidential_after: &str,
+    ) -> Result<bool, WalletStorageError> {
+        const OPERATION: &str = "balance_changes_insert";
+        use crate::schema::account_balance_changes;
+
+        if merged_revealed_after == existing_revealed_after && merged_confidential_after == existing_confidential_after
+        {
+            return Ok(false);
+        }
+        if revealed_before == merged_revealed_after && confidential_before == merged_confidential_after {
+            let deleted = diesel::delete(account_balance_changes::table.filter(account_balance_changes::id.eq(id)))
+                .execute(self.connection())
+                .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+            return Ok(deleted == 1);
+        }
+        let updated = diesel::update(account_balance_changes::table.filter(account_balance_changes::id.eq(id)))
+            .set((
+                account_balance_changes::revealed_after.eq(merged_revealed_after),
+                account_balance_changes::confidential_after.eq(merged_confidential_after),
+            ))
+            .execute(self.connection())
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+        Ok(updated == 1)
+    }
+
     fn stealth_outputs_release_by_lock_id(&mut self, lock_id: WalletLockId) -> Result<(), WalletStorageError> {
         const OPERATION: &str = "stealth_outputs_release_by_lock_id";
         use crate::schema::stealth_outputs;
@@ -405,24 +439,21 @@ impl<'a> WriteTransaction<'a> {
         self.confidential_outputs_release_by_lock_id(lock_id)
     }
 
-    /// Reads the vaults and revealed amounts reserved by `lock_id` before the lock is finalized, so the
-    /// resulting revealed-balance decreases can be recorded. Returns `(vault, revealed_before, amount)`.
-    fn locked_revealed_spend(
-        &mut self,
-        lock_id: WalletLockId,
-    ) -> Result<Vec<(VaultId, Amount, Amount)>, WalletStorageError> {
+    /// Reads the vaults and pre-lock revealed balances reserved by `lock_id` before the lock is finalized, so the
+    /// resulting revealed-balance changes can be recorded. Returns `(vault, revealed_before)`.
+    fn locked_revealed_spend(&mut self, lock_id: WalletLockId) -> Result<Vec<(VaultId, Amount)>, WalletStorageError> {
         const OPERATION: &str = "locked_revealed_spend";
         use crate::schema::{vault_locks, vaults};
 
         let rows = vault_locks::table
             .inner_join(vaults::table.on(vaults::id.eq(vault_locks::vault_id)))
-            .select((vaults::address, vaults::revealed_balance, vault_locks::amount))
+            .select((vaults::address, vaults::revealed_balance))
             .filter(vault_locks::lock_id.eq(lock_id))
-            .load::<(String, String, String)>(self.connection())
+            .load::<(String, String)>(self.connection())
             .map_err(|e| WalletStorageError::general(OPERATION, e))?;
 
         let mut spends = Vec::with_capacity(rows.len());
-        for (vault_address, revealed_before, amount) in rows {
+        for (vault_address, revealed_before) in rows {
             let vault_address = VaultId::from_str(&vault_address).map_err(|e| WalletStorageError::DecodingError {
                 operation: OPERATION,
                 item: "vault.address",
@@ -435,11 +466,7 @@ impl<'a> WriteTransaction<'a> {
                         "Corrupt db: invalid revealed balance '{revealed_before}' for lock {lock_id}: {e}"
                     ),
                 })?;
-            let amount = Amount::from_str(&amount).map_err(|e| WalletStorageError::DataInconsistent {
-                operation: OPERATION,
-                details: format!("Corrupt db: invalid lock amount '{amount}' for lock {lock_id}: {e}"),
-            })?;
-            spends.push((vault_address, revealed_before, amount));
+            spends.push((vault_address, revealed_before));
         }
         Ok(spends)
     }
@@ -478,11 +505,8 @@ impl<'a> WriteTransaction<'a> {
         lock_id: WalletLockId,
         vault_address: VaultId,
         revealed_before: Amount,
-        amount: Amount,
         diff: &SubstateDiff,
     ) -> Result<(), WalletStorageError> {
-        const OPERATION: &str = "record_finalized_revealed_spend";
-
         let Some(transaction_id) = self.lock_transaction_id(lock_id)? else {
             // No transaction linked to the lock — the spend cannot be attributed, so skip recording.
             return Ok(());
@@ -501,18 +525,12 @@ impl<'a> WriteTransaction<'a> {
         let vault = self.vaults_get(&vault_address)?;
         let (revealed_after, vault_version) = match diff_vault {
             Some((revealed_after, version)) => (revealed_after, version),
-            None => {
-                let revealed_after =
-                    revealed_before
-                        .checked_sub(amount)
-                        .ok_or_else(|| WalletStorageError::OperationError {
-                            operation: OPERATION,
-                            details: format!("revealed balance {revealed_before} is less than spent amount {amount}"),
-                        })?;
-                (revealed_after, vault.vault_version)
-            },
+            // A linked transaction whose finalized diff omits the locked vault (e.g. OnlyFeeAccepted)
+            // left that vault untouched on-chain, so restore its pre-lock revealed balance.
+            None => (revealed_before, vault.vault_version),
         };
         if revealed_after == revealed_before {
+            self.vaults_update(vault_address, vault_version, revealed_after, vault.confidential_balance)?;
             return Ok(());
         }
 
@@ -1308,25 +1326,15 @@ impl WalletStoreWriter for WriteTransaction<'_> {
             } else {
                 change.confidential_after.to_string()
             };
-            if merged_revealed_after == existing_revealed_after &&
-                merged_confidential_after == existing_confidential_after
-            {
-                return Ok(false);
-            }
-            if revealed_before == merged_revealed_after && confidential_before == merged_confidential_after {
-                let deleted = diesel::delete(account_balance_changes::table.filter(account_balance_changes::id.eq(id)))
-                    .execute(self.connection())
-                    .map_err(|e| WalletStorageError::general(OPERATION, e))?;
-                return Ok(deleted == 1);
-            }
-            let updated = diesel::update(account_balance_changes::table.filter(account_balance_changes::id.eq(id)))
-                .set((
-                    account_balance_changes::revealed_after.eq(merged_revealed_after),
-                    account_balance_changes::confidential_after.eq(merged_confidential_after),
-                ))
-                .execute(self.connection())
-                .map_err(|e| WalletStorageError::general(OPERATION, e))?;
-            return Ok(updated == 1);
+            return self.apply_merged_balance_change(
+                id,
+                &revealed_before,
+                &existing_revealed_after,
+                &merged_revealed_after,
+                &confidential_before,
+                &existing_confidential_after,
+                &merged_confidential_after,
+            );
         };
         let vault_address = vault_address.to_string();
         let maybe_existing = account_balance_changes::table
@@ -1400,25 +1408,15 @@ impl WalletStoreWriter for WriteTransaction<'_> {
             } else {
                 existing_confidential_after.clone()
             };
-            if merged_revealed_after == existing_revealed_after &&
-                merged_confidential_after == existing_confidential_after
-            {
-                return Ok(false);
-            }
-            if revealed_before == merged_revealed_after && confidential_before == merged_confidential_after {
-                let deleted = diesel::delete(account_balance_changes::table.filter(account_balance_changes::id.eq(id)))
-                    .execute(self.connection())
-                    .map_err(|e| WalletStorageError::general(OPERATION, e))?;
-                return Ok(deleted == 1);
-            }
-            let updated = diesel::update(account_balance_changes::table.filter(account_balance_changes::id.eq(id)))
-                .set((
-                    account_balance_changes::revealed_after.eq(merged_revealed_after),
-                    account_balance_changes::confidential_after.eq(merged_confidential_after),
-                ))
-                .execute(self.connection())
-                .map_err(|e| WalletStorageError::general(OPERATION, e))?;
-            return Ok(updated == 1);
+            return self.apply_merged_balance_change(
+                id,
+                &revealed_before,
+                &existing_revealed_after,
+                &merged_revealed_after,
+                &confidential_before,
+                &existing_confidential_after,
+                &merged_confidential_after,
+            );
         };
 
         let incoming_transaction_id = source.transaction_id().map(|id| id.to_string());
@@ -1427,11 +1425,10 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         let confidential_after = change.confidential_after.to_string();
 
         if existing_is_transaction {
-            // A transaction row is written in up to two steps that converge onto one row: its revealed spend
-            // when the transaction is finalized, and its confidential effect on the next account refresh. It
-            // may therefore only be extended by a further record of the SAME transaction, and only for a
-            // balance dimension it has not already recorded. A different transaction, or a re-statement of an
-            // already-recorded dimension (a replayed event), must not modify it.
+            // A transaction row converges onto one row across its finalized revealed spend, multi-lock
+            // stealth finalizations, and subsequent account refresh. Only the same transaction may extend it:
+            // confidential updates may chain from `existing_confidential_after` (e.g. a second lock on the same
+            // transaction), whereas a stale re-statement of an already-recorded dimension must not modify it.
             if incoming_transaction_id != existing_transaction_id {
                 return Ok(false);
             }
@@ -1439,35 +1436,34 @@ impl WalletStoreWriter for WriteTransaction<'_> {
             let incoming_changes_confidential = change.confidential_before != change.confidential_after;
             let existing_changed_revealed = revealed_before != existing_revealed_after;
             let existing_changed_confidential = confidential_before != existing_confidential_after;
+            let confidential_continues_from_existing =
+                change.confidential_before.to_string() == existing_confidential_after;
             if (incoming_changes_revealed && existing_changed_revealed) ||
-                (incoming_changes_confidential && existing_changed_confidential)
+                (incoming_changes_confidential &&
+                    existing_changed_confidential &&
+                    !confidential_continues_from_existing)
             {
                 return Ok(false);
             }
             let merged_revealed_after = if incoming_changes_revealed {
                 revealed_after
             } else {
-                existing_revealed_after
+                existing_revealed_after.clone()
             };
             let merged_confidential_after = if incoming_changes_confidential {
                 confidential_after
             } else {
-                existing_confidential_after
+                existing_confidential_after.clone()
             };
-            if revealed_before == merged_revealed_after && confidential_before == merged_confidential_after {
-                let deleted = diesel::delete(account_balance_changes::table.filter(account_balance_changes::id.eq(id)))
-                    .execute(self.connection())
-                    .map_err(|e| WalletStorageError::general(OPERATION, e))?;
-                return Ok(deleted == 1);
-            }
-            let updated = diesel::update(account_balance_changes::table.filter(account_balance_changes::id.eq(id)))
-                .set((
-                    account_balance_changes::revealed_after.eq(merged_revealed_after),
-                    account_balance_changes::confidential_after.eq(merged_confidential_after),
-                ))
-                .execute(self.connection())
-                .map_err(|e| WalletStorageError::general(OPERATION, e))?;
-            return Ok(updated == 1);
+            return self.apply_merged_balance_change(
+                id,
+                &revealed_before,
+                &existing_revealed_after,
+                &merged_revealed_after,
+                &confidential_before,
+                &existing_confidential_after,
+                &merged_confidential_after,
+            );
         }
 
         // The existing row is a scan/recovery record. An incoming transaction is linked to it via
@@ -2708,8 +2704,8 @@ impl WalletStoreWriter for WriteTransaction<'_> {
         // and decrements the vaults' revealed balances, so the decreases can be recorded as balance changes.
         let revealed_spends = self.locked_revealed_spend(lock_id)?;
         self.vaults_finalized_locked_revealed_funds(lock_id).optional()?;
-        for (vault_address, revealed_before, amount) in revealed_spends {
-            self.record_finalized_revealed_spend(lock_id, vault_address, revealed_before, amount, diff)?;
+        for (vault_address, revealed_before) in revealed_spends {
+            self.record_finalized_revealed_spend(lock_id, vault_address, revealed_before, diff)?;
         }
         self.record_finalized_stealth_spends(lock_id, affected_stealth_balances, diff)?;
         self.locks_delete(lock_id)?;

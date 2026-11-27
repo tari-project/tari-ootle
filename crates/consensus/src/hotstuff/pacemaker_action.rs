@@ -20,6 +20,12 @@ pub enum PacemakerAction {
     ResetLeaderTimeout { high_pc_height: NodeHeight },
     /// Move to height zero of `epoch` and restart both timers.
     SetEpoch { epoch: Epoch },
+    /// A quorum of the committee timed out view `height`: name a later view from now on and restart the leader
+    /// timeout, giving the leader that certified it a full interval to propose.
+    ViewTimedOut { epoch: Epoch, height: NodeHeight },
+    /// More than the committee's tolerated faulty power timed out view `height`, so at least one correct member is
+    /// there: name it from now on, and time out at once if this node has not yet named it.
+    JoinTimeoutView { epoch: Epoch, height: NodeHeight },
 }
 
 /// The pacemaker actions a handler requested. Handlers record into it and the worker applies it after every handler
@@ -58,6 +64,14 @@ impl PacemakerActions {
 
     pub fn set_epoch(&mut self, epoch: Epoch) {
         self.actions.push(PacemakerAction::SetEpoch { epoch });
+    }
+
+    pub fn view_timed_out(&mut self, epoch: Epoch, height: NodeHeight) {
+        self.actions.push(PacemakerAction::ViewTimedOut { epoch, height });
+    }
+
+    pub fn join_timeout_view(&mut self, epoch: Epoch, height: NodeHeight) {
+        self.actions.push(PacemakerAction::JoinTimeoutView { epoch, height });
     }
 
     pub fn drain(&mut self) -> impl Iterator<Item = PacemakerAction> + '_ {

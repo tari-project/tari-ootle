@@ -118,29 +118,35 @@ impl EventStream {
 
     pub fn into_stream(mut self) -> impl Stream<Item = Result<sse::Event, EventStreamError>> {
         async_stream::stream! {
-            let client = match self.client.upgrade() {
-                Some(client) => client,
-                None => {
-                    error!("Indexer REST client has been dropped");
-                    yield Err(EventStreamError::ClientDropped);
-                    return;
-                },
-            };
             loop {
                 let _enter = self.span.enter();
                 if self.paused.wait_unpaused().await {
                     debug!("event stream unpaused");
                 }
 
-                // Subscribed per connection attempt so that a switch made while paused or retrying, which this
-                // connection already reads, is not reported again once it is open.
-                let mut endpoint_changes = client.subscribe_endpoint_changes();
-                let connected = tokio::select! {
-                    result = client.sse_events() => result.map_err(EventStreamError::IndexerClientError),
-                    new_endpoint = endpoint_changes.changed() => {
-                        debug!(%new_endpoint, "indexer endpoint changed while connecting, reconnecting event stream");
-                        continue;
-                    },
+                let (mut endpoint_changes, connected) = {
+                    let Some(client) = self.client.upgrade() else {
+                        error!("Indexer REST client has been dropped");
+                        yield Err(EventStreamError::ClientDropped);
+                        return;
+                    };
+                    // Subscribed per connection attempt so that a switch made while paused or retrying, which this
+                    // connection already reads, is not reported again once it is open.
+                    let mut endpoint_changes = client.subscribe_endpoint_changes();
+                    let connected = tokio::select! {
+                        result = client.sse_events() => Some(result.map_err(EventStreamError::IndexerClientError)),
+                        new_endpoint = endpoint_changes.changed() => {
+                            debug!(
+                                %new_endpoint,
+                                "indexer endpoint changed while connecting, reconnecting event stream"
+                            );
+                            None
+                        },
+                    };
+                    (endpoint_changes, connected)
+                };
+                let Some(connected) = connected else {
+                    continue;
                 };
                 let mut events = match connected {
                     Ok(stream) => stream,
@@ -287,5 +293,32 @@ mod tests {
             connected_b.try_recv().is_err(),
             "connected to the new endpoint more than once"
         );
+    }
+
+    #[tokio::test]
+    async fn the_stream_does_not_keep_the_client_alive_while_paused() {
+        let (url_a, _) = spawn_sse_server(Some("FromA")).await;
+        let client = Arc::new(IndexerRestApiClient::connect(url_a).unwrap());
+        let paused = Paused::default();
+
+        let stream = EventStream::new(Arc::downgrade(&client), paused.waiter()).into_stream();
+        pin_mut!(stream);
+
+        // Poll once while paused, as TransactionWatcher::run does on startup.
+        assert!(
+            time::timeout(Duration::from_millis(50), stream.next()).await.is_err(),
+            "paused stream should not yield"
+        );
+        assert_eq!(Arc::strong_count(&client), 1);
+
+        drop(client);
+        paused.set_paused(false);
+
+        let item = time::timeout(Duration::from_secs(1), stream.next())
+            .await
+            .expect("stream did not wake on unpause")
+            .expect("stream ended without ClientDropped error");
+        assert!(matches!(item, Err(EventStreamError::ClientDropped)));
+        assert!(stream.next().await.is_none());
     }
 }

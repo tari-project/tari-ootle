@@ -55,6 +55,35 @@ pub async fn read_registration_file<P: AsRef<Path>>(
 
 pub fn to_vn_public_keys(vns: Vec<GetActiveValidatorNodesResponse>) -> Vec<RistrettoPublicKeyBytes> {
     vns.into_iter()
-        .map(|vn| RistrettoPublicKeyBytes::from_bytes(&vn.public_key).expect("Invalid public key, should not happen"))
+        .filter_map(|vn| match RistrettoPublicKeyBytes::from_bytes(&vn.public_key) {
+            Ok(pk) => Some(pk),
+            Err(err) => {
+                log::warn!("Skipping malformed validator public key from base node: {err}");
+                None
+            },
+        })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn to_vn_public_keys_skips_malformed_keys_instead_of_panicking() {
+        let valid_bytes = [7u8; 32];
+        let vns = vec![
+            GetActiveValidatorNodesResponse {
+                public_key: vec![1, 2, 3],
+                ..Default::default()
+            },
+            GetActiveValidatorNodesResponse {
+                public_key: valid_bytes.to_vec(),
+                ..Default::default()
+            },
+        ];
+
+        let keys = to_vn_public_keys(vns);
+        assert_eq!(keys, vec![RistrettoPublicKeyBytes::from_bytes(&valid_bytes).unwrap()]);
+    }
 }

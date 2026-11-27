@@ -145,6 +145,16 @@ impl Vault {
         self.resource_container.non_fungible_token_ids()
     }
 
+    /// See [`ResourceContainer::discrete_items_held`].
+    pub fn discrete_items_held(&self) -> usize {
+        self.resource_container.discrete_items_held()
+    }
+
+    /// See [`ResourceContainer::discrete_items_in_amount`].
+    pub fn discrete_items_in_amount<T: Into<Amount>>(&self, amount: T) -> usize {
+        self.resource_container.discrete_items_in_amount(amount.into())
+    }
+
     pub fn resource_container_mut(&mut self) -> &mut ResourceContainer {
         &mut self.resource_container
     }

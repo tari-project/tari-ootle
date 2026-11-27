@@ -101,12 +101,13 @@ export function versionSpread(shards: ShardSyncStatus[]): VersionSpread | null {
  * shard stands out beyond 3.
  */
 export function biasZ(version: number, spread: VersionSpread): number {
+  if (!Number.isFinite(version) || !Number.isFinite(spread.mean) || spread.mean <= 0) return 0;
   return (version - spread.mean) / Math.sqrt(spread.mean);
 }
 
 /** Maps `value` onto 0..1 on a log scale that saturates at `max`. */
 export function logScale(value: number, max: number): number {
-  if (value <= 0) return 0;
+  if (!Number.isFinite(value) || !Number.isFinite(max) || value <= 0 || max <= 0) return 0;
   return Math.min(1, Math.log10(1 + value) / Math.log10(1 + max));
 }
 
@@ -123,6 +124,7 @@ export function groupContains(sg: ShardGroup, shard: number): boolean {
 }
 
 export function formatAge(seconds: number): string {
+  if (!Number.isFinite(seconds)) return "--";
   const s = Math.max(0, Math.round(seconds));
   if (s < 2) return "just now";
   if (s < 60) return `${s}s ago`;
@@ -133,6 +135,7 @@ export function formatAge(seconds: number): string {
 }
 
 export function formatDuration(seconds: number): string {
+  if (!Number.isFinite(seconds)) return "--";
   const s = Math.max(0, Math.round(seconds));
   if (s < 60) return `${s}s`;
   const mins = Math.floor(s / 60);
@@ -141,7 +144,7 @@ export function formatDuration(seconds: number): string {
 }
 
 export function formatRate(perSec: number): string {
-  if (perSec === 0) return "0";
+  if (!Number.isFinite(perSec) || perSec <= 0) return "0";
   if (perSec < 0.1) return perSec.toFixed(2);
   if (perSec < 10) return perSec.toFixed(1);
   return Math.round(perSec).toLocaleString();
@@ -194,7 +197,15 @@ export function recentRate(
   windowSecs: number,
   pick: (b: SyncActivityBucket) => number,
 ): number {
-  if (activity.length === 0) return 0;
+  if (
+    activity.length === 0 ||
+    !Number.isFinite(bucketSecs) ||
+    bucketSecs <= 0 ||
+    !Number.isFinite(windowSecs) ||
+    windowSecs <= 0
+  ) {
+    return 0;
+  }
   const from = nowSec - windowSecs;
   let total = 0;
   let span = 0;

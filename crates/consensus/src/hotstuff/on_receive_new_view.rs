@@ -22,12 +22,13 @@ use crate::{
         ProposalValidationError,
         epoch_state::EpochState,
         error::HotStuffError,
+        on_next_sync_view::sign_timeout_vote,
         pacemaker::PaceMaker,
         pacemaker_action::PacemakerActions,
     },
-    messages::NewViewMessage,
+    messages::{HotstuffMessage, NewViewMessage},
     tracing::TraceTimer,
-    traits::{CertificateStore, ConsensusSpec},
+    traits::{CertificateStore, ConsensusSpec, OutboundMessaging},
     validations::check_quorum_certificate_signatures,
 };
 
@@ -44,6 +45,7 @@ pub struct OnReceiveNewViewHandler<TConsensusSpec: ConsensusSpec> {
     leader_strategy: TConsensusSpec::LeaderStrategy,
     proposal_vote_collector: ProposalVoteCollector<TConsensusSpec>,
     timeout_vote_collector: TimeoutVoteCollector<TConsensusSpec>,
+    outbound_messaging: TConsensusSpec::OutboundMessaging,
     rate_limiter: NewViewRateLimiter<TConsensusSpec::Addr>,
 }
 
@@ -57,6 +59,7 @@ where TConsensusSpec: ConsensusSpec
         leader_strategy: TConsensusSpec::LeaderStrategy,
         proposal_vote_collector: ProposalVoteCollector<TConsensusSpec>,
         timeout_vote_collector: TimeoutVoteCollector<TConsensusSpec>,
+        outbound_messaging: TConsensusSpec::OutboundMessaging,
     ) -> Self {
         let rate_limiter = NewViewRateLimiter::new(PaceMaker::min_leader_timeout_interval(
             config.consensus_constants.pacemaker_block_time,
@@ -68,6 +71,7 @@ where TConsensusSpec: ConsensusSpec
             leader_strategy,
             proposal_vote_collector,
             timeout_vote_collector,
+            outbound_messaging,
             rate_limiter,
         }
     }
@@ -78,6 +82,7 @@ where TConsensusSpec: ConsensusSpec
         pacemaker_actions: &mut PacemakerActions,
         epoch_state: &EpochState<TConsensusSpec::Addr>,
         current_height: NodeHeight,
+        timeout_floor: NodeHeight,
         from: TConsensusSpec::Addr,
         message: NewViewMessage,
     ) -> Result<(), HotStuffError> {
@@ -154,7 +159,14 @@ where TConsensusSpec: ConsensusSpec
             // The sender anchored its leader choice on a certificate we do not share. Its vote still counts towards
             // the quorum that ends the view.
             return self
-                .count_timeout_vote(pacemaker_actions, epoch_state, current_height, from, timeout)
+                .count_timeout_vote(
+                    pacemaker_actions,
+                    epoch_state,
+                    current_height,
+                    timeout_floor,
+                    from,
+                    timeout,
+                )
                 .await;
         }
 
@@ -217,10 +229,14 @@ where TConsensusSpec: ConsensusSpec
         // Take note of unique NEWVIEWs so that we can count them
         let collected = match self
             .timeout_vote_collector
-            .check_and_collect_vote(from, current_height, epoch_state, timeout)
+            .check_and_collect_vote(from.clone(), current_height, epoch_state, timeout.clone())
             .await
         {
-            Ok(collected) => collected,
+            Ok(collected) => {
+                self.answer_member_behind(epoch_state, current_height, timeout_floor, &from, &timeout)
+                    .await?;
+                collected
+            },
             Err(err) => {
                 warn!(target: LOG_TARGET, "❌ Error handling timeout vote: {}", err);
                 return Ok(());
@@ -253,6 +269,7 @@ where TConsensusSpec: ConsensusSpec
         pacemaker_actions: &mut PacemakerActions,
         epoch_state: &EpochState<TConsensusSpec::Addr>,
         current_height: NodeHeight,
+        timeout_floor: NodeHeight,
         from: TConsensusSpec::Addr,
         vote: TimeoutVote,
     ) -> Result<(), HotStuffError> {
@@ -272,8 +289,15 @@ where TConsensusSpec: ConsensusSpec
             return Ok(());
         }
 
-        self.count_timeout_vote(pacemaker_actions, epoch_state, current_height, from, vote)
-            .await
+        self.count_timeout_vote(
+            pacemaker_actions,
+            epoch_state,
+            current_height,
+            timeout_floor,
+            from,
+            vote,
+        )
+        .await
     }
 
     async fn count_timeout_vote(
@@ -281,17 +305,72 @@ where TConsensusSpec: ConsensusSpec
         pacemaker_actions: &mut PacemakerActions,
         epoch_state: &EpochState<TConsensusSpec::Addr>,
         current_height: NodeHeight,
+        timeout_floor: NodeHeight,
         from: TConsensusSpec::Addr,
         vote: TimeoutVote,
     ) -> Result<(), HotStuffError> {
         match self
             .timeout_vote_collector
-            .check_and_count_vote(from, current_height, epoch_state, vote)
+            .check_and_count_vote(from.clone(), current_height, epoch_state, vote.clone())
             .await
         {
-            Ok(pacing) => apply_pacing(pacemaker_actions, epoch_state, pacing),
-            Err(err) => warn!(target: LOG_TARGET, "❌ Error handling timeout vote: {}", err),
+            Ok(pacing) => {
+                apply_pacing(pacemaker_actions, epoch_state, pacing);
+                self.answer_member_behind(epoch_state, current_height, timeout_floor, &from, &vote)
+                    .await
+            },
+            Err(err) => {
+                warn!(target: LOG_TARGET, "❌ Error handling timeout vote: {}", err);
+                Ok(())
+            },
         }
+    }
+
+    /// Answers a timeout vote from a member still waiting for a view this node has already counted out. This node
+    /// sends no vote for that view any more, and the member may never have received the one it sent, so without an
+    /// answer the member can be left one vote short of the view's quorum.
+    ///
+    /// Only a view that is the sender's highest held one is answered. A member that has moved past the view as well
+    /// sends its answer for a view below its own timeout votes, so answers are never answered in turn.
+    async fn answer_member_behind(
+        &mut self,
+        epoch_state: &EpochState<TConsensusSpec::Addr>,
+        current_height: NodeHeight,
+        timeout_floor: NodeHeight,
+        from: &TConsensusSpec::Addr,
+        vote: &TimeoutVote,
+    ) -> Result<(), HotStuffError> {
+        let height = vote.height;
+        if *from == self.local_validator_addr ||
+            height >= timeout_floor ||
+            height < current_height.saturating_add(NodeHeight(2))
+        {
+            return Ok(());
+        }
+        let epoch = epoch_state.epoch();
+        let Some(senders_highest) = self
+            .timeout_vote_collector
+            .highest_timed_out_view_of(epoch, vote.public_key())
+            .await
+        else {
+            return Ok(());
+        };
+        if senders_highest != height {
+            return Ok(());
+        }
+
+        let high_pc_height = self.store.with_read_tx(|tx| HighPc::get(tx, epoch))?.height();
+        let answer = sign_timeout_vote(
+            self.proposal_vote_collector.signing_service(),
+            self.config.network,
+            epoch,
+            height,
+            high_pc_height,
+        );
+        debug!(target: LOG_TARGET, "🌟 Answering {from}, still waiting for view {epoch}/{height} to time out");
+        self.outbound_messaging
+            .send(from.clone(), HotstuffMessage::TimeoutVote(answer))
+            .await?;
         Ok(())
     }
 

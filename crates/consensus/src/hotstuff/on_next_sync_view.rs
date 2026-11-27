@@ -15,6 +15,7 @@ use tari_consensus_types::{
 };
 use tari_ootle_common_types::{Epoch, NodeHeight, committee::Committee, displayable::Displayable, optional::Optional};
 use tari_ootle_storage::{StateStore, StateStoreReadTransaction, StorageError, consensus_models::BookkeepingModel};
+use tari_ootle_transaction::Network;
 
 use crate::{
     hotstuff::{HotStuffError, HotstuffConfig, LeaderSkipSet},
@@ -109,7 +110,13 @@ impl<TConsensusSpec: ConsensusSpec> OnNextSyncViewHandler<TConsensusSpec> {
             {
                 vote
             },
-            _ => self.sign_timeout(epoch, timeout_height, high_pc_height),
+            _ => sign_timeout_vote(
+                &self.signer_service,
+                self.config.network,
+                epoch,
+                timeout_height,
+                high_pc_height,
+            ),
         };
         let local_public_key = timeout.signature.public_key;
         let message = NewViewMessage {
@@ -155,19 +162,23 @@ impl<TConsensusSpec: ConsensusSpec> OnNextSyncViewHandler<TConsensusSpec> {
 
         Ok(timeout_height)
     }
+}
 
-    fn sign_timeout(&self, epoch: Epoch, height: NodeHeight, high_pc_height: NodeHeight) -> TimeoutVote {
-        let msg = TimeoutVoteMessage::new(self.config.network, epoch, height, high_pc_height);
-        let signature = self.signer_service.sign(&msg);
-        TimeoutVote {
-            epoch,
-            height,
-            high_pc_height,
-            signature: ValidatorSignatureBytes::new(
-                self.signer_service.public_key().to_byte_type(),
-                signature.to_byte_type(),
-            ),
-        }
+/// This node's timeout vote for view `height`, reporting a high certificate at `high_pc_height`.
+pub(super) fn sign_timeout_vote<TSigner: ValidatorSignerService>(
+    signer: &TSigner,
+    network: Network,
+    epoch: Epoch,
+    height: NodeHeight,
+    high_pc_height: NodeHeight,
+) -> TimeoutVote {
+    let msg = TimeoutVoteMessage::new(network, epoch, height, high_pc_height);
+    let signature = signer.sign(&msg);
+    TimeoutVote {
+        epoch,
+        height,
+        high_pc_height,
+        signature: ValidatorSignatureBytes::new(signer.public_key().to_byte_type(), signature.to_byte_type()),
     }
 }
 

@@ -7,6 +7,7 @@ use tari_ootle_common_types::{Epoch, NodeHeight, VotePower, committee::Committee
 use tari_ootle_storage::{StateStore, global::models::ValidatorNode};
 use tari_ootle_transaction::Network;
 use tari_sidechain::SignerBitmap;
+use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
 use super::collector::{DuplicateVoteDetected, VoteCollector};
 use crate::{
@@ -152,6 +153,15 @@ where TConsensusSpec: ConsensusSpec
         Ok(self
             .count_pacing_vote(&sender_vn, current_height, epoch_state, vote)
             .await)
+    }
+
+    /// The highest view `public_key` has timed out in `epoch`, among the timeout votes held from it.
+    pub async fn highest_timed_out_view_of(
+        &self,
+        epoch: Epoch,
+        public_key: &RistrettoPublicKeyBytes,
+    ) -> Option<NodeHeight> {
+        self.pacing_votes.highest_view_of(epoch, public_key).await
     }
 
     /// The registered validator that signed `vote`, once the vote is known to be from a local committee member,

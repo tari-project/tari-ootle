@@ -94,6 +94,14 @@ where V::AggregationKey: Clone
         self.store.read().await.highest_view_held_by(epoch, committee, power)
     }
 
+    /// The highest view held from `public_key` in `epoch`. Signers are tracked only under a per-sender bound, so this
+    /// is `None` under any other.
+    pub async fn highest_view_of(&self, epoch: Epoch, public_key: &RistrettoPublicKeyBytes) -> Option<NodeHeight> {
+        let store = self.store.read().await;
+        let &(view_epoch, height) = store.sender_views.get(public_key)?.last()?;
+        (view_epoch == epoch).then_some(height)
+    }
+
     pub async fn collect_vote<TAddr: NodeAddressable>(
         &self,
         sender_vn: &ValidatorNode<TAddr>,

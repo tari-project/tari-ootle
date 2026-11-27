@@ -290,9 +290,8 @@ impl<T: prost::Message + Default + Unpin> Stream for ClientStreaming<T> {
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         match ready!(Pin::new(&mut self.inner).poll_recv(cx)) {
             Some(Ok(resp)) => {
-                // The streaming protocol dictates that an empty finish flag MUST be sent to indicate a terminated
-                // stream. This empty response need not be emitted to downsteam consumers.
-                if resp.flags.is_fin() {
+                // A FIN frame ends the stream; its payload, if any, is the final item, and an empty FIN is not emitted.
+                if resp.flags.is_fin() && resp.payload.is_empty() {
                     return Poll::Ready(None);
                 }
                 let result = T::decode(resp.into_message()).map_err(Into::into);
@@ -310,6 +309,7 @@ mod test {
     use prost::Message;
 
     use super::*;
+    use crate::message::RpcMessageFlags;
 
     #[tokio::test]
     async fn single_body() {
@@ -328,5 +328,24 @@ mod test {
         let body_bytes = body.into_iter().map(|r| r.unwrap()).collect::<Vec<_>>();
         assert!(body_bytes.iter().take(10).all(|b| !b.is_finished()));
         assert!(body_bytes.last().unwrap().is_finished());
+    }
+
+    #[tokio::test]
+    async fn client_streaming_emits_non_empty_fin_frame_and_skips_empty_fin() {
+        let (tx, rx) = mpsc::channel(4);
+        let (_keepalive_tx, keepalive_rx) = watch::channel(0u64);
+        let mut stream = ClientStreaming::<u32>::new(rx, keepalive_rx);
+
+        let mut final_with_payload = Response::new(Bytes::from(77u32.encode_to_vec()));
+        final_with_payload.flags = RpcMessageFlags::FIN;
+        tx.send(Ok(final_with_payload)).await.unwrap();
+
+        let mut empty_fin = Response::new(Bytes::new());
+        empty_fin.flags = RpcMessageFlags::FIN;
+        tx.send(Ok(empty_fin)).await.unwrap();
+        drop(tx);
+
+        assert_eq!(stream.next().await.transpose().unwrap(), Some(77u32));
+        assert_eq!(stream.next().await.transpose().unwrap(), None);
     }
 }

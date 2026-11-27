@@ -58,7 +58,7 @@ impl VersionedSubstateIdLockIntent {
                 version.unwrap_or(SubstateVersion::ZERO),
             ),
             lock,
-            version.is_some(),
+            version.is_some() || lock.is_output(),
         )
     }
 
@@ -297,11 +297,19 @@ impl SubstateRequirementLockIntent {
         self.lock_type
     }
 
+    pub fn requested_version(&self) -> Option<SubstateVersion> {
+        if self.lock_type.is_output() {
+            Some(self.version_to_lock)
+        } else {
+            self.substate_requirement.version()
+        }
+    }
+
     pub fn to_versioned_lock_intent(&self) -> VersionedSubstateIdLockIntent {
         VersionedSubstateIdLockIntent {
             versioned_substate_id: VersionedSubstateId::new(self.substate_id().clone(), self.version_to_lock),
             lock_type: self.lock_type,
-            require_version: self.substate_requirement.version().is_some(),
+            require_version: self.lock_type.is_output() || self.substate_requirement.version().is_some(),
             pledged_value_hash: self.pledged_value_hash,
         }
     }
@@ -321,7 +329,7 @@ impl LockIntent for &SubstateRequirementLockIntent {
     }
 
     fn requested_version(&self) -> Option<SubstateVersion> {
-        self.substate_requirement.version()
+        (*self).requested_version()
     }
 
     fn pledged_value_hash(&self) -> Option<Hash32> {
@@ -343,7 +351,7 @@ impl LockIntent for SubstateRequirementLockIntent {
     }
 
     fn requested_version(&self) -> Option<SubstateVersion> {
-        self.substate_requirement.version()
+        Self::requested_version(self)
     }
 
     fn pledged_value_hash(&self) -> Option<Hash32> {
@@ -383,5 +391,38 @@ impl Hash for SubstateRequirementLockIntent {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         // A SubstateRequirementLockIntent is uniquely identified by the SubstateRequirement
         self.substate_requirement.hash(state);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tari_template_lib_types::{ComponentAddress, ObjectKey};
+
+    use super::*;
+
+    fn sample_substate_id() -> SubstateId {
+        SubstateId::Component(ComponentAddress::from_array([9u8; ObjectKey::LENGTH]))
+    }
+
+    #[test]
+    fn output_lock_intents_always_require_their_version() {
+        let id = sample_substate_id();
+        let req_intent = SubstateRequirementLockIntent::output(id.clone(), SubstateVersion::new(3));
+        assert_eq!(req_intent.requested_version(), Some(SubstateVersion::new(3)));
+        assert_eq!(LockIntent::requested_version(&req_intent), Some(SubstateVersion::new(3)));
+        assert_eq!(LockIntent::requested_version(&&req_intent), Some(SubstateVersion::new(3)));
+
+        let versioned_intent = req_intent.to_versioned_lock_intent();
+        assert_eq!(versioned_intent.requested_version(), Some(SubstateVersion::new(3)));
+        assert_eq!(
+            versioned_intent.to_substate_requirement().version(),
+            Some(SubstateVersion::new(3))
+        );
+
+        let from_req = VersionedSubstateIdLockIntent::from_requirement(
+            SubstateRequirement::unversioned(id),
+            SubstateLockType::Output,
+        );
+        assert_eq!(from_req.requested_version(), Some(SubstateVersion::ZERO));
     }
 }

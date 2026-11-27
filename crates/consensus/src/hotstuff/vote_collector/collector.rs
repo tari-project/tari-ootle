@@ -82,6 +82,18 @@ where V::AggregationKey: Clone
         }
     }
 
+    /// The highest view that signers holding at least `power` in `committee` have each voted for, by the latest vote
+    /// held from each signer in `epoch`. Signers are tracked only under a per-sender bound, so this is `None` under
+    /// any other.
+    pub async fn highest_view_held_by<TAddr: NodeAddressable>(
+        &self,
+        epoch: Epoch,
+        committee: &Committee<TAddr>,
+        power: VotePower,
+    ) -> Option<NodeHeight> {
+        self.store.read().await.highest_view_held_by(epoch, committee, power)
+    }
+
     pub async fn collect_vote<TAddr: NodeAddressable>(
         &self,
         sender_vn: &ValidatorNode<TAddr>,
@@ -208,6 +220,29 @@ impl<V: Vote + Display + Clone> VoteStoreInner<V> {
             store: BTreeMap::new(),
             sender_views: HashMap::new(),
         }
+    }
+
+    fn highest_view_held_by<TAddr: NodeAddressable>(
+        &self,
+        epoch: Epoch,
+        committee: &Committee<TAddr>,
+        power: VotePower,
+    ) -> Option<NodeHeight> {
+        let mut latest = self
+            .sender_views
+            .iter()
+            .filter_map(|(public_key, views)| {
+                let &(view_epoch, height) = views.last()?;
+                let signer_power = committee.get_power_by_public_key(public_key)?;
+                (view_epoch == epoch).then_some((height, signer_power))
+            })
+            .collect::<Vec<_>>();
+        latest.sort_unstable_by_key(|&(height, _)| std::cmp::Reverse(height));
+        let mut held = VotePower::zero();
+        latest.into_iter().find_map(|(height, signer_power)| {
+            held = held.saturating_add(signer_power);
+            (held >= power).then_some(height)
+        })
     }
 
     fn clear_votes_before(&mut self, epoch: Epoch, height: NodeHeight) {
@@ -1154,6 +1189,59 @@ mod tests {
             .unwrap();
         let guard = collector.store.read().await;
         assert_eq!(guard.sender_views.get(&spammer).map(|s| s.len()).unwrap_or(0), 1);
+    }
+
+    #[tokio::test]
+    async fn the_highest_view_held_by_a_power_counts_each_signers_latest_vote() {
+        let collector = VoteCollector::<TestVote>::with_per_sender_limit(8);
+        let epoch = Epoch(1);
+        let current_height = NodeHeight(5);
+        let voters = [pubkey(1), pubkey(2), pubkey(3), pubkey(4)];
+        let committee = committee(&voters);
+        let f_plus_one = committee.max_failures().saturating_add(VotePower::of(1));
+        let vote = |pk, height| TestVote {
+            epoch,
+            height: NodeHeight(height),
+            block_id: FixedHash::zero(),
+            decision: QuorumDecision::Accept,
+            sig: ZERO_SIG,
+            public_key: pk,
+        };
+        let collect = |pk, height| {
+            let collector = &collector;
+            let committee = &committee;
+            async move {
+                collector
+                    .collect_vote(&validator(pk), epoch, current_height, vote(pk, height), committee)
+                    .await
+                    .unwrap();
+            }
+        };
+
+        // One signer is at most the tolerated faulty power, however far ahead it votes.
+        collect(voters[0], 50).await;
+        collect(voters[0], 500).await;
+        assert_eq!(
+            collector.highest_view_held_by(epoch, &committee, f_plus_one).await,
+            None
+        );
+
+        // Its latest vote counts, not its earlier ones: two signers are at 40 or above.
+        collect(voters[1], 40).await;
+        assert_eq!(
+            collector.highest_view_held_by(epoch, &committee, f_plus_one).await,
+            Some(NodeHeight(40))
+        );
+
+        collect(voters[2], 60).await;
+        assert_eq!(
+            collector.highest_view_held_by(epoch, &committee, f_plus_one).await,
+            Some(NodeHeight(60))
+        );
+        assert_eq!(
+            collector.highest_view_held_by(Epoch(2), &committee, f_plus_one).await,
+            None
+        );
     }
 
     #[test]

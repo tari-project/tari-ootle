@@ -165,6 +165,7 @@ impl<TConsensusSpec: ConsensusSpec> OnMessageValidate<TConsensusSpec> {
                 })
             },
             msg @ HotstuffMessage::NewView(_) |
+            msg @ HotstuffMessage::TimeoutVote(_) |
             msg @ HotstuffMessage::Vote(_) |
             msg @ HotstuffMessage::CatchUpSyncRequest(_) |
             msg @ HotstuffMessage::CatchUpPage(_) => {

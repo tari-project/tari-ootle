@@ -568,7 +568,9 @@ fn calc_args_weight(name: &FunctionName, args: &[InstructionArg]) -> u64 {
         }
     }
 
-    let literal_weight = (total_literal_bytes / LITERAL_BYTE_DIVISOR).max(num_literals * NON_LITERAL_WEIGHT);
+    // The per-literal minimum must not absorb the name's bytes, so the name weighs on top of it.
+    let literal_weight = (total_literal_bytes / LITERAL_BYTE_DIVISOR)
+        .max(num_literals * NON_LITERAL_WEIGHT + name.len() as u64 / LITERAL_BYTE_DIVISOR);
     literal_weight + num_non_literals * NON_LITERAL_WEIGHT
 }
 
@@ -1151,6 +1153,18 @@ mod weight_tests {
         };
         assert_eq!(calc_instruction_weight(&call("m")), 302 / LITERAL_BYTE_DIVISOR);
         assert_eq!(calc_instruction_weight(&call("transfer")), 309 / LITERAL_BYTE_DIVISOR);
+
+        // Many tiny literals: the per-literal minimum wins, and the name still weighs on top of it.
+        let tiny_literals = |name: &str| Instruction::CallMethod {
+            call: crate::ComponentReference::Workspace(0),
+            method: FunctionName::try_from(name).expect("the name fits"),
+            args: vec![InstructionArg::raw_literal_bytes(vec![0u8]); 32],
+        };
+        assert_eq!(calc_instruction_weight(&tiny_literals("m")), 32);
+        assert_eq!(
+            calc_instruction_weight(&tiny_literals(&"f".repeat(64))),
+            32 + 64 / LITERAL_BYTE_DIVISOR
+        );
     }
 
     /// An access rule of exactly `num_nodes` nodes: one `AnyOf` holding `num_nodes - 1` empty `AnyOf`s.

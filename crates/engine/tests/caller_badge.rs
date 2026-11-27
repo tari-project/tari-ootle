@@ -10,10 +10,13 @@ use tari_engine::runtime::{RuntimeError, scope::RestrictedFrame};
 use tari_engine_types::substate::SubstateId;
 use tari_ootle_transaction::args;
 use tari_template_lib::types::{
+    AccessRule,
     ComponentAddress,
+    OwnerRule,
     ResourceAddress,
-    access_rules::ResourceAuthAction,
+    access_rules::{ComponentAccessRules, ResourceAuthAction},
     constants::{CALLER_COMPONENT_RESOURCE_ADDRESS, DIRECT_CALLER_TEMPLATE_RESOURCE_ADDRESS},
+    rule,
 };
 use tari_template_test_tooling::{
     TemplateTest,
@@ -231,4 +234,52 @@ fn caller_badge_resources_hold_no_tokens() {
         );
         assert_reject_reason(reason, format!("{resource} not found"));
     }
+}
+
+/// `any_caller_*` rules name only engine-reserved resources, so they cross every frame boundary (arguments,
+/// component state, return values, and `CreateAccount` rules) while still gating withdrawals on the caller.
+#[test]
+fn any_caller_rules_are_accepted_in_arguments_state_returns_and_create_account() {
+    let mut test = TemplateTest::new(CRATE_PATH, TEMPLATES);
+    let caller_template = test.get_template_address("Caller");
+    let holder_template = test.get_template_address("GatedResource");
+    let any_comp_rule = rule!(any_caller_component);
+    let any_tmpl_rule = rule!(any_caller_template);
+
+    test.execute_expect_success(
+        test.transaction()
+            .create_account_custom(
+                test.to_public_key_bytes(),
+                Some(OwnerRule::ByAccessRule(any_tmpl_rule.clone())),
+                Some(ComponentAccessRules::new().default(any_comp_rule.clone())),
+                None::<&str>,
+            )
+            .call_function(caller_template, "new", args![])
+            .put_last_instruction_output_on_workspace("caller")
+            .call_function(holder_template, "new_with_withdraw_rule", args![any_comp_rule.clone()])
+            .put_last_instruction_output_on_workspace("comp_holder")
+            .call_method("comp_holder", "stored_rule", args![])
+            .call_method("caller", "withdraw_from", args![Workspace("comp_holder")])
+            .call_function(holder_template, "new_with_withdraw_rule", args![any_tmpl_rule.clone()])
+            .put_last_instruction_output_on_workspace("tmpl_holder")
+            .call_method("tmpl_holder", "stored_rule", args![])
+            .call_function(caller_template, "withdraw_from_static", args![Workspace("tmpl_holder")])
+            .build_and_seal(test.secret_key()),
+        vec![test.owner_proof()],
+    );
+
+    let returned_comp_rule: Option<AccessRule> = test.return_values()[5].decoded().unwrap();
+    let returned_tmpl_rule: Option<AccessRule> = test.return_values()[9].decoded().unwrap();
+    assert_eq!(returned_comp_rule, Some(any_comp_rule));
+    assert_eq!(returned_tmpl_rule, Some(any_tmpl_rule));
+    let comp_holder: ComponentAddress = test.return_values()[3].decoded().unwrap();
+
+    // A top-level signer carries neither caller badge, so direct withdrawal is still denied.
+    let reason = test.execute_expect_failure(
+        test.transaction()
+            .call_method(comp_holder, "withdraw_once", args![])
+            .build_and_seal(test.secret_key()),
+        vec![test.owner_proof()],
+    );
+    assert_access_denied_for_action(reason, ResourceAuthAction::Withdraw);
 }

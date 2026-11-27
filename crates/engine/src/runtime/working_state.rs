@@ -264,7 +264,7 @@ impl<TStore: StateReader> WorkingState<TStore> {
     }
 
     pub fn substate_exists(&self, address: &SubstateId) -> Result<bool, RuntimeError> {
-        if address.is_virtual_badge() {
+        if address.is_virtual() {
             return Ok(true);
         }
 

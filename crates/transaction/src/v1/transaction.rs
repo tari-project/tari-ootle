@@ -16,6 +16,7 @@ use tari_engine_types::{
 use tari_ootle_common_types::{Epoch, InputDeclaration, InputDeclarationRef};
 use tari_template_lib_types::{
     ComponentAddress,
+    FunctionName,
     Hash32,
     OwnerRule,
     constants::TARI_TOKEN,
@@ -460,8 +461,8 @@ fn calc_instruction_weight(instruction: &Instruction) -> u64 {
             let access_rule_nodes = access_rules.as_ref().map(|a| a.num_nodes() as u64).unwrap_or(0);
             (owner_rule_nodes + access_rule_nodes + workspace_id.as_ref().map(|_| 1).unwrap_or(0)).max(INVOCATION_FLOOR)
         },
-        Instruction::CallFunction { args, .. } => calc_args_weight(args).max(INVOCATION_FLOOR),
-        Instruction::CallMethod { args, .. } => calc_args_weight(args).max(INVOCATION_FLOOR),
+        Instruction::CallFunction { function, args, .. } => calc_call_weight(function, args),
+        Instruction::CallMethod { method, args, .. } => calc_call_weight(method, args),
         Instruction::PutLastInstructionOutputOnWorkspace { .. } => 0, // Call already costs
         Instruction::ClaimBurn { .. } => CLAIM_FIXED_COST,
         Instruction::ClaimValidatorFees { .. } => 1,
@@ -477,9 +478,11 @@ fn calc_instruction_weight(instruction: &Instruction) -> u64 {
         Instruction::AllocateAddress { .. } => 1,
         Instruction::StealthTransfer { statement, .. } => calc_stealth_statement_weight(statement),
         Instruction::PayFeeFromBucket { .. } => 1,
-        Instruction::UpdateComponentTemplate { migrate, .. } => {
-            (1 + migrate.as_ref().map(|m| calc_args_weight(&m.args)).unwrap_or(0)).max(INVOCATION_FLOOR)
-        },
+        Instruction::UpdateComponentTemplate { migrate, .. } => (1 + migrate
+            .as_ref()
+            .map(|m| calc_args_weight(&m.args) + calc_function_name_weight(&m.name))
+            .unwrap_or(0))
+        .max(INVOCATION_FLOOR),
         Instruction::SetComponentAccessRules { access_rules, .. } => 1 + access_rules.num_nodes() as u64,
         Instruction::SetComponentOwnerRule { owner_rule, .. } => match owner_rule {
             OwnerRule::ByAccessRule(rule) => 1 + rule.num_nodes() as u64,
@@ -540,6 +543,16 @@ pub const INVOCATION_FLOOR: u64 = 30;
 /// Paired with [`INVOCATION_FLOOR`], this is what turns the transaction byte cap into a bound on
 /// invocation count. `no_invocation_encodes_smaller_than_the_recorded_minimum` keeps it honest.
 pub const MIN_INVOCATION_ENCODED_BYTES: usize = 10;
+
+fn calc_call_weight(function: &FunctionName, args: &[InstructionArg]) -> u64 {
+    (calc_args_weight(args) + calc_function_name_weight(function)).max(INVOCATION_FLOOR)
+}
+
+/// A function name is up to 256 bytes the caller chooses, priced at the literal-argument rate. Most names weigh less
+/// than [`INVOCATION_FLOOR`], so this only raises the weight of calls with long names.
+fn calc_function_name_weight(name: &FunctionName) -> u64 {
+    name.len() as u64 / LITERAL_BYTE_DIVISOR
+}
 
 fn calc_args_weight(args: &[InstructionArg]) -> u64 {
     // Workspace and blob refs are cheap — just an index. Blob payloads are charged at the
@@ -1102,6 +1115,37 @@ mod weight_tests {
         assert_eq!(calc_instruction_weight(&no_arg_call()), INVOCATION_FLOOR);
         assert_eq!(calc_instruction_weight(&bare_create_account()), INVOCATION_FLOOR);
         assert_eq!(calc_instruction_weight(&bare_template_update()), INVOCATION_FLOOR);
+    }
+
+    #[test]
+    fn calls_weigh_the_bytes_of_long_function_names() {
+        let long_name = FunctionName::try_from("f".repeat(256)).expect("a 256-byte name fits");
+        let expected = 256 / LITERAL_BYTE_DIVISOR;
+        assert!(expected > INVOCATION_FLOOR);
+
+        let call_method = Instruction::CallMethod {
+            call: crate::ComponentReference::Workspace(0),
+            method: long_name.clone(),
+            args: vec![],
+        };
+        assert_eq!(calc_instruction_weight(&call_method), expected);
+
+        let call_function = Instruction::CallFunction {
+            address: TemplateAddress::default(),
+            function: long_name.clone(),
+            args: vec![],
+        };
+        assert_eq!(calc_instruction_weight(&call_function), expected);
+
+        let update = Instruction::UpdateComponentTemplate {
+            component: crate::ComponentReference::Workspace(0),
+            migrate: Some(MigrateFunction {
+                name: long_name,
+                args: vec![],
+            }),
+            new_template: TemplateAddress::default(),
+        };
+        assert_eq!(calc_instruction_weight(&update), 1 + expected);
     }
 
     /// An access rule of exactly `num_nodes` nodes: one `AnyOf` holding `num_nodes - 1` empty `AnyOf`s.

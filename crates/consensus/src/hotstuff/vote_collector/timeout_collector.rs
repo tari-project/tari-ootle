@@ -40,8 +40,8 @@ pub struct CollectedTimeoutVote {
 pub struct PacingTimeoutVotes {
     /// The vote's view, when this vote brought the signers that timed it out to a quorum.
     pub timed_out_view: Option<NodeHeight>,
-    /// The highest view that more than the committee's tolerated faulty power has timed out, by each signer's latest
-    /// vote. At least one correct member is at this view or above it.
+    /// The highest view that more than the committee's tolerated faulty power has timed out, by each signer's highest
+    /// held vote. At least one correct member has named this view or a higher one.
     pub joinable_view: Option<NodeHeight>,
 }
 

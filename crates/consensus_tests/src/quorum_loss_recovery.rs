@@ -94,30 +94,3 @@ async fn committee_resumes_after_a_long_quorum_loss() {
     test.stop();
     test.assert_clean_shutdown().await;
 }
-
-/// Members stopped through a long stall return with a record of far fewer timed-out views than those that stayed up.
-/// The record does not decide the view they name, so the committee times out one view together and resumes.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn committee_resumes_when_returning_members_timed_out_far_fewer_views() {
-    setup_logger();
-    let mut test = start().await;
-    let pre_heal_committed = partition(&mut test).await;
-
-    for name in ONLINE {
-        let leaf_height = test.get_validator(&TestAddress::new(name)).get_leaf_block().height();
-        test.get_validator(&TestAddress::new(name))
-            .state_store()
-            .with_write_tx(|tx| {
-                LastSentNewView {
-                    epoch: Epoch(1),
-                    height: leaf_height + NodeHeight(300),
-                }
-                .set(tx)
-            })
-            .unwrap();
-    }
-
-    heal_and_commit(&mut test, pre_heal_committed).await;
-    test.stop();
-    test.assert_clean_shutdown().await;
-}

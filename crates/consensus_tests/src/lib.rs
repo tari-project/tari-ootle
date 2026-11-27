@@ -77,6 +77,8 @@ mod timeout_certificate;
 #[cfg(test)]
 mod timeout_certificate_signatures;
 #[cfg(test)]
+mod timeout_pacing;
+#[cfg(test)]
 mod unexecuted_block_commit;
 #[cfg(test)]
 mod vote_equivocation_withholding;

@@ -82,7 +82,7 @@ where V::AggregationKey: Clone
         }
     }
 
-    /// The highest view that signers holding at least `power` in `committee` have each voted for, by the latest vote
+    /// The highest view that signers holding at least `power` in `committee` have each voted for, by the highest view
     /// held from each signer in `epoch`. Signers are tracked only under a per-sender bound, so this is `None` under
     /// any other.
     pub async fn highest_view_held_by<TAddr: NodeAddressable>(
@@ -228,7 +228,7 @@ impl<V: Vote + Display + Clone> VoteStoreInner<V> {
         committee: &Committee<TAddr>,
         power: VotePower,
     ) -> Option<NodeHeight> {
-        let mut latest = self
+        let mut highest = self
             .sender_views
             .iter()
             .filter_map(|(public_key, views)| {
@@ -237,9 +237,9 @@ impl<V: Vote + Display + Clone> VoteStoreInner<V> {
                 (view_epoch == epoch).then_some((height, signer_power))
             })
             .collect::<Vec<_>>();
-        latest.sort_unstable_by_key(|&(height, _)| std::cmp::Reverse(height));
+        highest.sort_unstable_by_key(|&(height, _)| std::cmp::Reverse(height));
         let mut held = VotePower::zero();
-        latest.into_iter().find_map(|(height, signer_power)| {
+        highest.into_iter().find_map(|(height, signer_power)| {
             held = held.saturating_add(signer_power);
             (held >= power).then_some(height)
         })
@@ -1192,7 +1192,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_highest_view_held_by_a_power_counts_each_signers_latest_vote() {
+    async fn the_highest_view_held_by_a_power_counts_each_signers_highest_vote() {
         let collector = VoteCollector::<TestVote>::with_per_sender_limit(8);
         let epoch = Epoch(1);
         let current_height = NodeHeight(5);
@@ -1219,14 +1219,15 @@ mod tests {
         };
 
         // One signer is at most the tolerated faulty power, however far ahead it votes.
-        collect(voters[0], 50).await;
         collect(voters[0], 500).await;
+        collect(voters[0], 50).await;
         assert_eq!(
             collector.highest_view_held_by(epoch, &committee, f_plus_one).await,
             None
         );
 
-        // Its latest vote counts, not its earlier ones: two signers are at 40 or above.
+        // A signer counts at its highest held view, whatever order its votes arrived in: two signers are at 40 or
+        // above.
         collect(voters[1], 40).await;
         assert_eq!(
             collector.highest_view_held_by(epoch, &committee, f_plus_one).await,

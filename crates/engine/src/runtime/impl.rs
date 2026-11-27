@@ -3404,6 +3404,8 @@ where
                         &proof,
                         has_view_key,
                     ))?;
+                // A confidential take's new bucket holds only the proof's output commitment, if it has one.
+                self.charge_discrete_items_moved(usize::from(proof.output_proof.output.is_some()))?;
 
                 self.tracker.write_with(|state| {
                     let bucket = state.get_bucket(bucket_id)?;
@@ -3499,12 +3501,14 @@ where
 
                 // The hook may have altered the bucket, so it is re-inspected after the hook runs and before
                 // anything is charged: a hook that locked funds makes the burn fail, and the charge must cover the
-                // proofs actually verified below rather than those held when the hook was scheduled.
-                let value_proof_points = self.tracker.write_with(|state_mut| {
+                // proofs actually verified and discrete items actually destroyed below rather than those held when
+                // the hook was scheduled.
+                let (value_proof_points, discrete_items) = self.tracker.write_with(|state_mut| {
                     let bucket = state_mut.get_bucket(bucket_id)?;
                     Self::check_bucket_is_unlocked("burn", bucket_id, bucket)?;
+                    let discrete_items = bucket.discrete_items_held();
                     if !tracks_supply {
-                        return Ok::<_, RuntimeError>(0);
+                        return Ok::<_, RuntimeError>((0, discrete_items));
                     }
                     // One proof is verified per unlocked commitment; the price depends on each proof's variant.
                     let points = bucket
@@ -3514,13 +3518,15 @@ where
                         .filter_map(|commitment| arg.value_proofs.get(commitment))
                         .map(crypto::value_proof_native_points)
                         .fold(0u64, u64::saturating_add);
-                    Ok(points)
+                    Ok((points, discrete_items))
                 })?;
 
-                // Charge the value proofs' native verification against the payment-funded allowance before they run.
+                // Charge the value proofs' native verification and discrete-item destruction against the
+                // payment-funded allowance before they run.
                 if value_proof_points > 0 {
                     self.tracker.charge_native_execution(value_proof_points)?;
                 }
+                self.charge_discrete_items_moved(discrete_items)?;
 
                 self.tracker.write_with(|state| {
                     let bucket = state.take_bucket(bucket_id)?;
@@ -6770,5 +6776,122 @@ mod tests {
             matches!(err, RuntimeError::InvalidMethodAccessRule { ref details, .. } if details.contains("No method 'deposit' found")),
             "unexpected error for missing method: {err:?}"
         );
+    }
+
+    #[test]
+    fn bucket_burn_charges_discrete_items_moved_for_non_fungible_tokens() {
+        use std::collections::BTreeMap;
+
+        use tari_engine_types::limits::non_fungible_move_points;
+        use tari_template_lib::{
+            args::{BurnBucketArg, CreateResourceArg, MintArg, ResourceAction, ResourceRef},
+            types::NonFungibleId,
+        };
+
+        let runtime = runtime_with_blobs(Blobs::default());
+        let template_address = TemplateAddress::from_array([31u8; 32]);
+        let entity_id = EntityId::default();
+
+        runtime
+            .push_call_frame(
+                PushCallFrame::Static {
+                    template_address,
+                    module_name: "NftBurner".to_string(),
+                    arg_scope: IndexedWellKnownTypes::new(),
+                    entity_id,
+                },
+                None,
+            )
+            .unwrap();
+
+        let nft_count = 32usize;
+        let tokens: BTreeMap<NonFungibleId, (tari_bor::Value, tari_bor::Value)> = (0..nft_count as u64)
+            .map(|i| (NonFungibleId::from_u64(i), (tari_bor::Value::Null, tari_bor::Value::Null)))
+            .collect();
+
+        let create_arg = CreateResourceArg {
+            resource_type: ResourceType::NonFungible,
+            owner_rule: OwnerRule::None,
+            access_rules: ResourceAccessRules::new().burnable(AccessRule::AllowAll, UpdateRule::Locked),
+            metadata: Metadata::new(),
+            mint_arg: Some(MintArg::NonFungible { tokens }),
+            view_key: None,
+            authorize_hook: None,
+            address_allocation: None,
+            divisibility: 0,
+            is_total_supply_tracking_enabled: true,
+        };
+
+        let created = runtime
+            .resource_invoke(
+                ResourceRef::Resource,
+                ResourceAction::Create,
+                invoke_args![create_arg].into(),
+            )
+            .unwrap();
+        let (_resource_address, maybe_bucket_id): (ResourceAddress, Option<BucketId>) = created.decode().unwrap();
+        let bucket_id = maybe_bucket_id.expect("initial NFT supply bucket");
+
+        let points_before_burn = runtime.native_points_consumed();
+        runtime
+            .bucket_invoke(
+                BucketRef::Ref(bucket_id),
+                BucketAction::Burn,
+                invoke_args![BurnBucketArg {
+                    value_proofs: BTreeMap::new(),
+                }]
+                .into(),
+            )
+            .unwrap();
+        let charged = runtime.native_points_consumed() - points_before_burn;
+        assert_eq!(
+            charged,
+            non_fungible_move_points(nft_count as u64) + 2 * limits::NativeExecutionPoints::PER_ACCESS_RULE_NODE
+        );
+
+        runtime.pop_call_frame(&IndexedWellKnownTypes::new()).unwrap();
+    }
+
+    #[test]
+    fn bucket_take_confidential_charges_discrete_items_moved_for_output_commitment() {
+        use tari_engine_types::{
+            confidential::withdraw_native_points,
+            limits::{FREE_COMPUTE_GRACE_POINTS, non_fungible_move_points},
+        };
+        use tari_template_lib::types::{EncryptedData, stealth::UnspentOutput};
+
+        let (runtime, _, bucket_id) = runtime_with_malformed_view_key_resource();
+
+        let mut proof = ConfidentialWithdrawProof::revealed_withdraw(Amount::new(1));
+        proof.output_proof.output = Some(UnspentOutput {
+            commitment: PedersenCommitmentBytes::zero(),
+            sender_public_nonce: RistrettoPublicKeyBytes::zero(),
+            encrypted_data: EncryptedData::empty(),
+            minimum_value_promise: 0,
+            viewable_balance_proof: None,
+        });
+        assert!(proof.output_proof.output.is_some());
+        let withdraw_cost = withdraw_native_points(&proof, true);
+        let move_cost = non_fungible_move_points(1);
+        assert!(withdraw_cost > 0);
+        assert!(move_cost > 0);
+
+        // Leave exactly `withdraw_cost` points of credit so `withdraw_native_points` succeeds and
+        // `charge_discrete_items_moved(1)` traps with `FeeIntentComputeExceeded` before view-key decompression.
+        let pre_charge = FREE_COMPUTE_GRACE_POINTS - withdraw_cost;
+        runtime.tracker.charge_native_execution(pre_charge).unwrap();
+
+        let take_args = EngineArgs::from(vec![tari_bor::encode(&proof).unwrap().into()]);
+        let err = runtime
+            .bucket_invoke(BucketRef::Ref(bucket_id), BucketAction::TakeConfidential, take_args)
+            .unwrap_err();
+        assert!(
+            matches!(
+                err,
+                RuntimeError::FeeIntentComputeExceeded { required_points, .. } if required_points == move_cost
+            ),
+            "expected FeeIntentComputeExceeded for discrete-item move cost {move_cost}, got {err:?}"
+        );
+        assert_eq!(runtime.native_points_consumed(), FREE_COMPUTE_GRACE_POINTS);
     }
 }

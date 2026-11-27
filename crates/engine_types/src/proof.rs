@@ -99,6 +99,11 @@ impl LockedResource {
         self.locked.non_fungible_token_ids()
     }
 
+    /// The discrete items locked into this proof. See [`ResourceContainer::discrete_items_held`].
+    pub fn discrete_items_held(&self) -> usize {
+        self.locked.discrete_items_held()
+    }
+
     pub fn resource_type(&self) -> ResourceType {
         self.locked.resource_type()
     }

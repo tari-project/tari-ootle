@@ -1,19 +1,27 @@
 //   Copyright 2023 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    ops::Range,
+};
 
 use ootle_byte_type::ToByteType;
+use tari_bor::encoded_len;
 use tari_crypto::{
     keys::PublicKey as _,
     ristretto::{RistrettoPublicKey, RistrettoSecretKey},
 };
-use tari_engine::runtime::{ArgumentValidationError, RuntimeError};
+use tari_engine::{
+    runtime::{ArgumentValidationError, RuntimeError},
+    state_store::StateWriter,
+};
 use tari_engine_types::{
     crypto::{ElgamalVerifiableBalance, OutputBody, ValueLookup, commit_range_provable_amount},
-    limits::CONFIDENTIAL_LIMITS,
+    limits::{self, CONFIDENTIAL_LIMITS},
     resource_container::{ResourceContainer, ResourceError},
-    substate::SubstateId,
+    substate::{Substate, SubstateId, SubstateValue},
+    vault::Vault,
 };
 use tari_ootle_common_types::substate_type::SubstateType;
 use tari_ootle_transaction::{Epoch, Transaction, args};
@@ -25,6 +33,8 @@ use tari_template_lib::{
         ComponentAddress,
         ConfidentialOutputAddress,
         OwnerRule,
+        ResourceAddress,
+        VaultId,
         confidential::{ConfidentialOutputStatement, ConfidentialWithdrawProof},
         constants::TARI_TOKEN,
         crypto::{CommitmentValueProof, PedersenCommitmentBytes, RistrettoPublicKeyBytes},
@@ -1061,5 +1071,143 @@ fn withdraw_rejects_a_change_commitment_the_container_holds_locked() {
     assert!(
         matches!(&err, ResourceError::InvariantError(msg) if msg.contains("change commitment")),
         "unexpected error: {err:?}"
+    );
+}
+
+/// Overwrites `account`'s vault of `resource` with one holding a commitment for each of `seeds`, keeping its substate
+/// version, and returns the vault's id.
+fn seed_confidential_vault(
+    test: &mut TemplateTest,
+    account: ComponentAddress,
+    resource: ResourceAddress,
+    seeds: Range<u32>,
+) -> VaultId {
+    let vault_id = *test
+        .read_only_state_store()
+        .get_vaults_for_component(account)
+        .unwrap()
+        .iter()
+        .find(|(_, vault)| *vault.resource_address() == resource)
+        .expect("the account holds a vault for the confidential resource")
+        .0;
+    let version = test
+        .read_only_state_store()
+        .get_substate(&SubstateId::Vault(vault_id))
+        .unwrap()
+        .version();
+
+    let commitments = seeds.map(|i| {
+        let mut bytes = [0u8; 32];
+        bytes[..4].copy_from_slice(&i.to_le_bytes());
+        PedersenCommitmentBytes::from_array(bytes)
+    });
+    let value = SubstateValue::Vault(Vault::new(ResourceContainer::confidential(
+        resource,
+        commitments,
+        Amount::zero(),
+    )));
+    assert!(encoded_len(&value) <= limits::ENGINE_LIMITS.max_substate_size);
+    test.get_state_store_mut()
+        .set_state(SubstateId::Vault(vault_id), Substate::new(version, value))
+        .unwrap();
+    vault_id
+}
+
+/// Locking a vault's commitments into a proof and unlocking them when it is dropped runs on the host for every
+/// commitment moved, as it does for non-fungible ids. So each commitment a proof moves is charged twice, at the
+/// non-fungible id price.
+#[test]
+fn moving_confidential_commitments_is_charged_per_commitment() {
+    let (confidential_proof, mask, value_proofs) = mint_statement(100, None);
+    let (mut test, faucet, faucet_resx) = setup(confidential_proof, value_proofs, None);
+    let resource = faucet_resx.as_resource_address().unwrap();
+    let (account, owner_proof, key) = test.create_empty_account();
+
+    let withdraw_proof = generate_withdraw_proof(&mask, 100, None, 0u64);
+    test.execute_expect_success(
+        Transaction::builder_localnet(Epoch(1))
+            .call_method(faucet, "take_free_coins", args![withdraw_proof.proof])
+            .put_last_instruction_output_on_workspace("coins")
+            .call_method(account, "deposit", args![Workspace("coins")])
+            .build_and_seal(&key),
+        vec![owner_proof.clone()],
+    );
+
+    let (small, large) = (1_000u32, 10_000u32);
+    let mut proof_round_trip_points = |count: u32| {
+        seed_confidential_vault(&mut test, account, resource, 0..count);
+        test.execute_expect_success(
+            Transaction::builder_localnet(Epoch(1))
+                .call_method(account, "create_proof_for_resource", args![resource])
+                .put_last_instruction_output_on_workspace("proof")
+                .drop_all_proofs_in_workspace()
+                .build_and_seal(&key),
+            vec![owner_proof.clone()],
+        )
+        .native_execution_points
+    };
+    let small_proof = proof_round_trip_points(small);
+    let large_proof = proof_round_trip_points(large);
+
+    assert_eq!(
+        large_proof - small_proof,
+        limits::non_fungible_move_points(2 * u64::from(large - small)),
+        "proving {large} commitments rather than {small} must cost exactly the difference in moves"
+    );
+}
+
+/// Recalling a vault's commitments into a bucket and depositing that bucket into another vault moves each commitment
+/// twice, once per container it enters, and each move is charged.
+#[test]
+fn recalling_and_depositing_confidential_commitments_is_charged_per_commitment() {
+    let mut test = TemplateTest::new(CRATE_PATH, ["tests/templates/recall"]);
+    let recall_template = test.get_template_address("Recall");
+    let (account, _, _) = test.create_empty_account();
+
+    let (mut initial_supply, mask, _) = generate_confidential_output_statement(1000, None);
+    initial_supply.output_revealed_amount = Amount::from(1000u64);
+    let value_proofs = value_proofs_for_commitment(1000u64, &mask);
+    test.execute_expect_success(
+        Transaction::builder_localnet(Epoch(1))
+            .call_function(recall_template, "new", args![initial_supply, value_proofs])
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
+    let recall_component: ComponentAddress = test.return_values()[0].get_value("$.0").unwrap().unwrap();
+    let resource: ResourceAddress = test.return_values()[0].get_value("$.3").unwrap().unwrap();
+
+    // Gives the account a vault for the confidential resource to seed.
+    let withdraw = generate_withdraw_proof(&mask, 10, Some(980), 10u64);
+    test.execute_expect_success(
+        Transaction::builder_localnet(Epoch(1))
+            .call_method(recall_component, "withdraw_some", args![withdraw.proof])
+            .put_last_instruction_output_on_workspace("buckets")
+            .call_method(account, "deposit", args![Workspace("buckets.0")])
+            .call_method(account, "deposit", args![Workspace("buckets.1")])
+            .call_method(account, "deposit", args![Workspace("buckets.2")])
+            .call_method(account, "deposit", args![Workspace("buckets.3")])
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
+
+    // The recalled commitments accumulate in the component's vault, so each run seeds commitments it does not hold.
+    let (small, large) = (1_000u32, 10_000u32);
+    let mut recall_points = |seeds: Range<u32>| {
+        let vault_id = seed_confidential_vault(&mut test, account, resource, seeds);
+        test.execute_expect_success(
+            Transaction::builder_localnet(Epoch(1))
+                .call_method(recall_component, "recall_all_confidential", args![vault_id])
+                .build_and_seal(test.secret_key()),
+            vec![],
+        )
+        .native_execution_points
+    };
+    let small_recall = recall_points(0..small);
+    let large_recall = recall_points(small..small + large);
+
+    assert_eq!(
+        large_recall - small_recall,
+        limits::non_fungible_move_points(2 * u64::from(large - small)),
+        "recalling and depositing {large} commitments rather than {small} must cost exactly the difference in moves"
     );
 }

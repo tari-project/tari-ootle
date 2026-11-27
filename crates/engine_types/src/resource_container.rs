@@ -237,6 +237,32 @@ impl ResourceContainer {
         }
     }
 
+    /// The number of unlocked discrete items the container holds: non-fungible ids, or confidential commitments.
+    /// Fungible and stealth containers hold an amount only, so they hold none.
+    ///
+    /// The engine moves each discrete item on its own when it moves a container's contents, so this is the count
+    /// those moves are charged by. Locked items are excluded: every move takes the unlocked set alone, and a
+    /// container moved whole holds nothing locked.
+    pub fn discrete_items_held(&self) -> usize {
+        match self {
+            Self::NonFungible { token_ids, .. } => token_ids.len(),
+            Self::Confidential { commitments, .. } => commitments.len(),
+            Self::Fungible { .. } | Self::Stealth { .. } => 0,
+        }
+    }
+
+    /// The discrete items a move of `amount` out of this container carries, read before the move is made. A
+    /// non-fungible container moves an amount as that many of its unlocked ids, up to those it holds; every other
+    /// container moves an amount out of its balance, which carries no discrete item.
+    pub fn discrete_items_in_amount(&self, amount: Amount) -> usize {
+        match self {
+            Self::NonFungible { token_ids, .. } => {
+                usize::try_from(amount.to_u128()).map_or(token_ids.len(), |n| n.min(token_ids.len()))
+            },
+            Self::Fungible { .. } | Self::Confidential { .. } | Self::Stealth { .. } => 0,
+        }
+    }
+
     pub fn into_non_fungible_ids(self) -> Option<BTreeSet<NonFungibleId>> {
         match self {
             Self::NonFungible { token_ids, .. } => Some(token_ids),

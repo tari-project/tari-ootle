@@ -2303,6 +2303,8 @@ pub struct SwapPoolGetExchangeRateResponse {
 pub struct SwapPoolsListRequest {
     /// Filter pools to only those containing this exact resource pair (in any order).
     /// Both must be provided for filtering to take effect.
+    ///
+    /// Note: filtered listing inspects at most the first 400 watched liquidity pools returned by the indexer.
     #[serde(default)]
     #[cfg_attr(feature = "ts", ts(type = "[string, string] | null"))]
     pub resource_pair: Option<(ResourceAddress, ResourceAddress)>,

@@ -93,7 +93,12 @@ impl TestDaemon {
 
     /// A handler context on LocalNet that reads from `indexer` with `indexer_trust`.
     pub async fn start_with_indexer(indexer: &FakeIndexer, indexer_trust: IndexerTrust) -> Self {
-        Self::init(false, indexer.url.as_str(), indexer_trust).await
+        Self::start_with_indexer_url(indexer.url.as_str(), indexer_trust).await
+    }
+
+    /// A handler context on LocalNet that reads from `indexer_url` with `indexer_trust`.
+    pub async fn start_with_indexer_url(indexer_url: &str, indexer_trust: IndexerTrust) -> Self {
+        Self::init(false, indexer_url, indexer_trust).await
     }
 
     async fn init(run_transaction_service: bool, indexer_url: &str, indexer_trust: IndexerTrust) -> Self {

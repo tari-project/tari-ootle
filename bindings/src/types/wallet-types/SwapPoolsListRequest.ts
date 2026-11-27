@@ -4,6 +4,8 @@ export type SwapPoolsListRequest = {
   /**
    * Filter pools to only those containing this exact resource pair (in any order).
    * Both must be provided for filtering to take effect.
+   *
+   * Note: filtered listing inspects at most the first 400 watched liquidity pools returned by the indexer.
    */
   resource_pair: [string, string] | null;
   limit: number | bigint | string | null;

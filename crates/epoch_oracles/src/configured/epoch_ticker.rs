@@ -39,21 +39,22 @@ impl IntervalEpochTicker {
 
     fn increment_epoch(&mut self) -> Epoch {
         let epoch = self.epoch;
-        self.epoch += Epoch(1);
+        self.epoch = self.epoch.saturating_add(Epoch(1));
         epoch
     }
 }
 
 impl EpochTicker for IntervalEpochTicker {
     fn poll_tick(&mut self, cx: &mut Context) -> Poll<Option<EpochTickerData>> {
-        // Tick quickly initially
-        if self.epoch < self.initial_epoch {
+        // Tick quickly initially. When no interval is configured, also emit `initial_epoch` itself with
+        // `done_for_now = true` before going pending (matching `RealTimeEpochTicker::disable_ticks`).
+        if self.epoch < self.initial_epoch || (self.interval.is_none() && self.epoch == self.initial_epoch) {
             let epoch = self.increment_epoch();
             let epoch_hash = calc_static_epoch_hash(epoch);
             return Poll::Ready(Some(EpochTickerData {
                 epoch,
                 epoch_hash,
-                done_for_now: false,
+                done_for_now: epoch == self.initial_epoch,
             }));
         }
 
@@ -81,7 +82,7 @@ fn calc_static_epoch_hash(epoch: Epoch) -> FixedHash {
 
 #[cfg(test)]
 mod tests {
-    use std::{future::poll_fn, time::Duration};
+    use std::{future::poll_fn, task::Waker, time::Duration};
 
     use tokio::time::timeout;
 
@@ -102,5 +103,23 @@ mod tests {
                 }))
             );
         }
+    }
+
+    #[test]
+    fn without_interval_it_catches_up_through_initial_epoch_and_marks_done_for_now() {
+        let mut ticker = IntervalEpochTicker::new(None, Epoch(3), Epoch(0));
+        let mut cx = Context::from_waker(Waker::noop());
+
+        for i in 0..=3 {
+            assert_eq!(
+                ticker.poll_tick(&mut cx),
+                Poll::Ready(Some(EpochTickerData {
+                    epoch: Epoch(i),
+                    epoch_hash: calc_static_epoch_hash(Epoch(i)),
+                    done_for_now: i == 3,
+                }))
+            );
+        }
+        assert_eq!(ticker.poll_tick(&mut cx), Poll::Pending);
     }
 }

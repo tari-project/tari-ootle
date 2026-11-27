@@ -1562,18 +1562,20 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
 
         let epoch_end_drain = self.epoch_end_drain(epoch_state).await?;
         let (propose_now, is_epoch_end_held) = self.state_store.with_read_tx(|tx| {
-            let highest_block = HighestSeenBlock::get(tx, epoch_state.epoch())?;
-            // Propose quickly if there are UTXOs to mint or transactions to propose
+            let high_pc = HighPc::get(tx, epoch_state.epoch())?;
+            let justify_block_id = justified_block_id_for_high_pc(tx, epoch_state.epoch(), &high_pc)?;
+            // Propose quickly if there are UTXOs to mint or transactions to propose on the HighPc chain that
+            // `OnPropose::build_next_block` extends from.
             let propose_now = ForeignProposalRecord::has_unconfirmed(tx, epoch_state.epoch())? ||
                 self.transaction_pool.has_ready_or_pending_transaction_updates(
                     tx,
-                    highest_block.block_id(),
+                    &justify_block_id,
                     &epoch_end_drain
                         .proposal_filter(epoch_state.epoch(), epoch_state.local_committee_info().shard_group()),
                 )?;
             let is_epoch_end_held = epoch_end_drain.is_active() &&
                 self.transaction_pool
-                    .any_in_chain(tx, highest_block.block_id(), |rec| {
+                    .any_in_chain(tx, &justify_block_id, |rec| {
                         epoch_end_drain.holds_epoch_end_for(rec.current_stage())
                     })?;
 
@@ -1877,69 +1879,49 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
         }
 
         // The parent of the next block must be a block every honest node provably shares: either the
-        // HighQC's justified block, or a deterministic dummy chain extending it. Building directly on
-        // `highest_block` is correct ONLY when it *is* the HighQC (the steady-state case): a block can
-        // be locally accepted without a certificate forming for it, and we still build on it so a
-        // subsequent QC justifies it. But when the highest seen block sits *above* the HighQC
-        // (`leaf > HighPC` — accepted locally yet never certified), we must NOT extend it on a recovery
-        // proposal. Validators reconstruct the post-timeout chain from the HighQC carried in our
-        // proposal and would reject a real parent at the gap height as "does not extend justify",
-        // forking the committee. So on a timeout (or a height gap) we anchor on the HighQC and fill the
-        // gap with dummy blocks instead — exactly what validators recompute.
-        let highest_block = self
+        // HighQC's justified block, or a deterministic dummy chain extending it. `OnPropose::build_next_block`
+        // always anchors the proposal's parent chain on `justify_block` (HighPC) rather than `highest_block`.
+        // When `highest_block` is a locally seen but uncertified block above `HighPC` (`highest_block.height >
+        // high_pc.height()`) and a subsequent proposal is triggered via a non-timeout beat (`is_timeout == false`,
+        // e.g. `on_beat`, `on_force_beat(None)`, or after catch-up/restart), `next_height > highest_block.height + 1`
+        // can be false even though `next_height > justify_block.height() + 1`. Checking against `HighPc.height()` and
+        // `HighTc.height()` directly ensures the proposal always carries the timeout certificate for `next_height - 1`
+        // and fills any height gap above `justify_block` with dummy blocks.
+        let ProposalRecoveryContext {
+            highest_block,
+            propose_high_tc,
+            gap_anchor,
+        } = self
             .state_store
-            .with_read_tx(|tx| HighestSeenBlock::get(tx, epoch_state.epoch()))?;
+            .with_read_tx(|tx| load_proposal_recovery_context(tx, epoch_state.epoch(), next_height))?;
 
         let mut dummy_block = None;
-        let mut propose_high_tc = None;
-        if is_timeout || next_height > highest_block.height + NodeHeight(1) {
-            let (high_qc, high_tc, justify_block) = self.state_store.with_read_tx(|tx| {
-                let high_qc = HighPc::get(tx, epoch_state.epoch())?;
-                let high_qc = ProposalCertificate::get(tx, high_qc.epoch(), high_qc.id())?;
-                let high_tc = HighTc::get(tx, epoch_state.epoch()).optional()?;
-                let high_tc = high_tc
-                    .map(|tc| TimeoutCertificate::get(tx, tc.epoch(), tc.id()))
-                    .transpose()?;
-                let justify_block = Block::get_justified_block(tx, &high_qc, epoch_state.epoch())?;
-                Ok::<_, HotStuffError>((high_qc, high_tc, justify_block))
-            })?;
+        if let Some((high_qc, justify_block)) = gap_anchor {
+            info!(
+                target: LOG_TARGET,
+                "⚠️ Leader Failure: proposing at {next_height} anchored on HighQC (height {}, is_timeout = {is_timeout}); highest seen is {highest_block}. Filling the gap with dummy blocks.",
+                justify_block.height(),
+            );
 
-            // A block may only carry the timeout certificate for the view directly below it
-            // (`check_timeout_certificate_precedes_block`).
-            propose_high_tc = high_tc.filter(|tc| tc.height().checked_add(NodeHeight(1)) == Some(next_height));
-
-            // Fill [justify_block.height + 1, next_height - 1] with dummy blocks anchored on the HighQC,
-            // so our parent matches what every validator deterministically recomputes from the QC. When
-            // next_height == justify_block.height + 1 there is no gap: the parent is the HighQC block
-            // itself, which in that case is also the highest seen block, so on_propose's fallback to
-            // highest_block is correct.
-            if next_height > justify_block.height() + NodeHeight(1) {
-                info!(
-                    target: LOG_TARGET,
-                    "⚠️ Leader Failure: proposing at {next_height} anchored on HighQC (height {}); highest seen is {highest_block}. Filling the gap with dummy blocks.",
-                    justify_block.height(),
-                );
-
-                let skip_set = self.load_leader_skip_set(epoch_state, justify_block.height())?;
-                if let Some(dummy) = calculate_last_dummy_block(
-                    justify_block.height(),
-                    next_height,
-                    self.config.network,
-                    epoch_state.epoch(),
-                    justify_block.shard_group(),
-                    *justify_block.id(),
-                    &high_qc,
-                    *justify_block.state_merkle_root(),
-                    &self.leader_strategy,
-                    epoch_state.local_committee(),
-                    &skip_set,
-                    justify_block.timestamp(),
-                    *justify_block.header().accumulated_data(),
-                    *justify_block.epoch_hash(),
-                    justify_block.exhaust_burn_rate(),
-                ) {
-                    dummy_block = Some(dummy);
-                }
+            let skip_set = self.load_leader_skip_set(epoch_state, justify_block.height())?;
+            if let Some(dummy) = calculate_last_dummy_block(
+                justify_block.height(),
+                next_height,
+                self.config.network,
+                epoch_state.epoch(),
+                justify_block.shard_group(),
+                *justify_block.id(),
+                &high_qc,
+                *justify_block.state_merkle_root(),
+                &self.leader_strategy,
+                epoch_state.local_committee(),
+                &skip_set,
+                justify_block.timestamp(),
+                *justify_block.header().accumulated_data(),
+                *justify_block.epoch_hash(),
+                justify_block.exhaust_burn_rate(),
+            ) {
+                dummy_block = Some(dummy);
             }
         }
 
@@ -2769,6 +2751,64 @@ fn apply_epoch_changed(
     EpochChangedOutcome::Registered
 }
 
+/// Resolves the block ID justified by `high_pc` in `epoch`.
+///
+/// A zero-block `HighPc` (`PcId::zero()` at the start of an epoch) justifies the epoch's genesis block; any other
+/// `HighPc` directly carries the justified block's ID.
+fn justified_block_id_for_high_pc<TTx: StateStoreReadTransaction>(
+    tx: &TTx,
+    epoch: Epoch,
+    high_pc: &HighPc,
+) -> Result<BlockId, HotStuffError> {
+    if high_pc.block_id().is_zero() {
+        Ok(*Block::get_genesis_for_epoch(tx, epoch)?.id())
+    } else {
+        Ok(*high_pc.block_id())
+    }
+}
+
+struct ProposalRecoveryContext {
+    pub highest_block: HighestSeenBlock,
+    pub propose_high_tc: Option<TimeoutCertificate>,
+    pub gap_anchor: Option<(ProposalCertificate, Block)>,
+}
+
+/// Loads `HighestSeenBlock`, any `TimeoutCertificate` directly preceding `next_height`, and (when `next_height` lies
+/// more than one view above `HighPc`) the `(ProposalCertificate, Block)` anchor required to build intermediate dummy
+/// blocks from the justified block up to `next_height - 1`.
+fn load_proposal_recovery_context<TTx: StateStoreReadTransaction>(
+    tx: &TTx,
+    epoch: Epoch,
+    next_height: NodeHeight,
+) -> Result<ProposalRecoveryContext, HotStuffError> {
+    let highest_block = HighestSeenBlock::get(tx, epoch)?;
+    let high_pc = HighPc::get(tx, epoch)?;
+
+    // A block may only carry the timeout certificate for the view directly below it
+    // (`check_timeout_certificate_precedes_block`).
+    let propose_high_tc = HighTc::get(tx, epoch)
+        .optional()?
+        .filter(|tc| tc.height().checked_add(NodeHeight(1)) == Some(next_height))
+        .map(|tc| TimeoutCertificate::get(tx, tc.epoch(), tc.id()))
+        .transpose()?;
+
+    // Fill [justify_block.height + 1, next_height - 1] with dummy blocks anchored on the HighQC whenever
+    // `next_height` sits more than one view above the HighPC justified block.
+    let gap_anchor = if next_height > high_pc.height().saturating_add(NodeHeight(1)) {
+        let high_qc = ProposalCertificate::get(tx, high_pc.epoch(), high_pc.id())?;
+        let justify_block = Block::get_justified_block(tx, &high_qc, epoch)?;
+        Some((high_qc, justify_block))
+    } else {
+        None
+    };
+
+    Ok(ProposalRecoveryContext {
+        highest_block,
+        propose_high_tc,
+        gap_anchor,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3327,6 +3367,208 @@ mod tests {
                 EpochChangedOutcome::Registered
             );
             assert_eq!(next_epoch, Some((Epoch(4), t0)));
+        }
+    }
+
+    mod proposal_recovery_anchor {
+        use tari_consensus_types::{ShardGroupAccumulatedData, SignedTimeout, TcSignatures};
+        use tari_ootle_common_types::{ExtraData, NumPreshards};
+        use tari_ootle_storage::consensus_models::{BlockCommands, BlockHeader};
+        use tari_ootle_transaction::Network;
+        use tari_sidechain::{QuorumDecision, SignerBitmap};
+        use tari_state_store_rocksdb::{DatabaseOptions, RocksDbStateStore};
+        use tari_template_lib_types::crypto::SchnorrSignatureBytes;
+
+        use super::*;
+
+        const NETWORK: Network = Network::LocalNet;
+        const NUM_PRESHARDS: NumPreshards = NumPreshards::P256;
+        const EPOCH: Epoch = Epoch(1);
+
+        fn make_block(
+            parent_id: BlockId,
+            justify: ProposalCertificate,
+            height: NodeHeight,
+            shard_group: ShardGroup,
+        ) -> Block {
+            let header = BlockHeader::create(
+                NETWORK,
+                ProtocolVersion::at(NETWORK, EPOCH),
+                parent_id,
+                justify.calculate_id(),
+                None,
+                height,
+                EPOCH,
+                shard_group,
+                RistrettoPublicKeyBytes::default(),
+                FixedHash::zero(),
+                &BlockCommands::empty(),
+                0,
+                SchnorrSignatureBytes::zero(),
+                0,
+                FixedHash::zero(),
+                ShardGroupAccumulatedData::default(),
+                ExtraData::new(),
+            )
+            .unwrap();
+            Block::new(header, justify, BlockCommands::empty(), None)
+        }
+
+        fn make_qc_for_block(block: &Block) -> ProposalCertificate {
+            ProposalCertificate::new(
+                block.header().calculate_hash(),
+                *block.parent(),
+                block.height(),
+                block.epoch(),
+                block.shard_group(),
+                ProposalCertificate::genesis_signatures(),
+                QuorumDecision::Accept,
+            )
+        }
+
+        fn make_tc(height: NodeHeight, high_pc_height: NodeHeight) -> TimeoutCertificate {
+            TimeoutCertificate::new(EPOCH, height, TcSignatures::Schnorr {
+                signers: SignerBitmap::from_indices(1, 0..1).unwrap(),
+                timeouts: vec![SignedTimeout {
+                    high_pc_height,
+                    signature: SchnorrSignatureBytes::zero(),
+                }],
+            })
+        }
+
+        #[test]
+        fn loads_tc_and_gap_anchor_when_uncertified_highest_seen_block_sits_at_timeout_height() {
+            let tmp = tempfile::tempdir().unwrap();
+            let store = RocksDbStateStore::<String>::open(tmp.path(), DatabaseOptions::default()).unwrap();
+            let shard_group = ShardGroup::all_shards(NUM_PRESHARDS);
+
+            let mut zero = Block::zero_block(NETWORK, NUM_PRESHARDS);
+            let genesis = Block::genesis(
+                NETWORK,
+                ProtocolVersion::at(NETWORK, EPOCH),
+                EPOCH,
+                FixedHash::zero(),
+                shard_group,
+                FixedHash::zero(),
+                None,
+                ExhaustBurnRate::new(0),
+            );
+            let block1 = make_block(*genesis.id(), genesis.justify().clone(), NodeHeight(1), shard_group);
+            let qc1 = make_qc_for_block(&block1);
+            // Block 2 was seen and accepted locally (`HighestSeenBlock.height == 2`), but view 2 timed out before a QC
+            // formed for block 2, leaving `HighPc` at height 1 (`qc1`) and `HighTc` at height 2 (`tc2`).
+            let uncertified_block2 = make_block(*block1.id(), qc1.clone(), NodeHeight(2), shard_group);
+            let tc2 = make_tc(NodeHeight(2), NodeHeight(1));
+
+            store
+                .with_write_tx(|tx| {
+                    zero.justify().save(tx)?;
+                    zero.insert(tx)?;
+                    zero.add_justify_qc(tx, &PcId::zero())?;
+
+                    genesis.justify().save(tx)?;
+                    genesis.insert(tx)?;
+                    genesis.as_locked().set(tx)?;
+                    genesis.as_leaf().set(tx)?;
+                    genesis.as_highest_seen().set(tx)?;
+                    genesis.justify().as_high_pc().set(tx)?;
+
+                    block1.insert(tx)?;
+                    qc1.update_highest(tx)?;
+
+                    uncertified_block2.insert(tx)?;
+                    uncertified_block2.as_highest_seen().set(tx)?;
+                    tc2.update_highest(tx)?;
+                    Ok::<_, HotStuffError>(())
+                })
+                .unwrap();
+
+            // Next proposal height is `max(HighPc(1), HighTc(2)) + 1 == 3`, which equals `HighestSeenBlock(2) + 1`
+            // even though it is two heights above `HighPc(1)`.
+            let next_height = NodeHeight(3);
+            let ProposalRecoveryContext {
+                highest_block: highest_seen,
+                propose_high_tc,
+                gap_anchor,
+            } = store
+                .with_read_tx(|tx| load_proposal_recovery_context(tx, EPOCH, next_height))
+                .unwrap();
+
+            assert_eq!(highest_seen.height, NodeHeight(2));
+            assert_eq!(
+                propose_high_tc.as_ref().map(|tc| tc.calculate_id()),
+                Some(tc2.calculate_id()),
+                "must attach HighTc(2) when proposing at height 3 even when HighestSeenBlock is at height 2"
+            );
+            let (anchor_qc, anchor_block) =
+                gap_anchor.expect("must return HighPc(1) gap anchor so dummy block 2 is built above block 1");
+            assert_eq!(anchor_qc.calculate_id(), qc1.calculate_id());
+            assert_eq!(anchor_block.id(), block1.id());
+        }
+
+        #[test]
+        fn justified_block_id_for_high_pc_resolves_genesis_and_ignores_uncertified_highest_seen_block() {
+            let tmp = tempfile::tempdir().unwrap();
+            let store = RocksDbStateStore::<String>::open(tmp.path(), DatabaseOptions::default()).unwrap();
+            let shard_group = ShardGroup::all_shards(NUM_PRESHARDS);
+
+            let mut zero = Block::zero_block(NETWORK, NUM_PRESHARDS);
+            let genesis = Block::genesis(
+                NETWORK,
+                ProtocolVersion::at(NETWORK, EPOCH),
+                EPOCH,
+                FixedHash::zero(),
+                shard_group,
+                FixedHash::zero(),
+                None,
+                ExhaustBurnRate::new(0),
+            );
+            let uncertified_block1 = make_block(*genesis.id(), genesis.justify().clone(), NodeHeight(1), shard_group);
+
+            store
+                .with_write_tx(|tx| {
+                    zero.justify().save(tx)?;
+                    zero.insert(tx)?;
+                    zero.add_justify_qc(tx, &PcId::zero())?;
+
+                    genesis.justify().save(tx)?;
+                    genesis.insert(tx)?;
+                    genesis.as_leaf().set(tx)?;
+                    genesis.justify().as_high_pc().set(tx)?;
+
+                    uncertified_block1.insert(tx)?;
+                    uncertified_block1.as_highest_seen().set(tx)?;
+                    Ok::<_, HotStuffError>(())
+                })
+                .unwrap();
+
+            let resolved_at_zero_qc = store
+                .with_read_tx(|tx| {
+                    let high_pc = HighPc::get(tx, EPOCH)?;
+                    justified_block_id_for_high_pc(tx, EPOCH, &high_pc)
+                })
+                .unwrap();
+            assert_eq!(resolved_at_zero_qc, *genesis.id());
+
+            let qc1 = make_qc_for_block(&uncertified_block1);
+            let uncertified_block2 =
+                make_block(*uncertified_block1.id(), qc1.clone(), NodeHeight(2), shard_group);
+            store
+                .with_write_tx(|tx| {
+                    qc1.update_highest(tx)?;
+                    uncertified_block2.insert(tx)?;
+                    uncertified_block2.as_highest_seen().set(tx)?;
+                    Ok::<_, HotStuffError>(())
+                })
+                .unwrap();
+
+            let resolved_at_qc1 = store
+                .with_read_tx(|tx| {
+                    let high_pc = HighPc::get(tx, EPOCH)?;
+                    justified_block_id_for_high_pc(tx, EPOCH, &high_pc)
+                })
+                .unwrap();
+            assert_eq!(resolved_at_qc1, *uncertified_block1.id());
         }
     }
 }

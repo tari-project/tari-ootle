@@ -78,6 +78,8 @@ impl TransactionPoolStateUpdateData {
         other.set_fee_intent_only(self.fee_intent_only);
         if let Some(leader_fee) = self.leader_fee {
             other.set_leader_fee(leader_fee);
+        } else {
+            other.no_leader_fee();
         }
         other.set_pending_stage(Some(self.stage));
         other.set_local_decision(self.local_decision);

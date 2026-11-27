@@ -495,11 +495,12 @@ impl<'a> WriteTransaction<'a> {
     }
 
     /// Records the revealed-balance movement of a finalized spend as a `Transaction`-sourced balance change
-    /// and syncs the wallet vault to it. The vault substate in the finalized diff is the authoritative
-    /// post-transaction revealed balance: the locked amount is only the wallet's reservation, which the
-    /// transaction may not fully (or at all) withdraw from the vault. The row is keyed on the vault's
-    /// post-transaction version so that the account refresh's later record of the same transaction's
-    /// confidential effect merges onto this one row.
+    /// and syncs the wallet vault to it unless the stored vault is already at a newer version; an existing
+    /// scan or recovery row at the post-transaction version is attributed to the transaction. The vault
+    /// substate in the finalized diff is the authoritative post-transaction revealed balance: the locked
+    /// amount is only the wallet's reservation, which the transaction may not fully (or at all) withdraw
+    /// from the vault. The row is keyed on the vault's post-transaction version so that the account
+    /// refresh's later record of the same transaction's confidential effect merges onto this one row.
     fn record_finalized_revealed_spend(
         &mut self,
         transaction_id: TransactionId,
@@ -525,6 +526,8 @@ impl<'a> WriteTransaction<'a> {
         let vault = self.vaults_get(&vault_address)?;
         self.balance_changes_attribute_transaction(&vault_address, vault_version, transaction_id)?;
         if vault.vault_version > vault_version {
+            // If a refresh jumped straight past `vault_version`, no row exists at `vault_version` and this
+            // transaction's revealed movement remains folded into that newer scan row rather than rewinding the vault.
             return Ok(());
         }
         if revealed_after == revealed_before {

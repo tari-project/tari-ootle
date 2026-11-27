@@ -160,14 +160,17 @@ const WALLET_JRPC_URL =
   "/json_rpc";
 
 export const isValidJwt = (token?: string | null) => {
-  if (!token) return false;
+  if (!token || !token.trim()) return false;
   try {
     const decodedToken = jwtDecode(token);
-    if (!decodedToken.exp) {
+    if (decodedToken.exp === undefined) {
       return true;
     }
+    if (typeof decodedToken.exp !== "number" || !Number.isFinite(decodedToken.exp)) {
+      return false;
+    }
     const currentTime = Date.now() / 1000;
-    return decodedToken.exp >= currentTime;
+    return decodedToken.exp > currentTime;
   } catch (error) {
     console.warn("Failed to decode token:", error);
     return false;

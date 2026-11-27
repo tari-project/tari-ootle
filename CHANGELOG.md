@@ -3,6 +3,108 @@
 All notable changes to this project will be documented in this file.
 See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [0.57.0](https://github.com/tari-project/tari-ootle/compare/v0.56.0...v0.57.0) (2026-11-27)
+
+A consensus and wallet hardening release. Timeout views advance on certificates rather than local
+timeouts, so a committee resumes after a long loss of quorum. The engine charges for confidential
+commitments it moves and stops walking component state on every auth hook vault read. Stealth
+revealed amounts are committed at full `Amount` width. The wallet daemon, SDKs and web UIs get a
+broad sweep of fixes.
+
+### ⚠️ Upgrade notes
+
+- **Validators upgrade together.** The engine and consensus changes below take effect on
+  deployment with no activation epoch. Validators on different binaries reach different results
+  for the same transaction, and an un-upgraded validator drops the new `TimeoutVote` message.
+  (#3965, #4064, #4065, #3780, #4074, #3758)
+- **App and wallet developers:**
+  - Moving confidential commitments between containers (take, join, deposit, withdraw, recall and
+    proofs) is charged per commitment, so operations on large confidential vaults cost more.
+    (#4065)
+  - A stealth transfer that repeats an input commitment, or whose output repeats an input, is
+    rejected with `ResourceError::InvalidSpend`. A repeated output commitment is rejected with
+    `InvalidConfidentialProof`. (#3780)
+  - `tari_engine_types`: `commit_amount` commits at full `Amount` width and returns a
+    `PedersenCommitment`. The `u64`-capped variant is `commit_range_provable_amount`, and
+    `commit_amount_unchecked` is gone. (#3965)
+  - SDK hosts: `ootle_sdk_core` carries revealed amounts (`StealthTransferIntent`,
+    `StealthOutputSpec`, `DecodedSubstate::Vault`, `ResourceBalance`) as `U128 { hi, lo }`. The
+    FFI ABI tag is `ootle-sdk-ffi-c/21`, and the golden vectors are regenerated. (#3965)
+  - `ootle_ledger_common` holds `SignStreamState` and `TxDisplay`, and the Ledger app enforces
+    exact segment lengths when it streams a `SignTransaction`. (#3823)
+- **Wallet daemon operators:** `transaction_request_ttl` and `signing_request_ttl` take
+  human-readable durations such as `"45m"`, like every other duration in the config. (#3690)
+
+### Features
+
+- **indexer web UI:** the sync shard map has a Bias mode showing whether traffic favours some
+  shards. (#4001)
+- **swarm web UI:** validators and indexers show sync progress. (#4075)
+
+### Bug fixes
+
+- **consensus:** timeout views come from certificates and the committee's timeout votes, and every
+  member counts lean `TimeoutVote`s, so the committee times out a dead leader's view together.
+  (#4074)
+- **consensus:** timeout votes are capped per sender instead of by a lookahead from the current
+  height, and NEWVIEW verification is rate-limited per sender, so committees resume after a long
+  quorum loss. (#3758)
+- **consensus:** a catch-up page's continuation cursor no longer raises the catch-up target. Only
+  heights backed by a verified quorum certificate do. (#4066)
+- **engine:** a resource auth hook's read of the acting component's vault is a set lookup, not an
+  uncharged walk of both components' state. (#4064)
+- **engine:** stealth transfer commitments are checked for duplicates on admission, before any
+  execution is charged. (#3780)
+- **engine:** stealth transfers and covenant balance claims commit revealed amounts above
+  `u64::MAX` correctly, and the wallet verifier matches. (#3965)
+- **validator_node:** transaction prewarming looks up each called component once, up to 32 per
+  transaction. (#3809)
+- **wallet SDK:** stealth transfers emit change for selected inputs, count a revealed fee input
+  toward change, and authorize the badge proof around the whole transfer. (#3840, #3836, #3837)
+- **wallet SDK:** revealed recipient outputs add optional account and vault wants, missing
+  referenced vaults and duplicate stealth inputs are rejected, and a commit with no execution
+  result is a parse error. (#3830, #3676, #3688)
+- **wallet storage:** balances stay correct for several locks on one vault version, a finalized
+  diff that leaves the revealed vault unchanged, burnt stealth UTXOs, and confidential outputs
+  spent elsewhere. (#3849, #3842, #3304, #3983)
+- **wallet:** batched substate fetches reject substates and proofs that were not requested. (#3805)
+- **walletd:** stealth transfers clamp `max_fee` to at least 1, a transfer stops looking up
+  destination vaults once it finds one, and the embedded web UI serves binary assets. (#3843,
+  #3884, #3588)
+- **wallet CLI:** `submit` no longer panics without fee instructions, `submit-manifest` keeps
+  manifest blobs and adds no second `pay_fee`, and `auth request` prints the JWT. (#3685, #3870)
+- **ootle-rs:** faucet builders keep the workspace account across `pay_fee` and allocate distinct
+  workspace IDs, balances sum every vault of a resource, and transaction watches handle concurrent
+  and repeated waits. (#3835, #3488, #3340, #3598)
+- **walletd_client:** a non-2xx HTTP response surfaces as `RequestFailed` with its status. (#3292)
+- **ootle_address:** decoding accepts only Bech32m checksums with canonical padding, so each
+  address has one string form. (#3523, #3810)
+- **common_types:** `SubstateType::ClaimedOutputTombstone` filters on the `tombstone_` prefix.
+  (#3741)
+- **indexer:** `GET /templates/watched` lists watched templates missing from the catalogue.
+  (#3544)
+- **app_utilities:** `-p key=val` keeps any `=` in the value, and `SeedPeer` displays in its
+  parseable form. (#3501)
+- **watcher:** `--unmanaged` and `--no-auto-register` each disable auto-registration, relative
+  `vn_base_dir` paths resolve, exits forward their signature, and status channels stay open.
+  (#3541, #3499, #3589)
+- **validator_rollback:** preflight checks pruned values, and `convert` validates the audit's
+  header and footer before writing output. (#3730, #3745)
+- **bindings:** ConfidentialOutput and BucketId CBOR tags decode, `matchesTypeEnum` compares
+  payloads structurally, `rejectReasonToString` covers every variant, and `OotleAddress` enforces
+  the 64-byte destination tag limit. (#3979, #3909, #3903, #3901, #3985)
+- **web UIs:** fixes to pagination, error handling, stale responses and display across the wallet
+  daemon UI (#3384, #3722, #3729, #3902, #3905, #3906, #3908, #3910, #3913, #3914, #3917, #3918,
+  #3922, #3923, #3925, #3926, #3928, #3929, #3931, #3932, #3935–#3961, #3963, #3968–#3970,
+  #3976–#3978, #3981, #3982, #3987–#3992, #3994–#3998, #4000, #4002, #4063), the indexer UI (#3924, #3927,
+  #3930, #3984, #4003–#4007, #4009, #4018, #4020, #4021, #4024, #4032, #4041), the validator
+  node UI (#3915, #3916, #3919–#3921, #3933, #4011, #4012, #4015–#4017, #4019, #4025, #4054), the
+  swarm UI (#4044, #4046, #4050), the db inspector UI (#4057) and shared helpers (#3713, #3904,
+  #3907).
+- **dev tools:** fixes to the swarm daemon, db inspector, transaction generator and submitter,
+  traffic sim, tariswap bench, vn bench and value lookup generator. (#3315, #3503, #3540, #3546,
+  #3551, #3563, #3564, #3571, #3583, #3586, #3587, #3590, #3591, #3594, #3599, #3728, #3882)
+
 ## [0.56.0](https://github.com/tari-project/tari-ootle/compare/v0.55.0...v0.56.0) (2026-11-23)
 
 A hardening release. The engine refuses templates whose branch tables can trigger a Cranelift

@@ -524,12 +524,17 @@ async fn catch_up_blocks_citing_unknown_transactions_do_not_stay_parked() {
     *request.lock().unwrap() = None;
     let victim_leaf = test.get_validator(&victim).get_leaf_block().height();
     withhold_from.store((victim_leaf + NodeHeight(2)).as_u64(), Ordering::SeqCst);
-    let (request_id, catch_up_peer) = loop {
-        test.on_block_committed().await;
-        if let Some(outstanding) = request.lock().unwrap().clone() {
-            break outstanding;
+    // The committee may stop committing while the victim is behind: with its pages held it cannot propose, so its
+    // slot in the rotation times out every round. Wait for the request itself rather than for a commit.
+    let mut outstanding = None;
+    for _ in 0..300 {
+        outstanding = request.lock().unwrap().clone();
+        if outstanding.is_some() {
+            break;
         }
-    };
+        sleep(Duration::from_millis(100)).await;
+    }
+    let (request_id, catch_up_peer) = outstanding.expect("the victim did not ask to catch up");
 
     let (leaf, locked_height, committed) = test
         .get_validator(&victim)

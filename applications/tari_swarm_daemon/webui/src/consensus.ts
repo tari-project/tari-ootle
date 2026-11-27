@@ -32,7 +32,7 @@ export interface Channel {
 export function readChannels(validators: ValidatorNode[], details: Record<number, VnDetail>) {
   const rows = validators.map((vn) => {
     const detail = details[vn.instance_id];
-    const consensus = detail?.consensus ?? null;
+    const consensus = vn.is_running ? (detail?.consensus ?? null) : null;
     return {
       vn,
       detail,

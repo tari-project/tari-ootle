@@ -188,7 +188,6 @@ export function SwarmProvider({ children }: { children: ReactNode }) {
     ]);
 
     setInstances(allInstances.instances);
-    setValidators(vnList.nodes);
     setWallets(walletList.nodes);
     setIndexers(indexerList.nodes);
     setIsMining(mining.result);
@@ -218,6 +217,8 @@ export function SwarmProvider({ children }: { children: ReactNode }) {
       ),
     ]);
     const nextDetails = Object.fromEntries(vnList.nodes.map((vn, i) => [vn.instance_id, detailList[i]]));
+    // Validators commit with their details so every render reads both from the same poll.
+    setValidators(vnList.nodes);
     setDetails(nextDetails);
     catchUpRef.current = trackCatchUp(catchUpRef.current, readChannels(vnList.nodes, nextDetails).channels);
     setCatchUp(catchUpRef.current);

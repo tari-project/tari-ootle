@@ -20,7 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-import { Grid } from "@mui/material";
+import { Alert, Grid } from "@mui/material";
 import { CommitteeMember } from "@tari-project/ootle-ts-bindings";
 import { useContext, useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
@@ -30,7 +30,7 @@ import { StyledPaper } from "../../Components/StyledComponents";
 import { getCommittee } from "../../utils/json_rpc";
 import Committee from "./CommitteeSingle";
 
-async function getMembers(currentEpoch: number, shardKey: string, publicKey: string) {
+async function getMembers(currentEpoch: number, shardKey: string) {
   const committee = await getCommittee({ epoch: currentEpoch, substate_address: shardKey });
   const committeeMembers = committee?.committee?.members;
   if (!committeeMembers || committeeMembers.length === 0) {
@@ -41,22 +41,34 @@ async function getMembers(currentEpoch: number, shardKey: string, publicKey: str
 
 export default function CommitteeMembers() {
   const [members, setMembers] = useState<CommitteeMember<string>[]>([]);
+  const [error, setError] = useState<string | null>(null);
   const { epoch, identity, shardKey } = useContext(VNContext);
   const { address } = useParams();
-  const addresses = address && address.split(",");
+  const addresses = address ? address.split(",") : null;
+  const hasValidRange = Boolean(addresses && addresses.length >= 2 && addresses[0] && addresses[1]);
 
   useEffect(() => {
+    let cancelled = false;
     const fetchMembers = async () => {
       try {
         if (identity?.public_key && shardKey && epoch) {
-          const committeeMembers = await getMembers(epoch.current_epoch, shardKey, identity.public_key);
-          setMembers(committeeMembers);
+          const committeeMembers = await getMembers(epoch.current_epoch, shardKey);
+          if (!cancelled) {
+            setMembers(committeeMembers);
+            setError(null);
+          }
         }
-      } catch (error) {
-        console.log("Error fetching members:", error);
+      } catch (err) {
+        if (!cancelled) {
+          setMembers([]);
+          setError(err instanceof Error ? err.message : "Error fetching committee members");
+        }
       }
     };
     fetchMembers();
+    return () => {
+      cancelled = true;
+    };
   }, [epoch, identity?.public_key, shardKey]);
 
   if (epoch === undefined || identity === undefined) return <div>Loading</div>;
@@ -68,16 +80,21 @@ export default function CommitteeMembers() {
       </Grid>
       <Grid size={12}>
         <StyledPaper>
-          {addresses && (
-            <>
-              <Committee
-                key={addresses[0]}
-                begin={addresses[0]}
-                end={addresses[1]}
-                members={members}
-                publicKey={identity.public_key}
-              />
-            </>
+          {error && (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              {error}
+            </Alert>
+          )}
+          {hasValidRange && addresses ? (
+            <Committee
+              key={`${addresses[0]}-${addresses[1]}`}
+              begin={addresses[0]}
+              end={addresses[1]}
+              members={members}
+              publicKey={identity.public_key}
+            />
+          ) : (
+            <Alert severity="warning">Invalid committee address range</Alert>
           )}
         </StyledPaper>
       </Grid>

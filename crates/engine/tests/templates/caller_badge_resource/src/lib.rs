@@ -12,6 +12,7 @@ mod gated_resource {
 
     pub struct GatedResource {
         vault: Vault,
+        stored_rule: Option<AccessRule>,
     }
 
     impl GatedResource {
@@ -23,6 +24,7 @@ mod gated_resource {
 
             Component::new(GatedResource {
                 vault: Vault::from_bucket(tokens),
+                stored_rule: None,
             })
             .with_owner_rule(OwnerRule::None)
             .with_access_rules(ComponentAccessRules::allow_all())
@@ -39,6 +41,7 @@ mod gated_resource {
 
             Component::new(GatedResource {
                 vault: Vault::from_bucket(tokens),
+                stored_rule: None,
             })
             .with_owner_rule(OwnerRule::None)
             .with_access_rules(ComponentAccessRules::allow_all())
@@ -54,10 +57,31 @@ mod gated_resource {
 
             Component::new(GatedResource {
                 vault: Vault::from_bucket(tokens),
+                stored_rule: None,
             })
             .with_owner_rule(OwnerRule::None)
             .with_access_rules(ComponentAccessRules::allow_all())
             .create()
+        }
+
+        /// Accepts a caller-supplied withdraw `rule`, stores it in component state, and gates withdrawals on it.
+        pub fn new_with_withdraw_rule(withdraw_rule: AccessRule) -> Component<Self> {
+            let tokens = ResourceBuilder::public_fungible()
+                .with_owner_rule(OwnerRule::None)
+                .withdrawable(withdraw_rule.clone(), LOCKED)
+                .initial_supply(1000u32);
+
+            Component::new(GatedResource {
+                vault: Vault::from_bucket(tokens),
+                stored_rule: Some(withdraw_rule),
+            })
+            .with_owner_rule(OwnerRule::None)
+            .with_access_rules(ComponentAccessRules::allow_all())
+            .create()
+        }
+
+        pub fn stored_rule(&self) -> Option<AccessRule> {
+            self.stored_rule.clone()
         }
 
         pub fn resource_address(&self) -> ResourceAddress {

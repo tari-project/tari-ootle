@@ -119,8 +119,9 @@ impl CallScope {
             return true;
         }
 
-        // Engine-issued badges are identifiers only: naming one confers nothing, so every frame may name any of them
-        if address.is_virtual_badge() {
+        // Engine-reserved virtual substates are identifiers only: naming one confers nothing, so every frame may name
+        // any of them.
+        if address.is_virtual() {
             return true;
         }
 
@@ -797,5 +798,43 @@ mod tests {
         comp_scope.add_substate_to_scope(res_id.clone()).unwrap();
         assert!(comp_scope.owned_nodes().contains(&comp_id));
         assert!(comp_scope.orphans().contains(&res_id));
+    }
+
+    #[test]
+    fn virtual_caller_badge_resources_and_badges_are_in_scope_without_insertion() {
+        use tari_template_lib::types::{
+            NonFungibleAddress,
+            TemplateAddress,
+            constants::{CALLER_COMPONENT_RESOURCE_ADDRESS, DIRECT_CALLER_TEMPLATE_RESOURCE_ADDRESS},
+            crypto::RistrettoPublicKeyBytes,
+        };
+
+        let comp_addr = ComponentAddress::new(ObjectKey::from_array([6u8; ObjectKey::LENGTH]));
+        let tmpl_addr = TemplateAddress::from_array([7u8; 32]);
+        let virtual_ids = [
+            SubstateId::Resource(CALLER_COMPONENT_RESOURCE_ADDRESS),
+            SubstateId::Resource(DIRECT_CALLER_TEMPLATE_RESOURCE_ADDRESS),
+            SubstateId::NonFungible(NonFungibleAddress::caller_component_badge(comp_addr)),
+            SubstateId::NonFungible(NonFungibleAddress::direct_caller_template_badge(tmpl_addr)),
+            SubstateId::NonFungible(NonFungibleAddress::from_public_key(RistrettoPublicKeyBytes::default())),
+        ];
+
+        let mut scope = CallScope::new();
+        for id in &virtual_ids {
+            assert!(scope.is_substate_in_scope(id), "expected {id} to be in scope");
+        }
+
+        let indexed = IndexedWellKnownTypes::from_value(
+            &tari_bor::to_value(&(
+                CALLER_COMPONENT_RESOURCE_ADDRESS,
+                DIRECT_CALLER_TEMPLATE_RESOURCE_ADDRESS,
+            ))
+            .unwrap(),
+        )
+        .unwrap();
+        scope.include_owned_in_scope(&indexed);
+        scope.include_refs_in_scope(&indexed);
+        assert!(scope.owned_nodes().is_empty());
+        assert!(!scope.is_component_owned(&SubstateId::Resource(CALLER_COMPONENT_RESOURCE_ADDRESS)));
     }
 }

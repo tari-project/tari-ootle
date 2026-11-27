@@ -46,9 +46,12 @@ function Committee({
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(10);
 
-  const emptyRowsCnt = emptyRows(page, rowsPerPage, members);
+  const maxPage = Math.max(0, Math.ceil(members.length / rowsPerPage) - 1);
+  const safePage = Math.min(page, maxPage);
+  const emptyRowsCnt = emptyRows(safePage, rowsPerPage, members);
+  const isWrappedRange = end.toLowerCase() < begin.toLowerCase();
 
-  const handleChangePage = (event: unknown, newPage: number) => {
+  const handleChangePage = (_event: unknown, newPage: number) => {
     setPage(newPage);
   };
 
@@ -66,7 +69,7 @@ function Committee({
             <TableBody>
               <TableRow>
                 <DataTableCell>
-                  {end < begin ? (
+                  {isWrappedRange ? (
                     <>
                       [<span>{begin}</span>,{" "}
                       <span>ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff</span>] [
@@ -86,20 +89,26 @@ function Committee({
           <Typography variant="h6">Public Keys</Typography>
           <Table>
             <TableBody>
-              {members.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage).map((member) => (
-                <TableRow key={member.address}>
-                  <DataTableCell className={`member ${member.public_key === publicKey ? "me" : ""}`}>
-                    {member.public_key} (power: {member.vote_power.toString()})
-                  </DataTableCell>
+              {members.length === 0 ? (
+                <TableRow>
+                  <DataTableCell>No committee members</DataTableCell>
                 </TableRow>
-              ))}
+              ) : (
+                members.slice(safePage * rowsPerPage, safePage * rowsPerPage + rowsPerPage).map((member) => (
+                  <TableRow key={`${member.public_key}-${member.address}`}>
+                    <DataTableCell className={`member ${member.public_key === publicKey ? "me" : ""}`}>
+                      {member.public_key} (power: {member.vote_power.toString()})
+                    </DataTableCell>
+                  </TableRow>
+                ))
+              )}
               {emptyRowsCnt > 0 && (
                 <TableRow
                   style={{
                     height: 67 * emptyRowsCnt,
                   }}
                 >
-                  <DataTableCell colSpan={4} />
+                  <DataTableCell />
                 </TableRow>
               )}
             </TableBody>
@@ -110,7 +119,7 @@ function Committee({
           component="div"
           count={members.length}
           rowsPerPage={rowsPerPage}
-          page={page}
+          page={safePage}
           onPageChange={handleChangePage}
           onRowsPerPageChange={handleChangeRowsPerPage}
         />

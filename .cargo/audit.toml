@@ -13,4 +13,6 @@ ignore = [
     "RUSTSEC-2026-0459",
     # humantime 2.3.0 unmaintained; transitive only (log4rs, env_logger, console-subscriber, cucumber, humantime-serde).
     "RUSTSEC-2026-0542",
+    # memmap2 0.6.2 unchecked pointer offset; direct dependencies pin "0.9" (>= 0.9.11); transitive copy pinned via `wasmer 7.5.0 -> shared-buffer 0.1.4` (#2276); blocked on wasmer/shared-buffer upgrading memmap2.
+    "RUSTSEC-2026-0186",
 ]

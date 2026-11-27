@@ -232,34 +232,38 @@ where TConsensusSpec: ConsensusSpec
             .check_and_collect_vote(from.clone(), current_height, epoch_state, timeout.clone())
             .await
         {
-            Ok(collected) => {
-                self.answer_member_behind(epoch_state, current_height, timeout_floor, &from, &timeout)
-                    .await?;
-                collected
-            },
+            Ok(collected) => collected,
             Err(err) => {
                 warn!(target: LOG_TARGET, "❌ Error handling timeout vote: {}", err);
                 return Ok(());
             },
         };
         apply_pacing(pacemaker_actions, epoch_state, collected.pacing);
-        let Some((timeout_certificate, high_tc)) = collected.certificate else {
-            debug!(target: LOG_TARGET, "🌟 Received NEWVIEW but quorum is not yet reached.");
-            return Ok(());
-        };
+        if let Some((timeout_certificate, high_tc)) = collected.certificate {
+            let threshold = epoch_state.local_committee_info().quorum_threshold();
 
-        let threshold = epoch_state.local_committee_info().quorum_threshold();
-
-        info!(target: LOG_TARGET, "🌟✅ NEWVIEW height {} (high_tc: {}) has reached quorum ({}/{})", timeout_height, high_tc, timeout_certificate.num_signatures(), threshold.value());
-        if timeout_certificate.calculate_id() == *high_tc.id() {
-            info!(target: LOG_TARGET, "🕒️ New HIGH TC {}", timeout_certificate);
-            // Clear the last sent new view since we have a new certificate
-            self.store.with_write_tx(|tx| tx.last_sent_new_view_clear())?;
-            pacemaker_actions.force_beat(high_tc.height());
+            info!(target: LOG_TARGET, "🌟✅ NEWVIEW height {} (high_tc: {}) has reached quorum ({}/{})", timeout_height, high_tc, timeout_certificate.num_signatures(), threshold.value());
+            if timeout_certificate.calculate_id() == *high_tc.id() {
+                info!(target: LOG_TARGET, "🕒️ New HIGH TC {}", timeout_certificate);
+                // Clear the last sent new view since we have a new certificate
+                self.store.with_write_tx(|tx| tx.last_sent_new_view_clear())?;
+                pacemaker_actions.force_beat(high_tc.height());
+            } else {
+                info!(target: LOG_TARGET, "❓️ New TC from votes {} but it is not the highest TC {}", timeout_certificate, high_tc);
+            }
         } else {
-            info!(target: LOG_TARGET, "❓️ New TC from votes {} but it is not the highest TC {}", timeout_certificate, high_tc);
+            debug!(target: LOG_TARGET, "🌟 Received NEWVIEW but quorum is not yet reached.");
         }
 
+        self.answer_member_behind(
+            epoch_state,
+            current_height,
+            timeout_floor,
+            &from,
+            &timeout,
+            collected.pacing,
+        )
+        .await;
         Ok(())
     }
 
@@ -316,22 +320,18 @@ where TConsensusSpec: ConsensusSpec
         {
             Ok(pacing) => {
                 apply_pacing(pacemaker_actions, epoch_state, pacing);
-                self.answer_member_behind(epoch_state, current_height, timeout_floor, &from, &vote)
-                    .await
+                self.answer_member_behind(epoch_state, current_height, timeout_floor, &from, &vote, pacing)
+                    .await;
             },
-            Err(err) => {
-                warn!(target: LOG_TARGET, "❌ Error handling timeout vote: {}", err);
-                Ok(())
-            },
+            Err(err) => warn!(target: LOG_TARGET, "❌ Error handling timeout vote: {}", err),
         }
+        Ok(())
     }
 
     /// Answers a timeout vote from a member still waiting for a view this node has already counted out. This node
     /// sends no vote for that view any more, and the member may never have received the one it sent, so without an
-    /// answer the member can be left one vote short of the view's quorum.
-    ///
-    /// Only a view that is the sender's highest held one is answered. A member that has moved past the view as well
-    /// sends its answer for a view below its own timeout votes, so answers are never answered in turn.
+    /// answer the member can be left one vote short of the view's quorum. The answer is best effort: the member
+    /// re-sends its vote once per leader timeout, and each re-send is answered again.
     async fn answer_member_behind(
         &mut self,
         epoch_state: &EpochState<TConsensusSpec::Addr>,
@@ -339,39 +339,42 @@ where TConsensusSpec: ConsensusSpec
         timeout_floor: NodeHeight,
         from: &TConsensusSpec::Addr,
         vote: &TimeoutVote,
-    ) -> Result<(), HotStuffError> {
-        let height = vote.height;
-        if *from == self.local_validator_addr ||
-            height >= timeout_floor ||
-            height < current_height.saturating_add(NodeHeight(2))
-        {
-            return Ok(());
+        pacing: PacingTimeoutVotes,
+    ) {
+        if *from == self.local_validator_addr {
+            return;
         }
         let epoch = epoch_state.epoch();
-        let Some(senders_highest) = self
+        let senders_highest = self
             .timeout_vote_collector
             .highest_timed_out_view_of(epoch, vote.public_key())
-            .await
-        else {
-            return Ok(());
-        };
-        if senders_highest != height {
-            return Ok(());
+            .await;
+        if !is_waiting_on_a_counted_out_view(vote.height, current_height, timeout_floor, senders_highest, pacing) {
+            return;
         }
 
-        let high_pc_height = self.store.with_read_tx(|tx| HighPc::get(tx, epoch))?.height();
+        let high_pc_height = match self.store.with_read_tx(|tx| HighPc::get(tx, epoch)) {
+            Ok(high_pc) => high_pc.height(),
+            Err(err) => {
+                warn!(target: LOG_TARGET, "❌ Not answering {from}'s timeout vote: {err}");
+                return;
+            },
+        };
         let answer = sign_timeout_vote(
             self.proposal_vote_collector.signing_service(),
             self.config.network,
             epoch,
-            height,
+            vote.height,
             high_pc_height,
         );
-        debug!(target: LOG_TARGET, "🌟 Answering {from}, still waiting for view {epoch}/{height} to time out");
-        self.outbound_messaging
+        debug!(target: LOG_TARGET, "🌟 Answering {from}, still waiting for view {epoch}/{} to time out", vote.height);
+        if let Err(err) = self
+            .outbound_messaging
             .send(from.clone(), HotstuffMessage::TimeoutVote(answer))
-            .await?;
-        Ok(())
+            .await
+        {
+            warn!(target: LOG_TARGET, "❌ Failed to answer {from}'s timeout vote: {err}");
+        }
     }
 
     fn validate_qc(
@@ -478,7 +481,9 @@ impl SenderQuota {
 ///
 /// An honest validator's sustained timeout rate is bounded by the pacemaker's leader timer: at most one per
 /// [`PaceMaker::min_leader_timeout_interval`]. Each timeout reaches the leader of its view as a NEWVIEW and every
-/// other member as a [`TimeoutVote`], so a receiver gets one of the two and both draw on one quota. A validator also
+/// other member as a [`TimeoutVote`], so a receiver gets one of the two and both draw on one quota. A member that has
+/// counted a view out answers each vote re-sent by a member still waiting for it, so its answers to that member come
+/// no faster than the member's own timeouts. A validator also
 /// times out without waiting for the timer each time it declines to vote on a live proposal, and each time it joins a
 /// view that more than the tolerated faulty power has timed out; the [`MAX_NEWVIEW_BURST_PER_SENDER`] burst covers
 /// these, and a throttled sender regains tokens at the timer rate. Replenishing one token per minimum leader-timeout
@@ -528,6 +533,30 @@ impl<TAddr: Eq + Hash + Clone> NewViewRateLimiter<TAddr> {
             RateDecision::ThrottleFirst
         }
     }
+}
+
+/// Whether a timeout vote for `view` comes from a member still waiting for that view to time out, when this node has
+/// already counted it out.
+///
+/// - The view is below this node's timeout floor, and is one a NEWVIEW sent from here could still name.
+/// - It is the highest view held from the sender, so the sender has not moved on.
+/// - The vote is not a differently signed copy of the one held from the sender for the view. A waiting member re-sends
+///   the vote it signed, while an answer is signed afresh. Two members that both counted the view out may each still
+///   hold the other's vote for it as the highest, so this keeps them from answering each other's answers.
+fn is_waiting_on_a_counted_out_view(
+    view: NodeHeight,
+    current_height: NodeHeight,
+    timeout_floor: NodeHeight,
+    senders_highest: Option<NodeHeight>,
+    pacing: PacingTimeoutVotes,
+) -> bool {
+    let Some(senders_highest) = senders_highest else {
+        return false;
+    };
+    view < timeout_floor &&
+        view >= current_height.saturating_add(NodeHeight(2)) &&
+        senders_highest == view &&
+        !pacing.duplicates_held_vote
 }
 
 fn apply_pacing<TAddr>(
@@ -590,6 +619,53 @@ mod tests {
     #[test]
     fn a_timeout_signed_by_a_non_member_is_rejected() {
         assert!(!is_signed_by_sender(&committee(), &key(2), &key(14)));
+    }
+
+    fn waiting(senders_highest: Option<u64>, duplicates_held_vote: bool) -> bool {
+        is_waiting_on_a_counted_out_view(
+            NodeHeight(12),
+            NodeHeight(10),
+            NodeHeight(13),
+            senders_highest.map(NodeHeight),
+            PacingTimeoutVotes {
+                duplicates_held_vote,
+                ..PacingTimeoutVotes::default()
+            },
+        )
+    }
+
+    #[test]
+    fn a_member_re_sending_a_counted_out_view_is_waiting_on_it() {
+        assert!(waiting(Some(12), false));
+    }
+
+    #[test]
+    fn an_answer_from_a_member_that_counted_the_view_out_is_not_answered() {
+        // Its highest held view is still the answered one until its vote for the next view arrives.
+        assert!(!waiting(Some(12), true));
+    }
+
+    #[test]
+    fn a_member_that_moved_past_the_view_is_not_waiting_on_it() {
+        assert!(!waiting(Some(13), false));
+        assert!(!waiting(None, false));
+    }
+
+    #[test]
+    fn only_counted_out_views_a_newview_could_name_are_answered() {
+        let pacing = PacingTimeoutVotes::default();
+        let answer = |view, current, floor| {
+            is_waiting_on_a_counted_out_view(
+                NodeHeight(view),
+                NodeHeight(current),
+                NodeHeight(floor),
+                Some(NodeHeight(view)),
+                pacing,
+            )
+        };
+        assert!(answer(12, 10, 13));
+        assert!(!answer(13, 10, 13));
+        assert!(!answer(11, 10, 13));
     }
 
     #[test]

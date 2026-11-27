@@ -44,6 +44,9 @@ pub struct PacingTimeoutVotes {
     /// The highest view that more than the committee's tolerated faulty power has timed out, by each signer's highest
     /// held vote. At least one correct member has named this view or a higher one.
     pub joinable_view: Option<NodeHeight>,
+    /// The vote is signed differently from the one already held from its signer for its view. A member re-sending
+    /// its vote sends it identically, so a differently signed copy is a vote the member signed again.
+    pub duplicates_held_vote: bool,
 }
 
 /// Counts leader timeout votes in two stores.
@@ -213,19 +216,19 @@ where TConsensusSpec: ConsensusSpec
         let epoch = epoch_state.epoch();
         let committee = epoch_state.local_committee();
         let height = vote.height;
-        let timed_out_view = match self
+        let (timed_out_view, duplicates_held_vote) = match self
             .pacing_votes
             .collect_vote(sender_vn, epoch, current_height, vote, committee)
             .await
         {
             Ok(Some(_)) => {
                 info!(target: LOG_TARGET, "🕒️ A quorum of the committee timed out view {epoch}/{height}");
-                Some(height)
+                (Some(height), false)
             },
-            Ok(None) => None,
+            Ok(None) => (None, false),
             Err(duplicate) => {
                 log_duplicate(&duplicate);
-                None
+                (None, true)
             },
         };
         let joinable_view = self
@@ -239,6 +242,7 @@ where TConsensusSpec: ConsensusSpec
         PacingTimeoutVotes {
             timed_out_view,
             joinable_view,
+            duplicates_held_vote,
         }
     }
 

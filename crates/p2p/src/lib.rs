@@ -2,6 +2,7 @@
 //    SPDX-License-Identifier: BSD-3-Clause
 
 mod conversions;
+pub mod decode_budget;
 mod encoding;
 mod gossip;
 mod message;

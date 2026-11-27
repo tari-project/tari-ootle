@@ -11,7 +11,10 @@ use libp2p::futures::executor::block_on;
 use prost::Message;
 use support::{OUTSTANDING, PEAK, SERIAL};
 use tari_networking::{MessagingMode, PeerId, message_queue};
-use tari_ootle_p2p::proto;
+use tari_ootle_p2p::{
+    decode_budget::{HOTSTUFF_MAX_DECODE_ITEMS, decode_with_max_items},
+    proto,
+};
 use tari_swarm::messaging::{BytesCodec, Codec, MAX_MESSAGE_SIZE};
 
 /// A length-prefixed frame carrying `message`, as the direct messaging protocol puts it on the wire.
@@ -102,5 +105,26 @@ fn a_queued_message_holds_no_more_heap_than_the_queue_charges_for_it() {
     assert!(
         peak <= wire_len + slack,
         "receiving a {wire_len} byte frame peaked at {peak} bytes of heap"
+    );
+}
+
+/// Once the decoder takes a frame off the inbound queue, `prost` must not materialize millions of empty structs from a
+/// single `MAX_MESSAGE_SIZE` frame before consensus validation runs.
+#[test]
+fn decoding_an_over_budget_message_holds_bounded_heap() {
+    let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let body = proposal_of_empty_commands().encode_to_vec();
+    assert!(body.len() <= MAX_MESSAGE_SIZE);
+
+    let baseline = OUTSTANDING.load(Ordering::Relaxed);
+    PEAK.store(baseline, Ordering::Relaxed);
+    let err = decode_with_max_items::<proto::consensus::HotStuffMessage>(&body, HOTSTUFF_MAX_DECODE_ITEMS).unwrap_err();
+    let peak = PEAK.load(Ordering::Relaxed).saturating_sub(baseline);
+
+    assert!(err.to_string().contains("exceeds the decode budget"), "{err}");
+    assert!(
+        peak <= 4 * 1024,
+        "rejecting a {} byte empty-command flood peaked at {peak} bytes of heap",
+        body.len()
     );
 }

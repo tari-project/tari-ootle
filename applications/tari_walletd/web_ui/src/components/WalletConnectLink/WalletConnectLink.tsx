@@ -88,7 +88,7 @@ const ConnectorDialog = () => {
 
   const [web3wallet, setWeb3wallet] = useState<any | undefined>();
 
-  async function createWallet(): Promise<any | null> {
+  async function createWallet(): Promise<WalletKit> {
     const core = new Core({ projectId });
     const wallet = await WalletKit.init({
       core,
@@ -227,13 +227,10 @@ const ConnectorDialog = () => {
         setError(formatErrorMessage(err));
         return;
       }
-      if (!wallet) {
-        setError("Failed to initialize WalletConnect client");
-        return;
-      }
       setWeb3wallet(wallet);
     }
 
+    setProposal(undefined);
     setIsLoading(true);
     try {
       await wallet.pair({ uri: link });
@@ -285,16 +282,11 @@ const ConnectorDialog = () => {
         },
       });
 
-      const session = await web3wallet.approveSession({
+      // approveSession answers the proposal on the pairing topic; the dapp receives the settled session from it.
+      await web3wallet.approveSession({
         id: proposal.id,
         namespaces: approvedNamespaces,
       });
-
-      // create response object
-      const response = { id: proposal.id, result: { approved: true }, jsonrpc: "2.0" };
-
-      // respond to the dapp request with the approved session's topic and response
-      await web3wallet.respondSessionRequest({ topic: session.topic, response });
       setPage((currentPage) => currentPage + 1);
     } catch (err) {
       console.error("USER_REJECTED:", err);

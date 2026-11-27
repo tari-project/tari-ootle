@@ -496,8 +496,8 @@ fn calc_instruction_weight(instruction: &Instruction) -> u64 {
 }
 
 /// Weight of component access rules: one per rule node, plus the bytes of the method names the rules are keyed by, at
-/// the literal-argument rate. A method name is an unbounded string, so the node count alone lets one method rule carry
-/// most of a transaction's size.
+/// the literal-argument rate. Method names are unbounded strings, so their bytes are weighed like literal argument
+/// bytes.
 fn calc_component_access_rules_weight(access_rules: &ComponentAccessRules) -> u64 {
     let method_name_bytes: u64 = access_rules
         .method_access_rules_iter()

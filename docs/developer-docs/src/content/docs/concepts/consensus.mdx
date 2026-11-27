@@ -250,8 +250,8 @@ replaces it.
 ## The pacemaker: timeouts and new views
 
 A leader can be silent — crashed, slow, or censoring. A BFT protocol cannot wait forever, so each
-view is bounded by a timer. This timer is the **pacemaker** (`pacemaker_handle.rs`,
-`pacemaker.rs`), and its interval is a per-network constant:
+view is bounded by a timer. This timer is the **pacemaker** (`pacemaker.rs`), and its interval is a
+per-network constant:
 
 ```rust
 // crates/consensus/src/consensus_constants.rs
@@ -259,15 +259,22 @@ pub pacemaker_block_time: Duration,   // 10s on every network in this repo
 ```
 
 When the pacemaker fires for a view and no block has been justified, validators emit a **timeout
-vote**. Once a quorum of timeout votes is collected, they form a `TimeoutCertificate` for that view.
+vote**. A new-view phase then follows:
 
-A new-view phase then follows:
+1. Each validator sends a `NewViewMessage` to the leader of the view it times out, carrying its
+   `high_pc` (the highest proposal certificate seen), its `timeout` vote and its `last_vote` if it cast
+   one — see `crates/consensus/src/messages/new_view.rs`. The rest of the committee gets the timeout
+   vote on its own (`HotstuffMessage::TimeoutVote`), without the certificate.
+2. Every member counts timeout votes. A quorum of them means the view timed out: the member names the
+   next view from then on and restarts its leader timeout. Votes from more than the tolerated faulty
+   power for a higher view mean at least one correct member is there, so the member joins that view at
+   once.
+3. The leader forms the `TimeoutCertificate` from the `NewViewMessage`s, whose `high_pc` it checked,
+   and proposes a block justified by the highest certificate it observed, so no locked block is
+   skipped.
 
-1. Validators broadcast a `NewViewMessage` carrying their `high_pc` (the highest proposal certificate
-   seen), their `timeout` vote for the view, and their `last_vote` if they cast one — see
-   `crates/consensus/src/messages/new_view.rs`.
-2. The next leader aggregates these into a fresh view: it proposes a block justified by the highest
-   certificate it observed, so no locked block is skipped.
+The view a validator times out comes from certificates and the committee's timeout votes, never from
+how many times it has timed out, so members name the same view however long a view stays stalled.
 
 <Aside type="tip">
 Timeouts are the **liveness** lever; the three-chain rule and the lock are the **safety** lever. Every

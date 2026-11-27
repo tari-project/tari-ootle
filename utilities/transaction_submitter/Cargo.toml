@@ -16,6 +16,7 @@ tari_ootle_transaction = { workspace = true }
 tari_ootle_common_types = { workspace = true }
 
 anyhow = { workspace = true }
+serde_json = { workspace = true }
 # if we set clap version 4 in the workspace it would break other crates
 clap = "4.3.21"
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "time"] }

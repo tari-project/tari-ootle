@@ -21,6 +21,7 @@ message HotStuffMessage {
     SyncRequest sync_request = 9;
     ProposalMessage catch_up_sync_response = 10;
     CatchUpPage catch_up_page = 11;
+    TimeoutVote timeout_vote = 12;
   }
 }
 

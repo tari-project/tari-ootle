@@ -18,7 +18,10 @@ Stages (default order; select with --only / --skip):
   multi_wallet  👥 Stealth transfer to a second wallet daemon (skipped unless one is running)
   claim_burn    🔥 Burn tTARI on the base layer and wait for the wallet daemon to auto-claim it
   epoch         ⏳ Mine into the next epoch, flood until consensus crosses it, then a wallet transfer
-                   must finalize promptly in the new epoch (opt-in: --epoch)
+                   must finalize promptly in the new epoch (opt-in: --epoch or --long)
+  outage        🔌 Stop f + 1 validators of a shard group so it loses quorum, hold the outage, then start
+                   them again: the group must resume committing and a wallet transfer must finalize
+                   (about 7 minutes; opt-in: --outage or --long)
   fees          💸 Fee report, compared with the previous run's fees
   health        🩺 Validators are running, agree on the epoch, and advanced during the run; the indexer
                    serves the checkpoint wallets need for the current epoch
@@ -30,7 +33,7 @@ Ports are discovered from the swarm daemon (default http://localhost:8080) unles
 --indexer-url are given. The wallet daemon must use `None` auth.
 
 --live runs against a live network (e.g. esmeralda) through the given wallet daemon and indexer. The
-swarm daemon is never contacted, so the stages that need it (claim_burn, epoch, health) skip, and fees
+swarm daemon is never contacted, so the stages that need it (claim_burn, epoch, outage, health) skip, and fees
 are compared with previous live runs only. A live faucet is usually empty, so the wallet's default
 account (or --funder-account) funds the smoketest account, which funds the flood accounts. A public
 indexer rate-limits submissions per IP; the flood retries rate-limited submissions, so it runs at the
@@ -39,6 +42,7 @@ indexer's sustained rate.
     scripts/smoke_test.py
     scripts/smoke_test.py --only templates,token,swap
     scripts/smoke_test.py --flood 500 --templates 5 --epoch
+    scripts/smoke_test.py --long                        # also the long-running stages (epoch, outage)
 """
 
 import argparse
@@ -86,12 +90,19 @@ WALK_SHARD = 1
 STEALTH_MAX_FEE = 20_000
 # The budget a dry run meters a transaction at; it pays nothing.
 DRY_RUN_MAX_FEE = TARI
+# How long a swarm daemon call may take: starting a validator whose sources changed compiles it first.
+SWARM_START_TIMEOUT = 900
+# Blocks already certified when validators stop may still commit, so the outage measures its stall height after this.
+OUTAGE_SETTLE_SECS = 15
+# How long every member of the shard group may take to advance once the stopped validators have started.
+OUTAGE_RECOVERY_TIMEOUT = 600
 
 STAGES = [
     "flood", "templates", "stealth", "token", "component", "swap", "spend_back", "concurrent",
-    "nfts", "negative", "multi_wallet", "claim_burn", "epoch", "fees", "health",
+    "nfts", "negative", "multi_wallet", "claim_burn", "epoch", "outage", "fees", "health",
 ]
-OPT_IN_STAGES = {"epoch"}
+# Long-running stages, each enabled by its own flag or all of them by --long.
+OPT_IN_STAGES = {"epoch", "outage"}
 STAGE_TITLES = {
     "flood": "🚰 Transfer flood",
     "templates": "📦 Publish templates",
@@ -106,6 +117,7 @@ STAGE_TITLES = {
     "multi_wallet": "👥 Transfer to a second wallet",
     "claim_burn": "🔥 Claim a base-layer burn",
     "epoch": "⏳ Flood across an epoch boundary",
+    "outage": "🔌 Quorum loss and recovery",
     "fees": "💸 Fee report",
     "health": "🩺 Validator health",
 }
@@ -680,34 +692,63 @@ class SmokeTest:
         the submitter's counts and the submission time."""
         with tempfile.TemporaryDirectory(prefix="smoke-") as tmp:
             out = Path(tmp) / f"{kind}.bin"
+            report_file = Path(tmp) / f"{kind}-report.json"
             run([self.bins / "transaction_generator", "write", "-n", str(n), "-o", out, "--flood", kind,
                  "--account-seed", str(self.flood_seed()), "--network", self.network(),
                  "--indexer-url", self.indexer_url])
             started = time.monotonic()
             output = run([self.bins / "transaction_submitter", "stress-test", "-f", out, "-a", self.indexer_url,
-                          "-k", str(skip), "-y"])
+                          "-k", str(skip), "-y", "--report", report_file])
             elapsed = time.monotonic() - started
+            try:
+                report = json.loads(report_file.read_text())
+            except (OSError, ValueError) as e:
+                raise StageFailed(f"submitter wrote no readable report ({e}):\n"
+                                  + "\n".join(output.splitlines()[-15:])) from e
 
-        stats = {}
-        for key, label in [
-            ("submitted", "Transactions submitted"),
-            ("committed", "Fully committed"),
-            ("fee_only", "Fee charged, execution rejected"),
-            ("rejected", "Rejected"),
-            ("errored", "Errored"),
-        ]:
-            m = re.search(rf"{re.escape(label)}:\s*(\d+)", output)
-            stats[key] = int(m.group(1)) if m else None
-        if stats["committed"] is None:
-            raise StageFailed("could not parse submitter summary:\n" + "\n".join(output.splitlines()[-15:]))
+        stats = {key: report[key] for key in ("committed", "fee_only", "rejected", "errored")}
+        stats["submitted"] = report["results"]
         expected = n - skip
+        outcomes = {t["id"]: t["outcome"] for t in report["transactions"]}
+        decisions = self.indexer_decisions(list(outcomes))
+        indexer_commits = sum(d == "Commit" for d in decisions.values())
+        disagree = [tx_id for tx_id, outcome in outcomes.items()
+                    if outcome == "committed" and decisions.get(tx_id) != "Commit"]
+        if disagree:
+            raise StageFailed(f"the submitter counts {len(disagree)} {kind} transaction(s) committed that the indexer "
+                              f"does not serve as committed, e.g. {short(disagree[0])} "
+                              f"({decisions.get(disagree[0]) or 'no finalized result'})")
         if stats["committed"] != expected:
-            breakdown = f"fee-only {stats['fee_only']} · rejected {stats['rejected']} · errored {stats['errored']}"
+            breakdown = (f"fee-only {stats['fee_only']} · rejected {stats['rejected']} · errored {stats['errored']} · "
+                         f"indexer serves {indexer_commits}/{len(outcomes)} as committed")
             reasons = sorted({l.strip() for l in output.splitlines() if re.search(r"reject|error|fail|abort", l, re.I)
                               and not re.match(r"\s*(Rejected|Errored|Fee charged)", l)})
             raise StageFailed(f"only {stats['committed']}/{expected} {kind} transactions committed ({breakdown})"
                               + "".join(f"\n      {r[:200]}" for r in reasons[:5]))
         return stats, elapsed
+
+    def indexer_decisions(self, tx_ids, timeout_secs=60):
+        """The final decision the indexer serves for each of `tx_ids`, or None for one it has not finalized within
+        `timeout_secs`."""
+        decisions = {}
+        pending = list(tx_ids)
+        deadline = time.monotonic() + timeout_secs
+        while pending:
+            still_pending = []
+            for tx_id in pending:
+                status, body = http_get(f"{self.indexer_url}/transactions/{tx_id}/result")
+                finalized = (body or {}).get("result", {}).get("Finalized") if status == 200 else None
+                if finalized:
+                    decisions[tx_id] = finalized.get("final_decision")
+                else:
+                    still_pending.append(tx_id)
+            pending = still_pending
+            if pending and time.monotonic() > deadline:
+                decisions.update({tx_id: None for tx_id in pending})
+                break
+            if pending:
+                time.sleep(1)
+        return decisions
 
     def flood(self, n, quiet=False):
         self.fund_flood_accounts(n)
@@ -769,6 +810,113 @@ class SmokeTest:
         finality = time.monotonic() - started
         return (f"consensus epoch {start_epoch} → {epoch}, {batches + 1} batches of {self.args.flood} all committed, "
                 f"wallet transfer finalized in {finality:.1f}s")
+
+    # ---- outage
+
+    def stage_outage(self):
+        """Stops f + 1 validators of the largest shard group so that it loses quorum, holds the outage for
+        --outage-secs (restarting one validator that is still up half way through, unless --outage-no-restart),
+        then starts the stopped validators again. The group must commit nothing during the outage, every member
+        must then advance past the height it stalled at, and a wallet transfer must finalize."""
+        instances = self.swarm.running("TariValidatorNode")
+        if not instances:
+            raise StageSkipped(f"{self.no_swarm}; cannot stop validators")
+        status = self.validator_status()
+        groups = {}
+        for inst in instances:
+            groups.setdefault(status[inst["name"]]["group"], []).append(inst)
+        group, members = max(groups.items(), key=lambda kv: len(kv[1]))
+        n = len(members)
+        f = (n - 1) // 3
+        if f < 1:
+            raise StageSkipped(f"shard group {group} has {n} validator(s); losing quorum needs at least 4")
+        stopped = members[n - (f + 1):]
+        online = members[:n - (f + 1)]
+        swarm = JsonRpc(f"{self.args.swarm_url.rstrip('/')}/json_rpc", timeout=SWARM_START_TIMEOUT)
+
+        def position(inst):
+            """(epoch, height) of `inst`'s consensus, or None while its API does not answer."""
+            try:
+                cs = JsonRpc(f"http://127.0.0.1:{inst['ports']['jrpc']}/json_rpc", timeout=10).call(
+                    "get_consensus_status")
+                return cs["epoch"], cs["height"]
+            except (StageFailed, OSError):
+                return None
+
+        def still_down():
+            """Fails when a validator this stage stopped is running again: another client of the swarm daemon started
+            it, so the shard group had its quorum back and the outage measures nothing."""
+            running = {i["id"] for i in Swarm(self.args.swarm_url).running("TariValidatorNode")}
+            restarted = [i["name"] for i in stopped if i["id"] in running]
+            if restarted:
+                raise StageFailed(f"{', '.join(restarted)} started during the outage by another client of the swarm "
+                                  f"daemon; the outage is void")
+
+        down = []
+        try:
+            info(f"🔌 stopping {', '.join(i['name'] for i in stopped)} ({f + 1} of {n} in shard group {group})")
+            for inst in stopped:
+                swarm.call("stop_instance", {"by_id": inst["id"]})
+                down.append(inst)
+            # Blocks already certified when the validators stopped may still commit.
+            time.sleep(OUTAGE_SETTLE_SECS)
+            stalled_at = max(p for p in map(position, online) if p)
+            detail(f"stalled at epoch {stalled_at[0]} height {stalled_at[1]}; holding the outage for "
+                   f"{self.args.outage_secs}s")
+            started = time.monotonic()
+            restart = None if self.args.outage_no_restart else online[0]
+            while (elapsed := time.monotonic() - started) < self.args.outage_secs:
+                if restart and elapsed >= self.args.outage_secs / 2:
+                    detail(f"🔁 restarting {restart['name']}, which stayed up, during the outage")
+                    swarm.call("stop_instance", {"by_id": restart["id"]})
+                    down.append(restart)
+                    swarm.call("start_instance", {"by_id": restart["id"]})
+                    down.remove(restart)
+                    restart = None
+                still_down()
+                time.sleep(5)
+            positions = {i["name"]: position(i) for i in online}
+            epochs = {p[0] for p in positions.values() if p}
+            if epochs - {stalled_at[0]}:
+                raise StageFailed(f"consensus moved from epoch {stalled_at[0]} to {max(epochs)} during the outage "
+                                  f"without a quorum")
+            advanced = [name for name, p in positions.items() if p and p > stalled_at]
+            if advanced:
+                raise StageFailed(f"{', '.join(advanced)} committed past epoch {stalled_at[0]} height "
+                                  f"{stalled_at[1]} without a quorum")
+        finally:
+            failed_starts = []
+            for inst in down:
+                info(f"▶️  starting {inst['name']}")
+                try:
+                    swarm.call("start_instance", {"by_id": inst["id"]})
+                except StageFailed as e:
+                    failed_starts.append(f"{inst['name']}: {e}")
+            # The stages after this one query every validator, so each started one answers before this stage ends.
+            deadline = time.monotonic() + OUTAGE_RECOVERY_TIMEOUT
+            while (not failed_starts and any(position(i) is None for i in down)
+                   and time.monotonic() < deadline):
+                time.sleep(2)
+            if failed_starts:
+                raise StageFailed("could not start validators the outage stopped, so the shard group may still lack "
+                                  "a quorum: " + "; ".join(failed_starts))
+
+        started = time.monotonic()
+        while True:
+            positions = {i["name"]: position(i) for i in members}
+            behind = [name for name, p in positions.items() if not p or p <= stalled_at]
+            if not behind:
+                break
+            if time.monotonic() - started > OUTAGE_RECOVERY_TIMEOUT:
+                raise StageFailed(f"{', '.join(behind)} did not advance past epoch {stalled_at[0]} height "
+                                  f"{stalled_at[1]} within {OUTAGE_RECOVERY_TIMEOUT}s of the outage ending")
+            time.sleep(5)
+        recovery = time.monotonic() - started
+        heights = sorted(p[1] for p in positions.values())
+        detail(f"all {n} advanced past height {stalled_at[1]} in {recovery:.0f}s (heights {heights[0]}..{heights[-1]})")
+        self.stealth_transfer(TARI_TOKEN, TARI, self.recv["address"], f"{fmt_tari(TARI)} after the outage")
+        return (f"shard group {group} stalled at height {stalled_at[1]} with {f + 1}/{n} validators down for "
+                f"{self.args.outage_secs}s, recovered in {recovery:.0f}s, wallet transfer finalized")
 
     # ---- templates
 
@@ -1313,6 +1461,15 @@ def main():
                    help="seconds a wallet transfer in the new epoch may take to finalize (default 120)")
     p.add_argument("--epoch-mine", type=int, default=12,
                    help="base-layer blocks the swarm mines at the start of the epoch stage (0 to not mine)")
+    p.add_argument("--outage", action="store_true",
+                   help="also run the outage stage, which stops validators for about 7 minutes")
+    p.add_argument("--long", action="store_true",
+                   help=f"also run every long-running stage ({', '.join(sorted(OPT_IN_STAGES))})")
+    p.add_argument("--outage-secs", type=int, default=330,
+                   help="seconds the outage stage keeps quorum lost (default 330, about 23 leader timeouts at the "
+                        "default 10s block time)")
+    p.add_argument("--outage-no-restart", action="store_true",
+                   help="do not restart a validator that stayed up half way through the outage")
     p.add_argument("--only", help=f"comma-separated subset of: {','.join(STAGES)}")
     p.add_argument("--skip", help="comma-separated stages to skip")
     p.add_argument("--no-build", action="store_true", help="use existing target/release generator/submitter")
@@ -1325,7 +1482,7 @@ def main():
     if args.only:
         selected = args.only.split(",")
     else:
-        selected = [s for s in all_stages if s not in OPT_IN_STAGES or (s == "epoch" and args.epoch)]
+        selected = [s for s in all_stages if s not in OPT_IN_STAGES or args.long or getattr(args, s)]
     skipped = set(args.skip.split(",")) if args.skip else set()
     for s in selected + list(skipped):
         if s not in all_stages:

@@ -3,12 +3,13 @@
 
 use log::*;
 use tari_consensus_types::{HighTc, SignedMessage, TcSignatures, TimeoutCertificate, TimeoutVote, Vote};
-use tari_ootle_common_types::{Epoch, NodeHeight, committee::Committee};
-use tari_ootle_storage::StateStore;
+use tari_ootle_common_types::{Epoch, NodeHeight, VotePower, committee::Committee};
+use tari_ootle_storage::{StateStore, global::models::ValidatorNode};
 use tari_ootle_transaction::Network;
 use tari_sidechain::SignerBitmap;
+use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
 
-use super::collector::VoteCollector;
+use super::collector::{DuplicateVoteDetected, VoteCollector};
 use crate::{
     hotstuff::{epoch_state::EpochState, error::HotStuffError, vote_collector::helpers::check_eligibility},
     tracing::TraceTimer,
@@ -26,10 +27,41 @@ const LOG_TARGET: &str = "tari::ootle::consensus::hotstuff::timeout_collector";
 /// `committee.len() * MAX_TIMEOUT_VOTES_PER_SENDER` while allowing recovery after arbitrarily long stalls.
 pub const MAX_TIMEOUT_VOTES_PER_SENDER: usize = 128;
 
+/// What one timeout vote completed in a [`TimeoutVoteCollector`].
+#[derive(Debug, Default)]
+pub struct CollectedTimeoutVote {
+    /// The certificate for the vote's view, formed from votes whose `high_pc_height` claims were checked against
+    /// the certificate they came with. Only this certificate may be proposed on.
+    pub certificate: Option<(TimeoutCertificate, HighTc)>,
+    pub pacing: PacingTimeoutVotes,
+}
+
+/// What the timeout votes counted for pacing show about the committee's view.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct PacingTimeoutVotes {
+    /// The vote's view, when this vote brought the signers that timed it out to a quorum.
+    pub timed_out_view: Option<NodeHeight>,
+    /// The highest view that more than the committee's tolerated faulty power has timed out, by each signer's highest
+    /// held vote. At least one correct member has named this view or a higher one.
+    pub joinable_view: Option<NodeHeight>,
+    /// The vote is signed differently from the one already held from its signer for its view. A member re-sending
+    /// its vote sends it identically, so a differently signed copy is a vote the member signed again.
+    pub duplicates_held_vote: bool,
+}
+
+/// Counts leader timeout votes in two stores.
+///
+/// - Certified votes arrive in a NEWVIEW at the leader of the view they name, together with the certificate their
+///   `high_pc_height` claims. They form the [`TimeoutCertificate`] that leader proposes on, and a block's justify must
+///   reach the highest claim in it.
+/// - Every timeout vote, certified or not, is counted for pacing: a quorum of them tells any member that the view timed
+///   out. A vote outside a NEWVIEW carries no certificate, so its claim is unchecked and it never enters a certificate
+///   that is proposed on.
 #[derive(Clone)]
 pub struct TimeoutVoteCollector<TConsensusSpec: ConsensusSpec> {
     network: Network,
-    vote_collector: VoteCollector<TimeoutVote>,
+    certified_votes: VoteCollector<TimeoutVote>,
+    pacing_votes: VoteCollector<TimeoutVote>,
     store: TConsensusSpec::StateStore,
     epoch_manager: TConsensusSpec::EpochManager,
     vote_signer_service: TConsensusSpec::SignerService,
@@ -47,33 +79,114 @@ where TConsensusSpec: ConsensusSpec
         Self {
             network,
             store,
-            vote_collector: VoteCollector::with_per_sender_limit(MAX_TIMEOUT_VOTES_PER_SENDER),
+            certified_votes: VoteCollector::with_per_sender_limit(MAX_TIMEOUT_VOTES_PER_SENDER),
+            pacing_votes: VoteCollector::with_per_sender_limit(MAX_TIMEOUT_VOTES_PER_SENDER),
             epoch_manager,
             vote_signer_service,
         }
     }
 
-    /// Returns Some if quorum is reached
+    /// Collects a vote whose `high_pc_height` claim the caller checked against the certificate it came with.
     pub async fn check_and_collect_vote(
         &self,
         from: TConsensusSpec::Addr,
         current_height: NodeHeight,
         epoch_state: &EpochState<TConsensusSpec::Addr>,
         vote: TimeoutVote,
-    ) -> Result<Option<(TimeoutCertificate, HighTc)>, HotStuffError> {
+    ) -> Result<CollectedTimeoutVote, HotStuffError> {
         let _timer = TraceTimer::debug(LOG_TARGET, "check_and_collect_vote (TimeoutVote)");
+        let Some(sender_vn) = self.check_vote(from, current_height, epoch_state, &vote).await? else {
+            return Ok(CollectedTimeoutVote::default());
+        };
+
+        let pacing = self
+            .count_pacing_vote(&sender_vn, current_height, epoch_state, vote.clone())
+            .await;
+
+        let current_epoch = epoch_state.epoch();
+        let height = vote.height;
+        let result = self
+            .certified_votes
+            .collect_vote(
+                &sender_vn,
+                current_epoch,
+                current_height,
+                vote,
+                epoch_state.local_committee(),
+            )
+            .await;
+
+        let certificate = match result {
+            Ok(Some(quorum_votes)) => {
+                let new_tc =
+                    create_timeout_certificate(epoch_state.local_committee(), current_epoch, height, &quorum_votes)?;
+                let high_tc = self.store.with_write_tx(|tx| new_tc.update_highest(tx))?;
+                if new_tc.calculate_id() == *high_tc.id() {
+                    info!(target: LOG_TARGET, "🕒️ New HIGH {}", new_tc);
+                } else {
+                    info!(target: LOG_TARGET, "❓️ New TC from votes {} but it is not the highest TC {}", new_tc, high_tc);
+                }
+                Some((new_tc, high_tc))
+            },
+            Ok(None) => {
+                debug!(target: LOG_TARGET, "🟡 No quorum reached yet for TimeoutVote at height {}", height);
+                None
+            },
+            Err(duplicate) => {
+                log_duplicate(&duplicate);
+                None
+            },
+        };
+
+        Ok(CollectedTimeoutVote { certificate, pacing })
+    }
+
+    /// Counts a vote that arrived without the certificate its `high_pc_height` claims.
+    pub async fn check_and_count_vote(
+        &self,
+        from: TConsensusSpec::Addr,
+        current_height: NodeHeight,
+        epoch_state: &EpochState<TConsensusSpec::Addr>,
+        vote: TimeoutVote,
+    ) -> Result<PacingTimeoutVotes, HotStuffError> {
+        let _timer = TraceTimer::debug(LOG_TARGET, "check_and_count_vote (TimeoutVote)");
+        let Some(sender_vn) = self.check_vote(from, current_height, epoch_state, &vote).await? else {
+            return Ok(PacingTimeoutVotes::default());
+        };
+        Ok(self
+            .count_pacing_vote(&sender_vn, current_height, epoch_state, vote)
+            .await)
+    }
+
+    /// The highest view `public_key` has timed out in `epoch`, among the timeout votes held from it.
+    pub async fn highest_timed_out_view_of(
+        &self,
+        epoch: Epoch,
+        public_key: &RistrettoPublicKeyBytes,
+    ) -> Option<NodeHeight> {
+        self.pacing_votes.highest_view_of(epoch, public_key).await
+    }
+
+    /// The registered validator that signed `vote`, once the vote is known to be from a local committee member,
+    /// for the current epoch and correctly signed. `None` for a vote behind the current view.
+    async fn check_vote(
+        &self,
+        from: TConsensusSpec::Addr,
+        current_height: NodeHeight,
+        epoch_state: &EpochState<TConsensusSpec::Addr>,
+        vote: &TimeoutVote,
+    ) -> Result<Option<ValidatorNode<TConsensusSpec::Addr>>, HotStuffError> {
         debug!(
             target: LOG_TARGET,
             "📬 Validating timeout vote message from {from}: {vote}"
         );
 
         let current_epoch = epoch_state.epoch();
-        let local_committee_info = epoch_state.local_committee_info();
 
         // Check epoch and lower view bound before querying epoch_manager or verifying the signature.
         // Upper buffering is bounded per signer by `MAX_TIMEOUT_VOTES_PER_SENDER` rather than a fixed lookahead
         // window around `current_height`, which stands still while a committee lacks quorum.
-        check_timeout_vote_epoch(current_epoch, &vote)?;
+        check_timeout_vote_epoch(current_epoch, vote)?;
         if vote.height < current_height {
             debug!(
                 target: LOG_TARGET,
@@ -87,47 +200,49 @@ where TConsensusSpec: ConsensusSpec
         }
 
         let sender_vn =
-            check_eligibility::<TConsensusSpec, _>(&self.epoch_manager, from, &vote, local_committee_info).await?;
-        self.validate_vote(current_epoch, &vote)?;
-        let height = vote.height;
+            check_eligibility::<TConsensusSpec, _>(&self.epoch_manager, from, vote, epoch_state.local_committee_info())
+                .await?;
+        self.validate_vote(current_epoch, vote)?;
+        Ok(Some(sender_vn))
+    }
 
-        let result = self
-            .vote_collector
-            .collect_vote(
-                &sender_vn,
-                current_epoch,
-                current_height,
-                vote,
-                epoch_state.local_committee(),
+    async fn count_pacing_vote(
+        &self,
+        sender_vn: &ValidatorNode<TConsensusSpec::Addr>,
+        current_height: NodeHeight,
+        epoch_state: &EpochState<TConsensusSpec::Addr>,
+        vote: TimeoutVote,
+    ) -> PacingTimeoutVotes {
+        let epoch = epoch_state.epoch();
+        let committee = epoch_state.local_committee();
+        let height = vote.height;
+        let (timed_out_view, duplicates_held_vote) = match self
+            .pacing_votes
+            .collect_vote(sender_vn, epoch, current_height, vote, committee)
+            .await
+        {
+            Ok(Some(_)) => {
+                info!(target: LOG_TARGET, "🕒️ A quorum of the committee timed out view {epoch}/{height}");
+                (Some(height), false)
+            },
+            Ok(None) => (None, false),
+            Err(duplicate) => {
+                log_duplicate(&duplicate);
+                (None, true)
+            },
+        };
+        let joinable_view = self
+            .pacing_votes
+            .highest_view_held_by(
+                epoch,
+                committee,
+                committee.max_failures().saturating_add(VotePower::of(1)),
             )
             .await;
-
-        match result {
-            Ok(Some(quorum_votes)) => {
-                let new_tc =
-                    create_timeout_certificate(epoch_state.local_committee(), current_epoch, height, &quorum_votes)?;
-                let high_tc = self.store.with_write_tx(|tx| new_tc.update_highest(tx))?;
-                if new_tc.calculate_id() == *high_tc.id() {
-                    info!(target: LOG_TARGET, "🕒️ New HIGH {}", new_tc);
-                } else {
-                    info!(target: LOG_TARGET, "❓️ New TC from votes {} but it is not the highest TC {}", new_tc, high_tc);
-                }
-
-                Ok(Some((new_tc, high_tc)))
-            },
-            Ok(None) => {
-                debug!(target: LOG_TARGET, "🟡 No quorum reached yet for TimeoutVote at height {}", height);
-                Ok(None)
-            },
-            Err(duplicate) => {
-                // Not equivocation, and no evidence can be built from it: a timeout vote signs
-                // (epoch, height) and nothing else, which is the view it is bucketed under, so the
-                // two votes necessarily attest to the same thing and differ only in the signature's
-                // nonce. Re-signing one view is something an honest node does, for instance after a
-                // restart loses the in-memory record of the NEWVIEW it last sent.
-                warn!(target: LOG_TARGET, "❌ {}", duplicate);
-                Ok(None)
-            },
+        PacingTimeoutVotes {
+            timed_out_view,
+            joinable_view,
+            duplicates_held_vote,
         }
     }
 
@@ -146,6 +261,14 @@ where TConsensusSpec: ConsensusSpec
 
         Ok(())
     }
+}
+
+/// Not equivocation, and no evidence can be built from it: a timeout vote signs its view and the height of the
+/// certificate its signer holds, and the vote store buckets it under that view, so two votes from one signer differ
+/// at most in that height or the signature's nonce. Re-signing one view is something an honest node does, for
+/// instance after a restart loses the in-memory record of the NEWVIEW it last sent.
+fn log_duplicate(duplicate: &DuplicateVoteDetected<TimeoutVote>) {
+    warn!(target: LOG_TARGET, "❌ {}", duplicate);
 }
 
 fn check_timeout_vote_epoch(current_epoch: Epoch, vote: &TimeoutVote) -> Result<(), HotStuffError> {

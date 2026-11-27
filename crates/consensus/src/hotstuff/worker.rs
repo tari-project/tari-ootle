@@ -264,6 +264,7 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
                 leader_strategy.clone(),
                 proposal_vote_collector,
                 timeout_vote_collector,
+                outbound_messaging.clone(),
             ),
             on_receive_request_missing_txs: OnReceiveRequestMissingTransactions::new(
                 state_store.clone(),
@@ -1430,9 +1431,16 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             current_height,
             num_timeouts.display(),
         );
-        self.on_next_sync_view
-            .handle(epoch_state.epoch(), current_height, epoch_state.local_committee())
+        let timeout_height = self
+            .on_next_sync_view
+            .handle(
+                epoch_state.epoch(),
+                current_height,
+                self.pacemaker.timeout_floor(),
+                epoch_state.local_committee(),
+            )
             .await?;
+        self.pacemaker.record_timeout_sent(timeout_height);
 
         self.publish_event(HotstuffEvent::LeaderTimeout { height: current_height });
 
@@ -2011,10 +2019,32 @@ impl<TConsensusSpec: ConsensusSpec> HotstuffWorker<TConsensusSpec> {
             HotstuffMessage::NewView(message) => {
                 let result = self
                     .on_receive_new_view
-                    .handle(&mut self.pacemaker_actions, epoch_state, current_height, from, *message)
+                    .handle(
+                        &mut self.pacemaker_actions,
+                        epoch_state,
+                        current_height,
+                        self.pacemaker.timeout_floor(),
+                        from,
+                        *message,
+                    )
                     .await;
                 self.pacemaker.apply(&mut self.pacemaker_actions);
                 log_err("on_receive_new_view", result)
+            },
+            HotstuffMessage::TimeoutVote(vote) => {
+                let result = self
+                    .on_receive_new_view
+                    .handle_timeout_vote(
+                        &mut self.pacemaker_actions,
+                        epoch_state,
+                        current_height,
+                        self.pacemaker.timeout_floor(),
+                        from,
+                        vote,
+                    )
+                    .await;
+                self.pacemaker.apply(&mut self.pacemaker_actions);
+                log_err("on_receive_timeout_vote", result)
             },
             HotstuffMessage::Proposal(msg) => log_err(
                 "on_receive_local_proposal",

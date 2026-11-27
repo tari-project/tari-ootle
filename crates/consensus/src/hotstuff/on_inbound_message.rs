@@ -580,6 +580,7 @@ fn buffered_message_size(msg: &HotstuffMessage) -> usize {
         HotstuffMessage::ForeignProposal(_) |
         HotstuffMessage::MissingTransactionsResponse(_) => UNBOUNDED_MESSAGE_SIZE,
         HotstuffMessage::NewView(_) |
+        HotstuffMessage::TimeoutVote(_) |
         HotstuffMessage::Vote(_) |
         HotstuffMessage::ForeignProposalNotification(_) |
         HotstuffMessage::ForeignProposalRequest(_) |
@@ -729,6 +730,17 @@ fn msg_relative_view(
                 }
             } else {
                 // All new view messages for future view heights are considered applicable and should be processed
+                MessageRelativeView::Current
+            }
+        },
+        HotstuffMessage::TimeoutVote(vote) => {
+            if vote.epoch < current_epoch || (vote.epoch == current_epoch && vote.height < current_height) {
+                MessageRelativeView::Past {
+                    epoch: vote.epoch,
+                    height: vote.height,
+                }
+            } else {
+                // A timeout vote names a view above the current one by design: the view it times out has no block.
                 MessageRelativeView::Current
             }
         },

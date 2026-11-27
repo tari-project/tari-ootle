@@ -1,9 +1,10 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-//! Regression test for #3731: a committee that loses quorum for more than `MAX_VOTE_VIEW_LOOKAHEAD` (20)
-//! consecutive leader timeouts must still form a timeout certificate and resume committing blocks once a
-//! quorum of validators becomes reachable again.
+//! A committee that cannot reach quorum keeps timing out the same view: the view a NEWVIEW names comes from
+//! certificates and the committee's timeout votes, never from how many times a member timed out. Once a quorum
+//! is reachable again its members name the same view whatever they sent before, form the timeout certificate and
+//! resume.
 
 use std::time::Duration;
 
@@ -16,14 +17,11 @@ use crate::support::{Test, TestAddress, TestVnDestination, logging::setup_logger
 const OFFLINE: [&str; 2] = ["3", "4"];
 const ONLINE: [&str; 2] = ["1", "2"];
 
-/// Minimum drift between `LastSentNewView` and `leaf.height()` before healing, strictly exceeding the
-/// 20-view proposal vote lookahead window.
-const MIN_DRIFT_PAST_WINDOW: NodeHeight = NodeHeight(23);
+/// Long enough for several leader timeouts at the block time below.
+const PARTITION: Duration = Duration::from_secs(25);
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn committee_resumes_after_quorum_loss_exceeds_lookahead_window() {
-    setup_logger();
-    let mut test = Test::builder()
+async fn start() -> Test {
+    Test::builder()
         .with_test_timeout(Duration::from_secs(240))
         .modify_consensus_constants(|config| {
             config.pacemaker_block_time = Duration::from_millis(200);
@@ -31,8 +29,19 @@ async fn committee_resumes_after_quorum_loss_exceeds_lookahead_window() {
         // n = 4, f = 1, quorum = 3: taking 2 nodes offline leaves 2 online (< quorum).
         .add_committee(0, vec!["1", "2", "3", "4"])
         .start()
-        .await;
+        .await
+}
 
+fn last_sent_new_view(test: &Test, name: &str) -> Option<NodeHeight> {
+    test.get_validator(&TestAddress::new(name))
+        .state_store()
+        .with_read_tx(|tx| LastSentNewView::get(tx, Epoch(1)))
+        .optional()
+        .unwrap()
+        .map(|last_sent| last_sent.height)
+}
+
+async fn partition(test: &mut Test) -> NodeHeight {
     test.start_epoch(Epoch(1)).await;
     let (_, _, _, baseline_committed) = test.on_block_committed().await;
     log::info!("baseline committed at height {baseline_committed}");
@@ -40,36 +49,17 @@ async fn committee_resumes_after_quorum_loss_exceeds_lookahead_window() {
     for addr in OFFLINE {
         test.network().go_offline(TestAddress::new(addr)).await;
     }
+    tokio::time::sleep(PARTITION).await;
 
-    // Wait until every online validator has persisted LastSentNewView strictly past leaf + 23 (> 20-view window).
-    loop {
-        let all_past_window = ONLINE.iter().all(|&name| {
-            let v = test.get_validator(&TestAddress::new(name));
-            let leaf_height = v.get_leaf_block().height();
-            let last_sent = v
-                .state_store()
-                .with_read_tx(|tx| LastSentNewView::get(tx, Epoch(1)))
-                .optional()
-                .unwrap()
-                .map(|l| l.height)
-                .unwrap_or(NodeHeight::zero());
-            last_sent >= leaf_height.saturating_add(MIN_DRIFT_PAST_WINDOW)
-        });
-        if all_past_window {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(500)).await;
-    }
-
-    // Drain any commit notifications that were buffered before quorum was lost, recording the highest pre-heal commit.
+    // Drain the commit notifications buffered before quorum was lost, recording the highest pre-heal commit.
     let mut pre_heal_committed = baseline_committed;
     while let Ok((_, _, _, h)) = tokio::time::timeout(Duration::from_millis(100), test.on_block_committed()).await {
-        if h > pre_heal_committed {
-            pre_heal_committed = h;
-        }
+        pre_heal_committed = pre_heal_committed.max(h);
     }
+    pre_heal_committed
+}
 
-    // Heal the partition and submit a fresh transaction to verify full consensus + execution recovery.
+async fn heal_and_commit(test: &mut Test, pre_heal_committed: NodeHeight) {
     for addr in OFFLINE {
         test.network().go_online(&TestAddress::new(addr)).await;
     }
@@ -83,7 +73,24 @@ async fn committee_resumes_after_quorum_loss_exceeds_lookahead_window() {
             break;
         }
     }
+}
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn committee_resumes_after_a_long_quorum_loss() {
+    setup_logger();
+    let mut test = start().await;
+    let pre_heal_committed = partition(&mut test).await;
+
+    for name in ONLINE {
+        let current_height = test.get_validator(&TestAddress::new(name))._current_view.get_height();
+        assert_eq!(
+            last_sent_new_view(&test, name),
+            Some(current_height + NodeHeight(2)),
+            "validator {name} must keep timing out the view after its current one"
+        );
+    }
+
+    heal_and_commit(&mut test, pre_heal_committed).await;
     test.stop();
     test.assert_clean_shutdown().await;
 }

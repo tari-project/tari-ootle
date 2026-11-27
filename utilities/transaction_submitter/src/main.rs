@@ -37,8 +37,12 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::init();
     match cli.sub_command {
         SubCommand::StressTest(args) => {
+            let report = args.report.clone();
             if let Some(summary) = stress_test(args).await? {
                 print_summary(&summary);
+                if let Some(path) = report {
+                    write_report(&path, &summary)?;
+                }
             }
         },
     }
@@ -161,6 +165,7 @@ async fn fetch_result_summary(
             match timeout(Duration::from_secs(10), results_rx.recv()).await {
                 Ok(Some(tx)) => {
                     result.num_transactions += 1;
+                    result.outcomes.push((tx.transaction_id, tx.outcome.label()));
                     match tx.outcome {
                         Outcome::Committed => {
                             result.num_committed += 1;
@@ -230,6 +235,7 @@ async fn fetch_result_summary(
                                 Some(exec_result) if exec_result.finalize.is_full_accept() => {
                                     let diff = exec_result.finalize.accept().expect("is_full_accept");
                                     TxFinalized {
+                                        transaction_id,
                                         outcome: Outcome::Committed,
                                         num_up_substates: diff.up_len(),
                                         num_down_substates: diff.down_len(),
@@ -240,6 +246,7 @@ async fn fetch_result_summary(
                                 // per-transaction metering budget. The transaction executed but did not
                                 // do its intended work, so it is neither a full success nor an error.
                                 Some(exec_result) if exec_result.finalize.is_fee_only() => TxFinalized {
+                                    transaction_id,
                                     outcome: Outcome::FeeAcceptedExecutionRejected,
                                     num_up_substates: 0,
                                     num_down_substates: 0,
@@ -247,6 +254,7 @@ async fn fetch_result_summary(
                                 },
                                 // Rejected outright (or finalized with no execution result).
                                 _ => TxFinalized {
+                                    transaction_id,
                                     outcome: Outcome::Rejected,
                                     num_up_substates: 0,
                                     num_down_substates: 0,
@@ -273,6 +281,7 @@ async fn fetch_result_summary(
                             );
                             results_tx
                                 .send(TxFinalized {
+                                    transaction_id,
                                     outcome: Outcome::Rejected,
                                     num_up_substates: 0,
                                     num_down_substates: 0,
@@ -297,6 +306,7 @@ async fn fetch_result_summary(
                             println!("Failed to get transaction result: {}", e);
                             results_tx
                                 .send(TxFinalized {
+                                    transaction_id,
                                     outcome: Outcome::Error,
                                     num_up_substates: 0,
                                     num_down_substates: 0,
@@ -385,7 +395,19 @@ enum Outcome {
     Error,
 }
 
+impl Outcome {
+    fn label(&self) -> &'static str {
+        match self {
+            Outcome::Committed => "committed",
+            Outcome::FeeAcceptedExecutionRejected => "fee_only",
+            Outcome::Rejected => "rejected",
+            Outcome::Error => "errored",
+        }
+    }
+}
+
 struct TxFinalized {
+    transaction_id: TransactionId,
     outcome: Outcome,
     num_up_substates: usize,
     num_down_substates: usize,
@@ -406,6 +428,8 @@ pub struct StressTestResultSummary {
     pub slowest_execution_time: Duration,
     pub fastest_execution_time: Duration,
     pub total_execution_time: Duration,
+    /// Each transaction whose result was fetched, with its outcome's label, in the order the results arrived.
+    pub outcomes: Vec<(TransactionId, &'static str)>,
 }
 
 impl StressTestResultSummary {
@@ -434,6 +458,7 @@ impl Default for StressTestResultSummary {
             slowest_execution_time: Duration::from_secs(0),
             fastest_execution_time: Duration::MAX,
             total_execution_time: Duration::from_secs(0),
+            outcomes: Vec::new(),
         }
     }
 }
@@ -461,6 +486,26 @@ async fn check_validity_window(client: &IndexerClient, transaction_file: &Path, 
         );
     }
 
+    Ok(())
+}
+
+/// Writes the summary counts and each transaction's outcome as JSON, so that scripts read the result without parsing
+/// the printed summary.
+fn write_report(path: &Path, summary: &StressTestResultSummary) -> anyhow::Result<()> {
+    let transactions = summary
+        .outcomes
+        .iter()
+        .map(|(id, outcome)| serde_json::json!({ "id": id.to_string(), "outcome": outcome }))
+        .collect::<Vec<_>>();
+    let report = serde_json::json!({
+        "results": summary.num_transactions,
+        "committed": summary.num_committed,
+        "fee_only": summary.num_execution_rejected,
+        "rejected": summary.num_rejected,
+        "errored": summary.num_errors,
+        "transactions": transactions,
+    });
+    std::fs::write(path, serde_json::to_vec_pretty(&report)?)?;
     Ok(())
 }
 

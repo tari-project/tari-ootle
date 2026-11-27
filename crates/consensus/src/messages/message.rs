@@ -3,7 +3,7 @@
 
 use std::fmt::Display;
 
-use tari_consensus_types::Vote;
+use tari_consensus_types::{TimeoutVote, Vote};
 use tari_ootle_common_types::{Epoch, displayable::Displayable};
 
 use super::{
@@ -22,6 +22,10 @@ use crate::messages::{CatchUpPageMessage, CatchUpRequestMessage, MissingTransact
 pub enum HotstuffMessage {
     /// New view message: a vote to move to a new view after a leader timeout
     NewView(Box<NewViewMessage>),
+    /// A leader timeout vote sent to the committee members other than the leader of the view it names, who receives
+    /// it inside a [`HotstuffMessage::NewView`]. Every member counts these votes to learn when the view has
+    /// timed out.
+    TimeoutVote(TimeoutVote),
     /// Proposal message: a proposed block from the leader
     Proposal(Box<ProposalMessage>),
     /// Foreign proposal message: proposal from a foreign shard that involves this shard
@@ -62,6 +66,7 @@ impl HotstuffMessage {
     pub fn as_type_str(&self) -> &'static str {
         match self {
             Self::NewView(_) => "NewView",
+            Self::TimeoutVote(_) => "TimeoutVote",
             Self::Proposal(_) => "Proposal",
             Self::ForeignProposal(_) => "ForeignProposal",
             Self::ForeignProposalNotification(_) => "ForeignProposalNotification",
@@ -78,6 +83,7 @@ impl HotstuffMessage {
     pub fn epoch(&self) -> Epoch {
         match self {
             Self::NewView(msg) => msg.high_pc.epoch(),
+            Self::TimeoutVote(vote) => vote.epoch,
             Self::Proposal(msg) => msg.block.epoch(),
             Self::ForeignProposal(msg) => msg.proposal.epoch(),
             Self::ForeignProposalNotification(msg) => msg.epoch,
@@ -125,6 +131,7 @@ impl Display for HotstuffMessage {
                     msg.high_pc.height()
                 )
             },
+            Self::TimeoutVote(vote) => write!(f, "TimeoutVote({vote})"),
             Self::Proposal(msg) => {
                 write!(
                     f,

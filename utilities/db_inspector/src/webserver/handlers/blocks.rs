@@ -16,7 +16,7 @@ use tari_state_store_rocksdb::{column_families as cfs, error::RocksDbStorageErro
 use crate::webserver::{
     context::HandlerContext,
     error::WebError,
-    handlers::types::{Column, TableRequest, TableResponse, decode_hex_prefix},
+    handlers::types::{Column, TableRequest, TableResponse, decode_hex_prefix, scan_page},
 };
 
 #[allow(clippy::too_many_lines)]
@@ -59,38 +59,36 @@ pub async fn list(
 
     let page_size = req.limit.unwrap_or(1_000);
     let skip = req.page.unwrap_or(0).saturating_mul(page_size);
+    let parsed_query = parse_query(&req.query.unwrap_or_default())?;
+    let has_query = parsed_query.is_some();
 
-    let iter: Box<dyn Iterator<Item = Result<(_, _), RocksDbStorageError>>> =
-        match parse_query(&req.query.unwrap_or_default())? {
-            Some(BlockQuery::ByHeight(height)) => {
-                let epoch = locked_block.as_ref().map(|b| b.epoch()).unwrap_or_else(Epoch::zero);
-                let range = match ordering {
-                    Ordering::Ascending => (epoch, height)..(Epoch::max(), NodeHeight::max()),
-                    Ordering::Descending => {
-                        (Epoch::zero(), NodeHeight::zero())..(epoch, height.saturating_add(NodeHeight(1)))
-                    },
-                };
-                Box::new(height_query_cf.query_range_key_iterator(ordering, range).map(|r| {
-                    r.and_then(|(epoch, height, block_id)| {
-                        let block = cf.get(&block_id, OPERATION)?;
-                        Ok(((epoch, height, block_id), block))
-                    })
-                }))
-            },
-            Some(BlockQuery::ByBlockIdPrefix(key_prefix)) => Box::new(
-                cf.prefix_range_iterator_raw_key(ordering, key_prefix)
-                    .map(|r| r.map(|(k, v)| ((v.epoch(), v.height(), k), v))),
-            ),
-            None => Box::new(query_cf.query_end_range_key_iterator(ordering, &Epoch::max()).map(|r| {
-                r.and_then(|(epoch, height, block_id)| {
-                    let block = cf.get(&block_id, OPERATION)?;
-                    Ok(((epoch, height, block_id), block))
-                })
-            })),
-        };
+    let iter: Box<dyn Iterator<Item = Result<_, RocksDbStorageError>>> = match parsed_query {
+        Some(BlockQuery::ByHeight(height)) => {
+            let epoch = locked_block.as_ref().map(|b| b.epoch()).unwrap_or_else(Epoch::zero);
+            let range = match ordering {
+                Ordering::Ascending => (epoch, height)..(Epoch::max(), NodeHeight::max()),
+                Ordering::Descending => {
+                    (Epoch::zero(), NodeHeight::zero())..(epoch, height.saturating_add(NodeHeight(1)))
+                },
+            };
+            Box::new(
+                height_query_cf
+                    .query_range_key_iterator(ordering, range)
+                    .map(|r| r.map(|(_, _, block_id)| block_id)),
+            )
+        },
+        Some(BlockQuery::ByBlockIdPrefix(key_prefix)) => {
+            Box::new(cf.prefix_range_key_iterator_raw_key(ordering, key_prefix))
+        },
+        None => Box::new(
+            query_cf
+                .query_end_range_key_iterator(ordering, &Epoch::max())
+                .map(|r| r.map(|(_, _, block_id)| block_id)),
+        ),
+    };
 
-    for result in iter.skip(skip).take(page_size) {
-        let ((_, _, block_id), block) = result?;
+    let filtered_count = scan_page(iter, skip, page_size, has_query, |block_id| {
+        let block = cf.get(&block_id, OPERATION)?;
         let mut flags = Vec::new();
         if block.is_committed() {
             flags.push("✅");
@@ -126,8 +124,13 @@ pub async fn list(
             "state_hash": hex::encode(block.header().state_merkle_root()),
             "epoch_hash": hex::encode(block.header().epoch_hash()),
         }));
-    }
-    let total = cf.count(OPERATION)?;
+        Ok::<_, WebError>(())
+    })?;
+    let total = if has_query {
+        filtered_count
+    } else {
+        cf.count(OPERATION)?
+    };
     table.set_total_entries(total);
 
     Ok(Json(table))

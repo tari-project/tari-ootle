@@ -33,6 +33,11 @@ impl HandlerContext {
         self
     }
 
+    pub fn register_cf_name<S: Into<String>>(&mut self, name: S) -> &mut Self {
+        self.registered_cfs.push(name.into());
+        self
+    }
+
     pub fn registered_cfs(&self) -> &[String] {
         &self.registered_cfs
     }

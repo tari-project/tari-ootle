@@ -52,7 +52,11 @@ impl Default for VoteStoreBound {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SaveVoteOutcome {
     Saved,
-    Ignored,
+    /// An identical vote is already held. The view's quorum is re-evaluated, so a quorum returned through
+    /// [`VoteCollector::return_votes`] is emitted again when one of its votes is resubmitted.
+    AlreadyHeld,
+    /// The vote is below the oldest view retained for its signer under [`VoteStoreBound::PerSender`].
+    BelowSenderFloor,
 }
 
 #[derive(Clone)]
@@ -120,7 +124,7 @@ where V::AggregationKey: Clone
         let height = vote.height();
         let agg_key = vote.aggregation_key();
         let vote_display = vote.to_string();
-        if access_mut.save_vote(vote)? == SaveVoteOutcome::Ignored {
+        if access_mut.save_vote(vote)? == SaveVoteOutcome::BelowSenderFloor {
             return Ok(None);
         }
 
@@ -243,7 +247,7 @@ impl<V: Vote + Display + Clone> VoteStoreInner<V> {
                     "ℹ️  Received identical duplicate vote {}. Ignoring.",
                     vote,
                 );
-                return Ok(SaveVoteOutcome::Ignored);
+                return Ok(SaveVoteOutcome::AlreadyHeld);
             }
 
             warn!(
@@ -276,7 +280,7 @@ impl<V: Vote + Display + Clone> VoteStoreInner<V> {
                         oldest_view.0,
                         oldest_view.1,
                     );
-                    return Ok(SaveVoteOutcome::Ignored);
+                    return Ok(SaveVoteOutcome::BelowSenderFloor);
                 }
                 views.pop_first();
                 if let Some(view_votes) = self.store.get_mut(&oldest_view) {
@@ -339,7 +343,14 @@ impl<V: Vote + Display + Clone> VoteStoreInner<V> {
                 .get(&epoch_height)
                 .is_some_and(|vv| vv.votes.contains_key(vote.public_key()))
             {
-                let _ = self.save_vote(vote);
+                // The signer holds no vote at this view, so a duplicate here is a bookkeeping bug.
+                if let Err(err) = self.save_vote(vote) {
+                    error!(
+                        target: LOG_TARGET,
+                        "BUG: restoring {} found a vote already held from its signer at this view",
+                        err.new_vote,
+                    );
+                }
             }
         }
     }

@@ -343,10 +343,13 @@ impl SenderQuota {
 
 /// Per-sender token bucket bounding how fast any single committee member can drive NEWVIEW verification work.
 ///
-/// An honest validator sends at most one NEWVIEW per [`PaceMaker::min_leader_timeout_interval`], regardless of how
-/// far `LastSentNewView` has drifted above `current_height` during quorum loss. Replenishing one token per minimum
-/// leader-timeout interval with a [`MAX_NEWVIEW_BURST_PER_SENDER`] allowance admits arbitrary-duration recovery and
-/// transient delivery bursts while rejecting unbounded future-height floods before database or signature work.
+/// An honest validator's sustained NEWVIEW rate is bounded by the pacemaker's leader timer: at most one per
+/// [`PaceMaker::min_leader_timeout_interval`], regardless of how far `LastSentNewView` has drifted above
+/// `current_height` during quorum loss. A validator also sends a NEWVIEW, without waiting for the timer, each time it
+/// declines to vote on a live proposal; the [`MAX_NEWVIEW_BURST_PER_SENDER`] burst covers these, and a throttled sender
+/// regains tokens at the timer rate. Replenishing one token per minimum leader-timeout interval admits
+/// arbitrary-duration recovery and transient delivery bursts while rejecting unbounded future-height floods before
+/// database or signature work.
 struct NewViewRateLimiter<TAddr> {
     epoch: Option<Epoch>,
     refill_interval: Duration,

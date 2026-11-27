@@ -175,6 +175,7 @@ where
         unversioned: bool,
     ) -> Result<HashSet<SubstateRequirement>, SubstateApiError> {
         let mut substate_ids = HashSet::with_capacity(top_level_substates.len());
+        let mut network_resolved = HashSet::new();
 
         for parent_id in top_level_substates {
             if !parent_id.is_declarable_input() {
@@ -195,11 +196,18 @@ where
                     // current state from the network and add any that were missed.
                     if parent_id.is_component() {
                         let result = self.fetch_substate_from_network(parent_id, None).await?;
+                        network_resolved.insert(parent_id.clone());
                         if let SubstateValue::Component(data) = &result.substate {
                             let value = IndexedWellKnownTypes::from_value(&data.body.state)?;
-                            self.add_component_dependencies(&value, unversioned, &mut substate_ids)
-                                .await?;
+                            self.add_component_dependencies(
+                                &value,
+                                unversioned,
+                                &mut substate_ids,
+                                &mut network_resolved,
+                            )
+                            .await?;
                         }
+                        substate_ids.replace(result.id.into());
                     }
                 },
                 None => {
@@ -213,65 +221,51 @@ where
                         substate,
                         ..
                     } = self.fetch_substate_from_network(parent_id, None).await?;
+                    network_resolved.insert(parent_id.clone());
 
                     match &substate {
                         SubstateValue::Component(data) => {
                             let value = IndexedWellKnownTypes::from_value(&data.body.state)?;
-                            self.add_component_dependencies(&value, unversioned, &mut substate_ids)
-                                .await?;
+                            self.add_component_dependencies(
+                                &value,
+                                unversioned,
+                                &mut substate_ids,
+                                &mut network_resolved,
+                            )
+                            .await?;
                         },
-                        SubstateValue::Resource(_) => {},
-                        SubstateValue::TransactionReceipt(_) => {},
+                        SubstateValue::Resource(_) |
+                        SubstateValue::TransactionReceipt(_) |
+                        SubstateValue::ClaimedOutputTombstone(_) |
+                        SubstateValue::Template(_) => {},
                         SubstateValue::Vault(vault) => {
                             let resx_addr = SubstateId::Resource(*vault.resource_address());
-                            self.insert_substate_if_absent(&resx_addr, unversioned, &mut substate_ids)
-                                .await?;
+                            self.insert_substate_if_absent(
+                                &resx_addr,
+                                unversioned,
+                                &mut substate_ids,
+                                &mut network_resolved,
+                            )
+                            .await?;
                         },
-                        SubstateValue::NonFungible(_) => {
-                            let nft_addr = substate_id.substate_id().as_non_fungible_address().ok_or_else(|| {
-                                SubstateApiError::InvalidValidatorNodeResponse(format!(
-                                    "NonFungible substate does not have a valid address {}",
-                                    substate_id
-                                ))
-                            })?;
-
-                            let resx_addr = SubstateId::Resource(*nft_addr.resource_address());
-                            self.insert_substate_if_absent(&resx_addr, unversioned, &mut substate_ids)
-                                .await?;
-                        },
-                        SubstateValue::ValidatorFeePool(_) => {
-                            let resx_addr = SubstateId::Resource(TARI_TOKEN);
-                            self.insert_substate_if_absent(&resx_addr, unversioned, &mut substate_ids)
-                                .await?;
-                        },
-                        SubstateValue::ClaimedOutputTombstone(_) => {},
-                        SubstateValue::Template(_) => {},
-                        SubstateValue::Utxo(_) => {
-                            let addr = substate_id.substate_id().as_utxo_address().ok_or_else(|| {
-                                SubstateApiError::InvalidValidatorNodeResponse(format!(
-                                    "Utxo substate does not have a valid address {}",
-                                    substate_id
-                                ))
-                            })?;
-
-                            let resx_addr = SubstateId::Resource(*addr.resource_address());
-                            self.insert_substate_if_absent(&resx_addr, unversioned, &mut substate_ids)
-                                .await?;
-                        },
+                        SubstateValue::NonFungible(_) |
+                        SubstateValue::ValidatorFeePool(_) |
+                        SubstateValue::Utxo(_) |
                         SubstateValue::ConfidentialOutput(_) => {
-                            let addr = substate_id
-                                .substate_id()
-                                .as_confidential_output_address()
-                                .ok_or_else(|| {
-                                    SubstateApiError::InvalidValidatorNodeResponse(format!(
-                                        "ConfidentialOutput substate does not have a valid address {}",
-                                        substate_id
-                                    ))
-                                })?;
-
-                            let resx_addr = SubstateId::Resource(*addr.resource_address());
-                            self.insert_substate_if_absent(&resx_addr, unversioned, &mut substate_ids)
-                                .await?;
+                            let resx = associated_resource_address(substate_id.substate_id()).ok_or_else(|| {
+                                SubstateApiError::InvalidValidatorNodeResponse(format!(
+                                    "Substate does not have an associated resource address {}",
+                                    substate_id
+                                ))
+                            })?;
+                            let resx_addr = SubstateId::Resource(resx);
+                            self.insert_substate_if_absent(
+                                &resx_addr,
+                                unversioned,
+                                &mut substate_ids,
+                                &mut network_resolved,
+                            )
+                            .await?;
                         },
                     }
 
@@ -330,54 +324,71 @@ where
         value: &IndexedWellKnownTypes,
         unversioned: bool,
         substate_ids: &mut HashSet<SubstateRequirement>,
+        network_resolved: &mut HashSet<SubstateId>,
     ) -> Result<(), SubstateApiError> {
         for addr in value.referenced_substates() {
             // Component state legitimately holds addresses no transaction can declare: an `Account` approval is
             // keyed on a spender badge, which is commonly a public-key identity, and a template may record a
-            // transaction receipt.
-            if !addr.is_declarable_input() {
+            // transaction receipt. Vaults are resolved alongside their resource addresses below.
+            if !addr.is_declarable_input() || addr.is_vault() {
                 continue;
             }
-            self.insert_substate_if_absent(&addr, unversioned, substate_ids).await?;
+            if let Some(resx) = associated_resource_address(&addr) {
+                let resx_addr = SubstateId::Resource(resx);
+                self.insert_substate_if_absent(&resx_addr, unversioned, substate_ids, network_resolved)
+                    .await?;
+            }
+            self.insert_substate_if_absent(&addr, unversioned, substate_ids, network_resolved)
+                .await?;
         }
 
-        // Fetch each vault referenced in the component state and add its resource address
-        // as a dependency.
+        // Fetch each vault referenced in the component state once, updating its live version and adding
+        // its resource address as a dependency.
+        let mut seen_vaults = HashSet::new();
         for vault_id in value.vault_ids() {
+            if !seen_vaults.insert(*vault_id) {
+                continue;
+            }
             let vault_addr = SubstateId::Vault(*vault_id);
             let result = self.fetch_substate_from_network(&vault_addr, None).await?;
             if let SubstateValue::Vault(vault) = &result.substate {
                 let resx_addr = SubstateId::Resource(*vault.resource_address());
-                self.insert_substate_if_absent(&resx_addr, unversioned, substate_ids)
+                self.insert_substate_if_absent(&resx_addr, unversioned, substate_ids, network_resolved)
                     .await?;
+            }
+            if unversioned {
+                substate_ids.insert(vault_addr.into());
+            } else {
+                network_resolved.insert(vault_addr);
+                substate_ids.replace(result.id.into());
             }
         }
 
         Ok(())
     }
 
-    /// Inserts a substate ID into the set if it is not already present. If `unversioned` is false,
-    /// fetches the current version from the network before inserting.
+    /// Inserts a substate ID into the set, resolving its live version from the network once per lookup
+    /// when `unversioned` is false.
     async fn insert_substate_if_absent(
         &self,
         substate_id: &SubstateId,
         unversioned: bool,
         substate_ids: &mut HashSet<SubstateRequirement>,
+        network_resolved: &mut HashSet<SubstateId>,
     ) -> Result<(), SubstateApiError> {
         if !substate_id.is_declarable_input() {
             return Ok(());
         }
-        if let Some(existing) = substate_ids.get(substate_id) &&
-            (unversioned || existing.version().is_some())
-        {
-            return Ok(());
-        }
         if unversioned {
             substate_ids.insert(substate_id.clone().into());
-        } else {
-            let ValidatorScanResult { id, .. } = self.fetch_substate_from_network(substate_id, None).await?;
-            substate_ids.replace(id.into());
+            return Ok(());
         }
+        if network_resolved.contains(substate_id) {
+            return Ok(());
+        }
+        let ValidatorScanResult { id, .. } = self.fetch_substate_from_network(substate_id, None).await?;
+        network_resolved.insert(substate_id.clone());
+        substate_ids.replace(id.into());
         Ok(())
     }
 
@@ -806,9 +817,28 @@ fn insert_or_upgrade_requirement(substate_ids: &mut HashSet<SubstateRequirement>
     }
 }
 
-fn add_referenced_substate(substate_ids: &mut HashSet<SubstateRequirement>, id: &SubstateId) {
+fn associated_resource_address(id: &SubstateId) -> Option<ResourceAddress> {
     if let Some(addr) = id.as_non_fungible_address() {
-        insert_or_upgrade_requirement(substate_ids, SubstateRequirement::unversioned(*addr.resource_address()));
+        return Some(*addr.resource_address());
+    }
+    if let Some(addr) = id.as_utxo_address() {
+        return Some(*addr.resource_address());
+    }
+    if let Some(addr) = id.as_confidential_output_address() {
+        return Some(*addr.resource_address());
+    }
+    if id.is_validator_fee_pool() {
+        return Some(TARI_TOKEN);
+    }
+    None
+}
+
+fn add_referenced_substate(substate_ids: &mut HashSet<SubstateRequirement>, id: &SubstateId) {
+    if !id.is_declarable_input() {
+        return;
+    }
+    if let Some(resx) = associated_resource_address(id) {
+        insert_or_upgrade_requirement(substate_ids, SubstateRequirement::unversioned(resx));
     }
     insert_or_upgrade_requirement(substate_ids, SubstateRequirement::unversioned(id.clone()));
 }
@@ -824,8 +854,10 @@ fn get_dependent_substates<TTx: WalletStoreReader>(
     let mut visited = HashSet::new();
     visited.insert(parent.substate_id.substate_id().clone());
     insert_or_upgrade_requirement(substate_ids, parent.substate_id.clone().into());
-    if let Some(addr) = parent.substate_id.substate_id().as_non_fungible_address() {
-        insert_or_upgrade_requirement(substate_ids, SubstateRequirement::unversioned(*addr.resource_address()));
+    if parent.substate_id.substate_id().is_declarable_input() &&
+        let Some(resx) = associated_resource_address(parent.substate_id.substate_id())
+    {
+        insert_or_upgrade_requirement(substate_ids, SubstateRequirement::unversioned(resx));
     }
 
     for child in parent.referenced_substates {
@@ -835,9 +867,10 @@ fn get_dependent_substates<TTx: WalletStoreReader>(
 
     let children = tx.substates_get_children(parent.substate_id.substate_id())?;
     for child in children {
-        if let Some(addr) = child.substate_id.substate_id().as_non_fungible_address() {
-            // Ensure that the associated resource is also included
-            insert_or_upgrade_requirement(substate_ids, SubstateRequirement::unversioned(*addr.resource_address()));
+        if child.substate_id.substate_id().is_declarable_input() &&
+            let Some(resx) = associated_resource_address(child.substate_id.substate_id())
+        {
+            insert_or_upgrade_requirement(substate_ids, SubstateRequirement::unversioned(resx));
         }
         debug!(
             target: LOG_TARGET,

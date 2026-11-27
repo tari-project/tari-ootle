@@ -9,7 +9,13 @@ mod support;
 use std::collections::HashSet;
 
 use tari_engine_types::{
+    Utxo,
+    UtxoOutput,
     ValidatorFeePool,
+    component::{Component, ComponentBody, ComponentHeader},
+    confidential_output::ConfidentialOutput,
+    crypto::OutputBody,
+    non_fungible::NonFungibleContainer,
     resource::Resource,
     resource_container::ResourceContainer,
     substate::{SubstateId, SubstateValue},
@@ -19,6 +25,9 @@ use tari_ootle_common_types::{SubstateRequirement, SubstateVersion, VersionedSub
 use tari_template_lib::types::{
     ClaimedOutputTombstoneAddress,
     ComponentAddress,
+    ConfidentialOutputAddress,
+    EncryptedData,
+    EntityId,
     Metadata,
     NonFungibleAddress,
     NonFungibleId,
@@ -26,12 +35,16 @@ use tari_template_lib::types::{
     ResourceAddress,
     ResourceType,
     SubstateOwnerRule,
+    TemplateAddress,
     TransactionReceiptAddress,
+    UtxoAddress,
+    UtxoId,
     ValidatorFeePoolAddress,
     VaultId,
-    access_rules::ResourceAccessRules,
+    access_rules::{ComponentAccessRules, ResourceAccessRules, RulesUpdater, UpdateRule},
     constants::TARI_TOKEN,
-    crypto::RistrettoPublicKeyBytes,
+    crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, UtxoTag},
+    stealth::SpendAuthorization,
 };
 
 use crate::support::{CannedSubstateNetworkInterface, Test, TestWithNetwork};
@@ -224,4 +237,271 @@ async fn locate_dependent_substates_resolves_versions_for_local_references_and_s
     assert_eq!(by_id.get(&vault_id), Some(&Some(SubstateVersion::new(5))));
     assert_eq!(by_id.get(&resx_id), Some(&Some(SubstateVersion::new(7))));
     assert_eq!(by_id.len(), 2);
+}
+
+fn create_test_component_value(state: tari_bor::Value) -> SubstateValue {
+    SubstateValue::Component(Component {
+        header: ComponentHeader {
+            template_address: TemplateAddress::from_array([9; 32]),
+            owner_rule: SubstateOwnerRule::None,
+            access_rules: ComponentAccessRules::new(),
+            entity_id: EntityId::default(),
+            upgrade_rule: UpdateRule::Locked,
+            rules_updater: Some(RulesUpdater::TemplateManaged),
+        },
+        body: ComponentBody::from_cbor_value(state),
+    })
+}
+
+#[tokio::test]
+async fn locate_dependent_substates_refreshes_stale_stored_component_and_vault_versions_without_duplicate_fetches() {
+    let component_id = SubstateId::from(ComponentAddress::new(ObjectKey::from_array([40; 32])));
+    let vault_a = VaultId::new(ObjectKey::from_array([41; 32]));
+    let vault_a_id = SubstateId::Vault(vault_a);
+    let vault_b = VaultId::new(ObjectKey::from_array([42; 32]));
+    let vault_b_id = SubstateId::Vault(vault_b);
+    let resx_a = ResourceAddress::new(ObjectKey::from_array([43; 32]));
+    let resx_a_id = SubstateId::Resource(resx_a);
+    let resx_b = ResourceAddress::new(ObjectKey::from_array([44; 32]));
+    let resx_b_id = SubstateId::Resource(resx_b);
+    let nft_resx = ResourceAddress::new(ObjectKey::from_array([45; 32]));
+    let nft_resx_id = SubstateId::Resource(nft_resx);
+    let nft_id = SubstateId::from(NonFungibleAddress::new(nft_resx, NonFungibleId::from_u64(7)));
+
+    let live_state = tari_bor::to_value(&(vec![vault_a, vault_b], nft_id.clone())).unwrap();
+    let network = CannedSubstateNetworkInterface::new([
+        (
+            component_id.clone(),
+            SubstateVersion::new(3),
+            create_test_component_value(live_state),
+        ),
+        (
+            vault_a_id.clone(),
+            SubstateVersion::new(5),
+            create_test_vault_value(resx_a, 800),
+        ),
+        (
+            vault_b_id.clone(),
+            SubstateVersion::new(2),
+            create_test_vault_value(resx_b, 300),
+        ),
+        (
+            resx_a_id.clone(),
+            SubstateVersion::new(2),
+            create_test_resource_value(ResourceType::Fungible),
+        ),
+        (
+            resx_b_id.clone(),
+            SubstateVersion::ZERO,
+            create_test_resource_value(ResourceType::Fungible),
+        ),
+        (
+            nft_id.clone(),
+            SubstateVersion::new(4),
+            SubstateValue::NonFungible(NonFungibleContainer::no_data()),
+        ),
+        (
+            nft_resx_id.clone(),
+            SubstateVersion::new(1),
+            create_test_resource_value(ResourceType::NonFungible),
+        ),
+    ]);
+    let network_probe = network.clone();
+    let test = TestWithNetwork::without_accounts(network);
+    let substates = test.sdk().substate_api();
+
+    // Seed stale local versions (v0 / v1) before the component, its vault, its resource, and its NFT advanced on-chain.
+    substates
+        .save_root(VersionedSubstateIdRef::new(&component_id, SubstateVersion::ZERO), vec![
+            vault_a_id.clone(),
+            nft_id.clone(),
+        ])
+        .unwrap();
+    substates
+        .save_child(
+            &component_id,
+            VersionedSubstateIdRef::new(&vault_a_id, SubstateVersion::ZERO),
+            vec![resx_a_id.clone()],
+        )
+        .unwrap();
+    substates
+        .save_root(VersionedSubstateIdRef::new(&resx_a_id, SubstateVersion::ZERO), vec![])
+        .unwrap();
+    substates
+        .save_child(
+            &nft_resx_id,
+            VersionedSubstateIdRef::new(&nft_id, SubstateVersion::new(1)),
+            vec![],
+        )
+        .unwrap();
+
+    let resolved = substates
+        .locate_dependent_substates(std::slice::from_ref(&component_id), false)
+        .await
+        .unwrap();
+    let by_id = resolved
+        .iter()
+        .map(|req| (req.substate_id().clone(), req.version()))
+        .collect::<std::collections::HashMap<_, _>>();
+
+    assert_eq!(by_id.get(&component_id), Some(&Some(SubstateVersion::new(3))));
+    assert_eq!(by_id.get(&vault_a_id), Some(&Some(SubstateVersion::new(5))));
+    assert_eq!(by_id.get(&vault_b_id), Some(&Some(SubstateVersion::new(2))));
+    assert_eq!(by_id.get(&resx_a_id), Some(&Some(SubstateVersion::new(2))));
+    assert_eq!(by_id.get(&resx_b_id), Some(&Some(SubstateVersion::ZERO)));
+    assert_eq!(by_id.get(&nft_id), Some(&Some(SubstateVersion::new(4))));
+    assert_eq!(by_id.get(&nft_resx_id), Some(&Some(SubstateVersion::new(1))));
+    assert_eq!(by_id.len(), 7);
+    assert_eq!(network_probe.query_count(&vault_a_id), 1);
+    assert_eq!(network_probe.query_count(&vault_b_id), 1);
+}
+
+struct ComponentReferencedResourcesFixture {
+    network: CannedSubstateNetworkInterface,
+    component_id: SubstateId,
+    expected_ids: HashSet<SubstateId>,
+    nft_resx: ResourceAddress,
+    utxo_resx: ResourceAddress,
+    confidential_resx: ResourceAddress,
+}
+
+fn component_referenced_resources_fixture() -> ComponentReferencedResourcesFixture {
+    let component_id = SubstateId::from(ComponentAddress::new(ObjectKey::from_array([50; 32])));
+    let nft_resx = ResourceAddress::new(ObjectKey::from_array([51; 32]));
+    let nft_id = SubstateId::from(NonFungibleAddress::new(nft_resx, NonFungibleId::from_u64(1)));
+    let utxo_resx = ResourceAddress::new(ObjectKey::from_array([52; 32]));
+    let utxo_id = SubstateId::from(UtxoAddress::new(utxo_resx, UtxoId::from_array([53; 32])));
+    let confidential_resx = ResourceAddress::new(ObjectKey::from_array([54; 32]));
+    let commitment = PedersenCommitmentBytes::from_array([55; 32]);
+    let confidential_id = SubstateId::from(ConfidentialOutputAddress::new(confidential_resx, commitment));
+    let fee_pool_id = SubstateId::from(ValidatorFeePoolAddress::from_array([56; 32]));
+    let identity_badge = SubstateId::from(NonFungibleAddress::from_public_key(RistrettoPublicKeyBytes::default()));
+
+    let state = tari_bor::to_value(&(
+        nft_id.clone(),
+        utxo_id.clone(),
+        confidential_id.clone(),
+        fee_pool_id.clone(),
+        identity_badge,
+    ))
+    .unwrap();
+    let dummy_output = OutputBody {
+        public_nonce: RistrettoPublicKeyBytes::default(),
+        encrypted_data: EncryptedData::try_from(vec![0u8; EncryptedData::min_size()]).unwrap(),
+        minimum_value_promise: 0,
+        viewable_balance: None,
+    };
+    let utxo_value = Utxo::new(UtxoOutput {
+        output: dummy_output.clone(),
+        auth: SpendAuthorization::Key(RistrettoPublicKeyBytes::default()),
+        tag: UtxoTag::new(0),
+    });
+
+    let network = CannedSubstateNetworkInterface::new([
+        (
+            component_id.clone(),
+            SubstateVersion::new(1),
+            create_test_component_value(state),
+        ),
+        (
+            nft_id.clone(),
+            SubstateVersion::ZERO,
+            SubstateValue::NonFungible(NonFungibleContainer::no_data()),
+        ),
+        (
+            SubstateId::Resource(nft_resx),
+            SubstateVersion::new(2),
+            create_test_resource_value(ResourceType::NonFungible),
+        ),
+        (utxo_id.clone(), SubstateVersion::ZERO, SubstateValue::Utxo(utxo_value)),
+        (
+            SubstateId::Resource(utxo_resx),
+            SubstateVersion::new(1),
+            create_test_resource_value(ResourceType::Stealth),
+        ),
+        (
+            confidential_id.clone(),
+            SubstateVersion::ZERO,
+            SubstateValue::ConfidentialOutput(ConfidentialOutput::new(dummy_output)),
+        ),
+        (
+            SubstateId::Resource(confidential_resx),
+            SubstateVersion::new(3),
+            create_test_resource_value(ResourceType::Confidential),
+        ),
+        (
+            fee_pool_id.clone(),
+            SubstateVersion::new(6),
+            SubstateValue::ValidatorFeePool(ValidatorFeePool::new(RistrettoPublicKeyBytes::default(), 250)),
+        ),
+        (
+            SubstateId::Resource(TARI_TOKEN),
+            SubstateVersion::ZERO,
+            create_test_resource_value(ResourceType::Stealth),
+        ),
+    ]);
+    let expected_ids = HashSet::from([
+        component_id.clone(),
+        nft_id,
+        SubstateId::Resource(nft_resx),
+        utxo_id,
+        SubstateId::Resource(utxo_resx),
+        confidential_id,
+        SubstateId::Resource(confidential_resx),
+        fee_pool_id,
+        SubstateId::Resource(TARI_TOKEN),
+    ]);
+    ComponentReferencedResourcesFixture {
+        network,
+        component_id,
+        expected_ids,
+        nft_resx,
+        utxo_resx,
+        confidential_resx,
+    }
+}
+
+#[tokio::test]
+async fn locate_dependent_substates_resolves_associated_resources_for_component_state_references() {
+    let f = component_referenced_resources_fixture();
+    let test = TestWithNetwork::without_accounts(f.network);
+    let substates = test.sdk().substate_api();
+
+    let unversioned = substates
+        .locate_dependent_substates(std::slice::from_ref(&f.component_id), true)
+        .await
+        .unwrap();
+    assert_eq!(
+        unversioned
+            .into_iter()
+            .map(SubstateRequirement::into_substate_id)
+            .collect::<HashSet<_>>(),
+        f.expected_ids
+    );
+
+    let versioned = substates
+        .locate_dependent_substates(std::slice::from_ref(&f.component_id), false)
+        .await
+        .unwrap();
+    let by_id = versioned
+        .iter()
+        .map(|req| (req.substate_id().clone(), req.version()))
+        .collect::<std::collections::HashMap<_, _>>();
+    assert_eq!(
+        by_id.get(&SubstateId::Resource(f.nft_resx)),
+        Some(&Some(SubstateVersion::new(2)))
+    );
+    assert_eq!(
+        by_id.get(&SubstateId::Resource(f.utxo_resx)),
+        Some(&Some(SubstateVersion::new(1)))
+    );
+    assert_eq!(
+        by_id.get(&SubstateId::Resource(f.confidential_resx)),
+        Some(&Some(SubstateVersion::new(3)))
+    );
+    assert_eq!(
+        by_id.get(&SubstateId::Resource(TARI_TOKEN)),
+        Some(&Some(SubstateVersion::ZERO))
+    );
+    assert_eq!(by_id.len(), f.expected_ids.len());
 }

@@ -656,6 +656,7 @@ impl IsNotFoundError for PanicError {
 #[derive(Debug, Clone, Default)]
 pub struct CannedSubstateNetworkInterface {
     substates: HashMap<SubstateId, (SubstateVersion, SubstateValue)>,
+    query_counts: std::sync::Arc<std::sync::Mutex<HashMap<SubstateId, usize>>>,
 }
 
 impl CannedSubstateNetworkInterface {
@@ -666,7 +667,12 @@ impl CannedSubstateNetworkInterface {
                 .into_iter()
                 .map(|(id, version, value)| (id, (version, value)))
                 .collect(),
+            query_counts: Default::default(),
         }
+    }
+
+    pub fn query_count(&self, id: &SubstateId) -> usize {
+        self.query_counts.lock().unwrap().get(id).copied().unwrap_or(0)
     }
 }
 
@@ -680,6 +686,7 @@ impl WalletNetworkInterface for CannedSubstateNetworkInterface {
         _local_search_only: bool,
         _include_proof: bool,
     ) -> Result<SubstateQueryResult, Self::Error> {
+        *self.query_counts.lock().unwrap().entry(address.clone()).or_insert(0) += 1;
         let (version, value) = self.substates.get(address).ok_or(PanicError::NotFound)?;
         Ok(SubstateQueryResult {
             version: *version,

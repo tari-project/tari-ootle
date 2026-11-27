@@ -68,7 +68,7 @@ function UpSubstateRowData({ id, substate }: { id: SubstateId; substate: Substat
         </DataTableCell>
       </TableRow>
       <TableRow>
-        <DataTableCell style={{ paddingBottom: 0, paddingTop: 0 }} colSpan={4}>
+        <DataTableCell style={{ paddingBottom: 0, paddingTop: 0 }} colSpan={3}>
           <Collapse in={open} timeout="auto" unmountOnExit>
             <CodeBlockDialog title="Substate">{renderJson(substate.substate)}</CodeBlockDialog>
           </Collapse>
@@ -118,10 +118,12 @@ export default function Substates({
       <Table>
         <TableBody>
           {up.map(([id, substate], i) => {
-            return <UpSubstateRowData id={id} substate={substate} key={i} />;
+            const key = `up-${substateIdToString(id)}-${substate.version}-${i}`;
+            return <UpSubstateRowData id={id} substate={substate} key={key} />;
           })}
           {down.map((id, i) => {
-            return <DownSubstateRowData id={id} key={i} />;
+            const key = `down-${substateIdToString(id.substate_id)}-${id.version}-${i}`;
+            return <DownSubstateRowData id={id} key={key} />;
           })}
         </TableBody>
       </Table>

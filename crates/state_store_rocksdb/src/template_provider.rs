@@ -11,7 +11,34 @@ use tari_ootle_common_types::{
 use tari_ootle_storage::StorageError;
 use tari_template_lib_types::TemplateAddress;
 
-use crate::{RocksDbStateStore, column_families::substate::SubstateCf};
+use crate::{
+    RocksDbStateStore,
+    codecs::{DbDecoder, DefaultCodec},
+    column_families::substate::SubstateCf,
+};
+
+#[derive(minicbor::Decode)]
+enum VersionedSubstateLiveness {
+    #[n(0)]
+    V1(#[n(0)] SubstateLiveness),
+}
+
+#[derive(minicbor::Decode)]
+struct SubstateLiveness {
+    #[n(2)]
+    substate_value: Option<PresentValue>,
+    #[n(5)]
+    destroyed: Option<PresentValue>,
+}
+
+struct PresentValue;
+
+impl<'b, C> minicbor::Decode<'b, C> for PresentValue {
+    fn decode(d: &mut minicbor::Decoder<'b>, _ctx: &mut C) -> Result<Self, minicbor::decode::Error> {
+        d.skip()?;
+        Ok(Self)
+    }
+}
 
 impl<TAddr: Send + Sync + 'static> TemplateProvider for RocksDbStateStore<TAddr> {
     type Error = StorageError;
@@ -25,6 +52,9 @@ impl<TAddr: Send + Sync + 'static> TemplateProvider for RocksDbStateStore<TAddr>
         let Some(substate) = cf.get(&address, OPERATION).optional()? else {
             return Ok(None);
         };
+        if substate.is_destroyed() {
+            return Ok(None);
+        }
         let Some(value) = substate.into_substate_value() else {
             return Ok(None);
         };
@@ -41,8 +71,12 @@ impl<TAddr: Send + Sync + 'static> TemplateProvider for RocksDbStateStore<TAddr>
         let tx = self.read_view();
         let cf = tx.db().cf(SubstateCf)?;
         let address = template_address_to_substate_address(*id);
-        let exists = cf.exists(&address, OPERATION)?;
-        Ok(exists)
+        let Some(bytes) = cf.get_raw_pinned(&address, OPERATION)? else {
+            return Ok(false);
+        };
+        let VersionedSubstateLiveness::V1(liveness) =
+            DefaultCodec::<VersionedSubstateLiveness>::new().decode_exact(&bytes)?;
+        Ok(liveness.substate_value.is_some() && liveness.destroyed.is_none())
     }
 }
 

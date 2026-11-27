@@ -20,6 +20,7 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+import { isExactMatchNavRoute } from "@components/menuItemsHelpers";
 import ThemeSwitcher from "@components/ThemeSwitcher";
 import Box from "@mui/material/Box";
 import Fade from "@mui/material/Fade";
@@ -147,6 +148,7 @@ function MainListItems() {
         {mainItems.map(({ title, icon, activeIcon, link }) => (
           <NavLink
             to={link}
+            end={isExactMatchNavRoute(link)}
             key={title}
             style={{
               textDecoration: "none",

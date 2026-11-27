@@ -31,10 +31,20 @@ pub struct OnNextSyncViewHandler<TConsensusSpec: ConsensusSpec> {
     outbound_messaging: TConsensusSpec::OutboundMessaging,
     leader_strategy: TConsensusSpec::LeaderStrategy,
     signer_service: TConsensusSpec::SignerService,
-    /// The timeout vote this node first signed for the view it last named. Members other than the leader receive it
-    /// unchanged for as long as the view stays the same, so a member that already holds it can tell a re-send from
-    /// a vote signed again.
-    last_sent: Option<TimeoutVote>,
+    /// The timeout votes this node sent for the view it last named.
+    last_sent: Option<SentTimeoutVotes>,
+}
+
+/// The timeout votes sent for one view. Each is re-sent unchanged for as long as it still applies, so a member that
+/// already holds it can tell a re-send from a vote signed again.
+#[derive(Debug, Clone)]
+struct SentTimeoutVotes {
+    /// The vote first signed for the view, sent to every member other than the leader. Those members count it for
+    /// pacing only, which never reads its `high_pc_height` claim, so it stays the same after a higher certificate
+    /// arrives.
+    to_members: TimeoutVote,
+    /// The vote in the NEWVIEW to the leader, which checks its claim against the certificate the NEWVIEW carries.
+    to_leader: TimeoutVote,
 }
 
 impl<TConsensusSpec: ConsensusSpec> OnNextSyncViewHandler<TConsensusSpec> {
@@ -105,18 +115,12 @@ impl<TConsensusSpec: ConsensusSpec> OnNextSyncViewHandler<TConsensusSpec> {
         );
 
         let high_pc_height = high_pc.height();
-        // Members other than the leader count the vote for pacing only, which never reads its `high_pc_height`
-        // claim, so they get the vote first signed for the view even after a higher certificate arrives.
-        let timeout = match self.last_sent.take() {
-            Some(vote) if vote.epoch == epoch && vote.height == timeout_height => vote,
-            _ => self.sign_timeout(epoch, timeout_height, high_pc_height),
-        };
-        // The leader checks the claim against the certificate in the NEWVIEW, so its copy claims the one sent.
-        let leader_timeout = if timeout.high_pc_height == high_pc_height {
-            timeout.clone()
-        } else {
-            self.sign_timeout(epoch, timeout_height, high_pc_height)
-        };
+        let sent = self.timeout_votes(epoch, timeout_height, high_pc_height);
+        self.last_sent = Some(sent.clone());
+        let SentTimeoutVotes {
+            to_members: timeout,
+            to_leader: leader_timeout,
+        } = sent;
         let local_public_key = timeout.signature.public_key;
         let message = NewViewMessage {
             high_pc,
@@ -146,10 +150,9 @@ impl<TConsensusSpec: ConsensusSpec> OnNextSyncViewHandler<TConsensusSpec> {
             .await?;
         if !is_leader {
             self.outbound_messaging
-                .send_self(HotstuffMessage::TimeoutVote(timeout.clone()))
+                .send_self(HotstuffMessage::TimeoutVote(timeout))
                 .await?;
         }
-        self.last_sent = Some(timeout);
 
         self.store.with_write_tx(|tx| {
             LastSentNewView {
@@ -160,6 +163,30 @@ impl<TConsensusSpec: ConsensusSpec> OnNextSyncViewHandler<TConsensusSpec> {
         })?;
 
         Ok(timeout_height)
+    }
+
+    /// The votes to send for view `height`, reusing those already sent for it while they still apply.
+    fn timeout_votes(&self, epoch: Epoch, height: NodeHeight, high_pc_height: NodeHeight) -> SentTimeoutVotes {
+        let Some(sent) = self
+            .last_sent
+            .as_ref()
+            .filter(|sent| sent.to_members.epoch == epoch && sent.to_members.height == height)
+        else {
+            let vote = self.sign_timeout(epoch, height, high_pc_height);
+            return SentTimeoutVotes {
+                to_members: vote.clone(),
+                to_leader: vote,
+            };
+        };
+        let to_leader = if sent.to_leader.high_pc_height == high_pc_height {
+            sent.to_leader.clone()
+        } else {
+            self.sign_timeout(epoch, height, high_pc_height)
+        };
+        SentTimeoutVotes {
+            to_members: sent.to_members.clone(),
+            to_leader,
+        }
     }
 
     fn sign_timeout(&self, epoch: Epoch, height: NodeHeight, high_pc_height: NodeHeight) -> TimeoutVote {

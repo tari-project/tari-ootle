@@ -44,6 +44,9 @@ import { XTR_CURRENCY } from "@utils/currency";
 import { formatCurrency, parseAmountToBaseUnits } from "@utils/helpers";
 import { SyntheticEvent, useState } from "react";
 import { Form } from "react-router-dom";
+import { filterTariSwapPools, formatPoolRate, formatTariPerTokenRate, type PoolRateInfo } from "./poolRate";
+
+export type { PoolRateInfo };
 
 export interface SendMoneyFormState {
   address: string;
@@ -58,13 +61,6 @@ export interface SendMoneyFormState {
   swapPoolAddress: string;
   // Calculated from fee estimate + pool ratio, not user-entered
   swapInputAmount: string;
-}
-
-export interface PoolRateInfo {
-  resource_a: string;
-  balance_a: bigint;
-  resource_b: string;
-  balance_b: bigint;
 }
 
 interface FormStepProps {
@@ -98,26 +94,6 @@ export type FormError = {
   type: "general" | "address" | "amount" | "fee";
   message: string;
 };
-
-function formatPoolRate(poolRate: PoolRateInfo, tokenSymbol: string): string {
-  const a = poolRate.balance_a;
-  const b = poolRate.balance_b;
-  if (a === 0n || b === 0n) return "Pool has no liquidity";
-
-  // Determine which side is the token and which is TARI
-  if (poolRate.resource_a === TARI_TOKEN) {
-    // resource_b is the token: rate = balance_a / balance_b (TARI per token)
-    const rate = Number(a) / Number(b);
-    return `1 ${tokenSymbol} = ${rate.toFixed(6)} TARI`;
-  } else if (poolRate.resource_b === TARI_TOKEN) {
-    // resource_a is the token: rate = balance_b / balance_a (TARI per token)
-    const rate = Number(b) / Number(a);
-    return `1 ${tokenSymbol} = ${rate.toFixed(6)} TARI`;
-  }
-  // Neither side is TARI — show raw ratio
-  const rate = Number(a) / Number(b);
-  return `1:${rate.toFixed(6)}`;
-}
 
 export default function FormStep({
   resource_address,
@@ -197,10 +173,8 @@ export default function FormStep({
     decimals: divisibility,
   };
 
-  // Find pools that contain our resource
-  const relevantPools = knownPools.filter(
-    (p) => p.resource_a === resource_address || p.resource_b === resource_address,
-  );
+  // Find pools that pair our resource with TARI
+  const relevantPools = filterTariSwapPools(knownPools, resource_address);
 
   return (
     <Form onSubmit={onSubmit}>
@@ -430,10 +404,10 @@ export default function FormStep({
                     const isTokenA = pool.resource_a === resource_address;
                     const tokenBalance = isTokenA ? BigInt(pool.balance_a) : BigInt(pool.balance_b);
                     const tariBalance = isTokenA ? BigInt(pool.balance_b) : BigInt(pool.balance_a);
-                    const rate = tokenBalance > 0n ? Number(tariBalance) / Number(tokenBalance) : 0;
+                    const rate = formatTariPerTokenRate(tariBalance, tokenBalance, divisibility, 4);
                     return (
                       <MenuItem key={pool.pool_address} value={pool.pool_address}>
-                        Swap: {pool.pool_address.substring(0, 16)}... (1 {token_symbol} = {rate.toFixed(4)} TARI)
+                        Swap: {pool.pool_address.substring(0, 16)}... (1 {token_symbol} = {rate} TARI)
                       </MenuItem>
                     );
                   })}
@@ -476,7 +450,7 @@ export default function FormStep({
               <Alert severity={poolHasNoLiquidity ? "warning" : "info"} variant="outlined">
                 {poolHasNoLiquidity
                   ? "This pool has no liquidity. Please select a different pool."
-                  : `Pool exchange rate: ${formatPoolRate(poolRate, token_symbol)}`}
+                  : `Pool exchange rate: ${formatPoolRate(poolRate, token_symbol, divisibility)}`}
               </Alert>
             )}
 

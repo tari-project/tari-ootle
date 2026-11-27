@@ -20,7 +20,7 @@ use tari_ootle_common_types::{
     VersionedSubstateIdRef,
     displayable::Displayable,
     optional::{IsNotFoundError, Optional},
-    substate_type::SubstateType,
+    substate_type::{SubstateType, SubstateTypeMismatch, check_substate_type},
 };
 use tari_ootle_light_client::{LightClientError, VerifiedCommittee, down_proof_up_anchor, verify_down_proof};
 use tari_template_lib::types::{ResourceAddress, TemplateAddress, constants::TARI_TOKEN};
@@ -559,6 +559,7 @@ where
                 })?;
             (value, None)
         };
+        check_substate_type(substate_id, &value)?;
         Ok(ReadSubstate {
             substate: Substate::new(served.version(), value),
             proven_up,
@@ -726,6 +727,8 @@ pub enum SubstateApiError {
     ValueVisitorError(#[from] IndexedValueError),
     #[error("The indexer answered a substate fetch with {substate_id}, which the fetch did not request")]
     UnrequestedSubstate { substate_id: SubstateId },
+    #[error("The indexer served a substate of the wrong type: {0}")]
+    SubstateOfAnotherType(#[from] SubstateTypeMismatch),
     #[error("The indexer served substate {substate_id} as a value that does not decode: {details}")]
     UndecodableSubstate { substate_id: SubstateId, details: String },
     #[error("The indexer served substate {substate_id} without a proof. Retry, or use another indexer.")]

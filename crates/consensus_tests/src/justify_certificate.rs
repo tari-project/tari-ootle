@@ -1,11 +1,12 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-//! Tests for the rule that a proposal's justify accepts a lower block of the proposal's own shard group
+//! Tests for the rule that a proposal's justify accepts a lower block of the proposal's own epoch and shard group
 //! (`check_justify_precedes_block` in `crates/consensus/src/validations/common.rs`).
 //!
-//! The shard group a certificate names lies outside both its id and the vote message its signers sign, so a
-//! certificate relabelled to another shard group keeps its id and its signatures. The proposal is what binds it.
+//! Both the epoch and the shard group a certificate names lie outside its id, and a zero-block certificate carries no
+//! vote signatures (while a signed certificate from another epoch verifies against its own epoch when quorum members
+//! carry over), so the proposal is what binds them.
 
 use tari_consensus::{check_justify_precedes_block, hotstuff::ProposalValidationError};
 use tari_consensus_types::{BlockId, ProposalCertificate, ShardGroupAccumulatedData};
@@ -25,16 +26,25 @@ fn block_shard_group() -> ShardGroup {
     ShardGroup::new(0, 127)
 }
 
-fn justify(height: NodeHeight, shard_group: ShardGroup, decision: QuorumDecision) -> ProposalCertificate {
+fn justify_at_epoch(
+    epoch: Epoch,
+    height: NodeHeight,
+    shard_group: ShardGroup,
+    decision: QuorumDecision,
+) -> ProposalCertificate {
     ProposalCertificate::new(
         FixedHash::from([1u8; 32]),
         BlockId::from([2u8; 32]),
         height,
-        TEST_EPOCH,
+        epoch,
         shard_group,
         ProposalCertificate::genesis_signatures(),
         decision,
     )
+}
+
+fn justify(height: NodeHeight, shard_group: ShardGroup, decision: QuorumDecision) -> ProposalCertificate {
+    justify_at_epoch(TEST_EPOCH, height, shard_group, decision)
 }
 
 /// A block of `block_shard_group()` at `BLOCK_HEIGHT` justified by `justify`.
@@ -101,6 +111,49 @@ fn a_justify_at_or_above_the_block_is_rejected() {
     let err = check_justify_precedes_block(&block).unwrap_err();
     assert!(
         matches!(err, ProposalValidationError::CandidateBlockNotHigherThanJustify { .. }),
+        "{err}"
+    );
+}
+
+#[test]
+fn a_justify_for_another_epoch_is_rejected() {
+    for wrong_epoch in [Epoch(0), Epoch(2)] {
+        let relabelled = justify_at_epoch(wrong_epoch, JUSTIFY_HEIGHT, block_shard_group(), QuorumDecision::Accept);
+        let genuine = justify(JUSTIFY_HEIGHT, block_shard_group(), QuorumDecision::Accept);
+        assert_ne!(relabelled.epoch(), genuine.epoch());
+        assert_eq!(relabelled.calculate_id(), genuine.calculate_id());
+
+        let block = block_justified_by(relabelled.clone());
+        let err = check_justify_precedes_block(&block).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                ProposalValidationError::InvalidEpochInQc {
+                    block_id,
+                    qc_id,
+                    qc_epoch,
+                    current_epoch: TEST_EPOCH,
+                } if block_id == *block.id() && qc_id == relabelled.calculate_id() && qc_epoch == wrong_epoch
+            ),
+            "{err}"
+        );
+    }
+}
+
+#[test]
+fn a_zero_block_justify_relabelled_to_another_epoch_is_rejected() {
+    let genuine_genesis = ProposalCertificate::genesis(TEST_EPOCH, block_shard_group());
+    let cross_epoch_genesis = ProposalCertificate::genesis(Epoch(0), block_shard_group());
+    assert!(cross_epoch_genesis.justifies_zero_block());
+    assert_eq!(cross_epoch_genesis.calculate_id(), genuine_genesis.calculate_id());
+
+    let err = check_justify_precedes_block(&block_justified_by(cross_epoch_genesis)).unwrap_err();
+    assert!(
+        matches!(err, ProposalValidationError::InvalidEpochInQc {
+            qc_epoch: Epoch(0),
+            current_epoch: TEST_EPOCH,
+            ..
+        }),
         "{err}"
     );
 }

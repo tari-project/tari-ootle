@@ -76,6 +76,13 @@ const QUEUE_CAPACITY: usize = 2048;
 /// fraction of that limit for executor lookups to keep finding permits free.
 const MAX_WORKERS: usize = 4;
 
+/// Distinct called components [`TemplatePrewarmer::prewarm_transaction`] resolves per transaction.
+///
+/// Each resolution decodes the component's full state on the mempool task, before any fee is
+/// charged, so this bounds that work per transaction. The templates of components past the bound
+/// compile inline during execution.
+const MAX_CALLED_COMPONENTS: usize = 32;
+
 /// Everyone waiting on each template that is queued or in flight.
 type Waiters = HashMap<TemplateAddress, Vec<oneshot::Sender<()>>>;
 
@@ -109,11 +116,13 @@ impl TemplatePrewarmer {
         // needs and on nothing else.
         //
         // A transaction may call into one component from many instructions. Each component is looked
-        // up once, however often it is called.
+        // up once, however often it is called, and the first `MAX_CALLED_COMPONENTS` distinct
+        // components are resolved.
         let mut called_seen = HashSet::new();
         let called: Vec<_> = instructions()
             .filter_map(called_component)
             .filter(|component| called_seen.insert(*component))
+            .take(MAX_CALLED_COMPONENTS)
             .collect();
         let instantiated = self.components.templates_of(&called);
 
@@ -768,6 +777,24 @@ mod tests {
         assert!(!wait.is_empty());
         assert_eq!(*asked.lock().unwrap(), vec![component(7), component(8)]);
         assert_eq!(queued_in(&rx), vec![template(2)]);
+    }
+
+    #[test]
+    fn only_the_first_distinct_called_components_up_to_the_bound_are_looked_up() {
+        let components = FakeComponents::default();
+        let asked = components.asked();
+        let (prewarmer, _rx) = undrained_with(FakeProvider::default(), components);
+        let distinct = u8::try_from(MAX_CALLED_COMPONENTS + 8).unwrap();
+        let tx = transaction(|b| {
+            (0..distinct)
+                .fold(b, |b, n| b.call_method(component(n), "withdraw", args![]))
+                .call_method(component(0), "deposit", args![])
+        });
+
+        let _wait = prewarmer.prewarm_transaction(&tx);
+
+        let expected: Vec<_> = (0..distinct).take(MAX_CALLED_COMPONENTS).map(component).collect();
+        assert_eq!(*asked.lock().unwrap(), expected);
     }
 
     #[test]

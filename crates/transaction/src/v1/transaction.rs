@@ -16,6 +16,7 @@ use tari_engine_types::{
 use tari_ootle_common_types::{Epoch, InputDeclaration, InputDeclarationRef};
 use tari_template_lib_types::{
     ComponentAddress,
+    FunctionName,
     Hash32,
     OwnerRule,
     constants::TARI_TOKEN,
@@ -460,8 +461,8 @@ fn calc_instruction_weight(instruction: &Instruction) -> u64 {
             let access_rule_nodes = access_rules.as_ref().map(|a| a.num_nodes() as u64).unwrap_or(0);
             (owner_rule_nodes + access_rule_nodes + workspace_id.as_ref().map(|_| 1).unwrap_or(0)).max(INVOCATION_FLOOR)
         },
-        Instruction::CallFunction { args, .. } => calc_args_weight(args).max(INVOCATION_FLOOR),
-        Instruction::CallMethod { args, .. } => calc_args_weight(args).max(INVOCATION_FLOOR),
+        Instruction::CallFunction { function, args, .. } => calc_args_weight(function, args).max(INVOCATION_FLOOR),
+        Instruction::CallMethod { method, args, .. } => calc_args_weight(method, args).max(INVOCATION_FLOOR),
         Instruction::PutLastInstructionOutputOnWorkspace { .. } => 0, // Call already costs
         Instruction::ClaimBurn { .. } => CLAIM_FIXED_COST,
         Instruction::ClaimValidatorFees { .. } => 1,
@@ -477,9 +478,11 @@ fn calc_instruction_weight(instruction: &Instruction) -> u64 {
         Instruction::AllocateAddress { .. } => 1,
         Instruction::StealthTransfer { statement, .. } => calc_stealth_statement_weight(statement),
         Instruction::PayFeeFromBucket { .. } => 1,
-        Instruction::UpdateComponentTemplate { migrate, .. } => {
-            (1 + migrate.as_ref().map(|m| calc_args_weight(&m.args)).unwrap_or(0)).max(INVOCATION_FLOOR)
-        },
+        Instruction::UpdateComponentTemplate { migrate, .. } => (1 + migrate
+            .as_ref()
+            .map(|m| calc_args_weight(&m.name, &m.args))
+            .unwrap_or(0))
+        .max(INVOCATION_FLOOR),
         Instruction::SetComponentAccessRules { access_rules, .. } => 1 + access_rules.num_nodes() as u64,
         Instruction::SetComponentOwnerRule { owner_rule, .. } => match owner_rule {
             OwnerRule::ByAccessRule(rule) => 1 + rule.num_nodes() as u64,
@@ -541,7 +544,9 @@ pub const INVOCATION_FLOOR: u64 = 30;
 /// invocation count. `no_invocation_encodes_smaller_than_the_recorded_minimum` keeps it honest.
 pub const MIN_INVOCATION_ENCODED_BYTES: usize = 10;
 
-fn calc_args_weight(args: &[InstructionArg]) -> u64 {
+/// Weight of a call's function name and args. The name is up to 256 bytes the caller chooses, so its bytes count with
+/// the literal bytes, at the literal-argument rate.
+fn calc_args_weight(name: &FunctionName, args: &[InstructionArg]) -> u64 {
     // Workspace and blob refs are cheap — just an index. Blob payloads are charged at the
     // transaction level by `calc_blobs_weight`, so we don't double-count them here.
     const NON_LITERAL_WEIGHT: u64 = 1;
@@ -550,7 +555,7 @@ fn calc_args_weight(args: &[InstructionArg]) -> u64 {
     // Dividing per-argument would let a large literal be split into many small ones so each share
     // rounds down, evading the weight (and hence the fee). Each literal still costs at least
     // `NON_LITERAL_WEIGHT`, so a flood of tiny args can never be cheaper than the same bytes in one.
-    let mut total_literal_bytes = 0u64;
+    let mut total_literal_bytes = name.len() as u64;
     let mut num_literals = 0u64;
     let mut num_non_literals = 0u64;
     for arg in args {
@@ -563,7 +568,9 @@ fn calc_args_weight(args: &[InstructionArg]) -> u64 {
         }
     }
 
-    let literal_weight = (total_literal_bytes / LITERAL_BYTE_DIVISOR).max(num_literals * NON_LITERAL_WEIGHT);
+    // The per-literal minimum must not absorb the name's bytes, so the name weighs on top of it.
+    let literal_weight = (total_literal_bytes / LITERAL_BYTE_DIVISOR)
+        .max(num_literals * NON_LITERAL_WEIGHT + name.len() as u64 / LITERAL_BYTE_DIVISOR);
     literal_weight + num_non_literals * NON_LITERAL_WEIGHT
 }
 
@@ -1102,6 +1109,62 @@ mod weight_tests {
         assert_eq!(calc_instruction_weight(&no_arg_call()), INVOCATION_FLOOR);
         assert_eq!(calc_instruction_weight(&bare_create_account()), INVOCATION_FLOOR);
         assert_eq!(calc_instruction_weight(&bare_template_update()), INVOCATION_FLOOR);
+    }
+
+    #[test]
+    fn calls_weigh_the_bytes_of_long_function_names() {
+        let long_name = FunctionName::try_from("f".repeat(256)).expect("a 256-byte name fits");
+        let expected = 256 / LITERAL_BYTE_DIVISOR;
+        assert!(expected > INVOCATION_FLOOR);
+
+        let call_method = Instruction::CallMethod {
+            call: crate::ComponentReference::Workspace(0),
+            method: long_name.clone(),
+            args: vec![],
+        };
+        assert_eq!(calc_instruction_weight(&call_method), expected);
+
+        let call_function = Instruction::CallFunction {
+            address: TemplateAddress::default(),
+            function: long_name.clone(),
+            args: vec![],
+        };
+        assert_eq!(calc_instruction_weight(&call_function), expected);
+
+        let update = Instruction::UpdateComponentTemplate {
+            component: crate::ComponentReference::Workspace(0),
+            migrate: Some(MigrateFunction {
+                name: long_name,
+                args: vec![],
+            }),
+            new_template: TemplateAddress::default(),
+        };
+        assert_eq!(calc_instruction_weight(&update), 1 + expected);
+    }
+
+    #[test]
+    fn a_function_name_counts_with_the_literal_bytes() {
+        // Args already above the floor: the name's bytes add to them, divided once with the literal bytes.
+        let literal = InstructionArg::raw_literal_bytes(vec![0u8; 301]);
+        let call = |name: &str| Instruction::CallMethod {
+            call: crate::ComponentReference::Workspace(0),
+            method: FunctionName::try_from(name).expect("a short name fits"),
+            args: vec![literal.clone()],
+        };
+        assert_eq!(calc_instruction_weight(&call("m")), 302 / LITERAL_BYTE_DIVISOR);
+        assert_eq!(calc_instruction_weight(&call("transfer")), 309 / LITERAL_BYTE_DIVISOR);
+
+        // Many tiny literals: the per-literal minimum wins, and the name still weighs on top of it.
+        let tiny_literals = |name: &str| Instruction::CallMethod {
+            call: crate::ComponentReference::Workspace(0),
+            method: FunctionName::try_from(name).expect("the name fits"),
+            args: vec![InstructionArg::raw_literal_bytes(vec![0u8]); 32],
+        };
+        assert_eq!(calc_instruction_weight(&tiny_literals("m")), 32);
+        assert_eq!(
+            calc_instruction_weight(&tiny_literals(&"f".repeat(64))),
+            32 + 64 / LITERAL_BYTE_DIVISOR
+        );
     }
 
     /// An access rule of exactly `num_nodes` nodes: one `AnyOf` holding `num_nodes - 1` empty `AnyOf`s.

@@ -194,3 +194,27 @@ fn finalize_releases_outputs_the_diff_does_not_touch() {
         "a change output the diff does not up was never created"
     );
 }
+
+#[test]
+fn confidential_outputs_get_by_account_and_status_missing_returns_not_found() {
+    let store = SqliteWalletStore::try_open(":memory:").unwrap();
+    store.run_migrations().unwrap();
+
+    let mut tx = store.create_read_tx().unwrap();
+    let err = tx
+        .confidential_outputs_get_by_account_and_status(&account_address(), OutputStatus::Unspent)
+        .unwrap_err();
+    assert!(err.is_not_found_error(), "expected NotFound error, got {err:?}");
+}
+
+#[test]
+fn non_fungible_token_get_ids_by_vault_id_missing_returns_not_found() {
+    let store = SqliteWalletStore::try_open(":memory:").unwrap();
+    store.run_migrations().unwrap();
+
+    let mut tx = store.create_read_tx().unwrap();
+    let err = tx
+        .non_fungible_token_get_ids_by_vault_id(&vault_address(), 10, 0)
+        .unwrap_err();
+    assert!(err.is_not_found_error(), "expected NotFound error, got {err:?}");
+}

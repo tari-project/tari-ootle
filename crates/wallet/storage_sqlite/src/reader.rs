@@ -1098,13 +1098,20 @@ impl WalletStoreReader for ReadTransaction<'_> {
         account_addr: &ComponentAddress,
         status: OutputStatus,
     ) -> Result<Vec<ConfidentialOutputModel>, WalletStorageError> {
+        const OPERATION: &str = "outputs_get_by_account_and_status";
         use crate::schema::{accounts, confidential_outputs, vaults};
 
         let account_id = accounts::table
             .filter(accounts::address.eq(account_addr.to_string()))
             .select(accounts::id)
             .first::<i32>(self.connection())
-            .map_err(|e| WalletStorageError::general("outputs_get_by_account_and_status", e))?;
+            .optional()
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?
+            .ok_or_else(|| WalletStorageError::NotFound {
+                operation: OPERATION,
+                entity: "account".to_string(),
+                key: account_addr.to_string(),
+            })?;
 
         let rows = confidential_outputs::table
             .filter(confidential_outputs::account_id.eq(account_id))
@@ -1682,15 +1689,21 @@ impl WalletStoreReader for ReadTransaction<'_> {
         const OPERATION: &str = "non_fungible_token_get_ids_by_vault_id";
         use crate::schema::{non_fungible_tokens, vaults};
 
-        let vault_id = vaults::table
+        let vault_db_id = vaults::table
             .select(vaults::id)
             .filter(vaults::address.eq(vault_id.to_string()))
             .first::<i32>(self.connection())
-            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+            .optional()
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?
+            .ok_or_else(|| WalletStorageError::NotFound {
+                operation: OPERATION,
+                entity: "vault".to_string(),
+                key: vault_id.to_string(),
+            })?;
 
         let non_fungibles = non_fungible_tokens::table
             .select(non_fungible_tokens::nft_id)
-            .filter(non_fungible_tokens::vault_id.eq(vault_id))
+            .filter(non_fungible_tokens::vault_id.eq(vault_db_id))
             .limit(limit as i64)
             .offset(offset as i64)
             .get_results::<String>(self.connection())
@@ -2235,7 +2248,13 @@ impl WalletStoreReader for ReadTransaction<'_> {
         let row = api_keys::table
             .filter(api_keys::id.eq(id))
             .first::<models::ApiKey>(self.connection())
-            .map_err(|e| WalletStorageError::general(OPERATION, e))?;
+            .optional()
+            .map_err(|e| WalletStorageError::general(OPERATION, e))?
+            .ok_or_else(|| WalletStorageError::NotFound {
+                operation: OPERATION,
+                entity: "api_key".to_string(),
+                key: id.to_string(),
+            })?;
 
         Ok(map_api_key_row(row))
     }

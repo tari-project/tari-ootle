@@ -696,8 +696,10 @@ class SmokeTest:
             ("rejected", "Rejected"),
             ("errored", "Errored"),
         ]:
-            m = re.search(rf"{re.escape(label)}:\s*(\d+)", output)
-            stats[key] = int(m.group(1)) if m else None
+            # The submitter prints interim "Results so far" summaries with the same labels while it waits on
+            # results, so only the last occurrence is the final count.
+            matches = re.findall(rf"{re.escape(label)}:\s*(\d+)", output)
+            stats[key] = int(matches[-1]) if matches else None
         if stats["committed"] is None:
             raise StageFailed("could not parse submitter summary:\n" + "\n".join(output.splitlines()[-15:]))
         expected = n - skip

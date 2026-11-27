@@ -726,8 +726,8 @@ impl<TStore: StateReader + Clone + 'static, TTemplateProvider: TemplateProvider<
 
         // The acting component never chose the hook code, so the hook's frame is confined to its own component
         // state: it cannot act on any vault or resource it was handed, nor call out to a frame that could. It may
-        // read the vaults the acting component owns, which `check_component_scope` resolves through the acting
-        // component's loaded state.
+        // read the vaults the acting component owns, which `check_component_scope` resolves through the scope of the
+        // acting component's frame, directly below the hook's.
         let ret = self.invoke_component_method(
             auth_hook.component_address,
             &auth_hook.method,
@@ -6118,7 +6118,31 @@ mod tests {
         f.runtime.pop_call_frame(&IndexedWellKnownTypes::new()).unwrap();
     }
 
-    /// Pushes a resource auth hook frame on `hook_component`, triggered by `acting_component`.
+    /// Pushes a frame on `component`, scoped from its current state, as the method whose vault action triggers a
+    /// resource auth hook runs in. Returns the frame's component lock.
+    fn push_acting_frame(f: &VaultScopeFixture, component: ComponentAddress, lock_flag: LockFlag) -> LockedSubstate {
+        let component_scope = f.runtime.tracker.write_with(|state| {
+            IndexedWellKnownTypes::from_value(state.load_and_cache_component(component).unwrap().state()).unwrap()
+        });
+        let lock = f.runtime.lock_component(component, lock_flag).unwrap();
+        f.runtime
+            .push_call_frame(
+                PushCallFrame::ForComponent {
+                    template_address: f.template_address,
+                    module_name: "Acting".to_string(),
+                    component_scope,
+                    component_lock: lock.clone(),
+                    arg_scope: Box::new(IndexedWellKnownTypes::new()),
+                    entity_id: f.owner_entity,
+                    acting_component: None,
+                },
+                None,
+            )
+            .unwrap();
+        lock
+    }
+
+    /// Pushes a resource auth hook frame on `hook_component`, marked as triggered by `acting_component`.
     fn push_hook_frame(f: &VaultScopeFixture, hook_component: ComponentAddress, acting_component: ComponentAddress) {
         let hook_lock = f.runtime.lock_component(hook_component, LockFlag::Read).unwrap();
         f.runtime
@@ -6140,6 +6164,7 @@ mod tests {
     #[test]
     fn hook_frame_reads_vaults_of_the_acting_component() {
         let f = setup_vault_scope_fixture();
+        push_acting_frame(&f, f.owner_component, LockFlag::Read);
         push_hook_frame(&f, f.other_component, f.owner_component);
 
         for action in VAULT_READ_ACTIONS {
@@ -6159,6 +6184,57 @@ mod tests {
             .unwrap();
         assert_eq!(balance, Amount::new(42));
         f.runtime.pop_call_frame(&IndexedWellKnownTypes::new()).unwrap();
+        f.runtime.pop_call_frame(&IndexedWellKnownTypes::new()).unwrap();
+    }
+
+    /// A hook vault read resolves against the acting frame's scope, indexed from the acting component's state when
+    /// that frame was pushed, and never reads the acting component's state again: the read is the same cost however
+    /// large that state is. Clearing the state behind the frames' backs makes any per-read state access fail the
+    /// read.
+    #[test]
+    fn hook_frame_reads_acting_vaults_without_reading_the_acting_state() {
+        let f = setup_vault_scope_fixture();
+        let owner_write_lock = push_acting_frame(&f, f.owner_component, LockFlag::Write);
+        push_hook_frame(&f, f.other_component, f.owner_component);
+
+        f.runtime.tracker.write_with(|state| {
+            state
+                .store_mut()
+                .mutate_locked_substate_with(owner_write_lock.lock_id(), |_, substate| {
+                    substate.component_mut().unwrap().body.state = tari_bor::Value::Null;
+                    Ok(Some(()))
+                })
+                .unwrap();
+        });
+
+        for action in VAULT_READ_ACTIONS {
+            f.runtime
+                .vault_invoke(VaultRef::Ref(f.vault_id), action, EngineArgs::default())
+                .unwrap_or_else(|err| panic!("hook read {action:?} of the acting component's vault failed: {err:?}"));
+        }
+        f.runtime.pop_call_frame(&IndexedWellKnownTypes::new()).unwrap();
+        f.runtime.pop_call_frame(&IndexedWellKnownTypes::new()).unwrap();
+    }
+
+    /// Asserts that every vault read action on `vault_id` from the current hook frame, which runs on
+    /// `f.other_component`, is rejected as out of the hook component's scope.
+    fn assert_hook_reads_rejected(f: &VaultScopeFixture, vault_id: tari_template_lib::types::VaultId) {
+        let expected_id = SubstateId::Vault(vault_id);
+        let expected_owner = SubstateId::Component(f.other_component);
+        for action in VAULT_READ_ACTIONS {
+            let err = f
+                .runtime
+                .vault_invoke(VaultRef::Ref(vault_id), action, EngineArgs::default())
+                .unwrap_err();
+            assert!(
+                matches!(
+                    err,
+                    RuntimeError::SubstateNotOwned { ref id, ref requested_owner }
+                        if *id == expected_id && **requested_owner == expected_owner
+                ),
+                "expected SubstateNotOwned for {action:?}, got {err:?}"
+            );
+        }
     }
 
     #[test]
@@ -6170,30 +6246,111 @@ mod tests {
             "Third",
             EntityId::new([4u8; EntityId::LENGTH]),
         );
+        push_acting_frame(&f, third_component, LockFlag::Read);
         push_hook_frame(&f, f.other_component, third_component);
 
-        let expected_id = SubstateId::Vault(f.vault_id);
-        let expected_owner = SubstateId::Component(f.other_component);
-        for action in VAULT_READ_ACTIONS {
-            let err = f
-                .runtime
-                .vault_invoke(VaultRef::Ref(f.vault_id), action, EngineArgs::default())
-                .unwrap_err();
-            assert!(
-                matches!(
-                    err,
-                    RuntimeError::SubstateNotOwned { ref id, ref requested_owner }
-                        if *id == expected_id && **requested_owner == expected_owner
-                ),
-                "expected SubstateNotOwned for {action:?}, got {err:?}"
-            );
-        }
+        assert_hook_reads_rejected(&f, f.vault_id);
         f.runtime.pop_call_frame(&IndexedWellKnownTypes::new()).unwrap();
+        f.runtime.pop_call_frame(&IndexedWellKnownTypes::new()).unwrap();
+    }
+
+    /// A hook frame reads vaults through the frame below it only when that frame holds the lock on the component the
+    /// hook frame names as acting.
+    #[test]
+    fn hook_frame_rejects_reads_through_a_frame_on_another_component() {
+        let f = setup_vault_scope_fixture();
+        let third_component = create_test_component(
+            &f.runtime,
+            f.template_address,
+            "Third",
+            EntityId::new([4u8; EntityId::LENGTH]),
+        );
+        push_acting_frame(&f, f.owner_component, LockFlag::Read);
+        push_hook_frame(&f, f.other_component, third_component);
+
+        assert_hook_reads_rejected(&f, f.vault_id);
+        f.runtime.pop_call_frame(&IndexedWellKnownTypes::new()).unwrap();
+        f.runtime.pop_call_frame(&IndexedWellKnownTypes::new()).unwrap();
+    }
+
+    /// A vault the acting frame created and has yet to attach to its component's state is the frame's own, and the
+    /// hook may read only the vaults of the acting component.
+    #[test]
+    fn hook_frame_rejects_reads_of_vaults_the_acting_frame_has_not_attached() {
+        use tari_engine_types::vault::Vault;
+
+        let f = setup_vault_scope_fixture();
+        let unattached_vault = tari_template_lib::types::VaultId::new([15u8; 32].into());
+        push_acting_frame(&f, f.owner_component, LockFlag::Read);
+        f.runtime.tracker.write_with(|state| {
+            state
+                .new_substate(
+                    unattached_vault,
+                    Vault::new(ResourceContainer::public_fungible(f.resource_address, Amount::zero())),
+                )
+                .unwrap();
+        });
+        push_hook_frame(&f, f.other_component, f.owner_component);
+
+        assert_hook_reads_rejected(&f, unattached_vault);
+        // The frames are left on the stack: the acting frame cannot be popped while it holds an orphan vault.
+    }
+
+    /// A component the acting frame creates is created on that frame's authority, and the vaults its state holds are
+    /// attached to the acting frame's component-owned scope, so the hook may read them as it reads the acting
+    /// component's own.
+    #[test]
+    fn hook_frame_reads_vaults_of_components_the_acting_frame_created() {
+        use tari_engine_types::vault::Vault;
+
+        let f = setup_vault_scope_fixture();
+        let created_vault = tari_template_lib::types::VaultId::new([15u8; 32].into());
+        push_acting_frame(&f, f.owner_component, LockFlag::Read);
+        f.runtime.tracker.write_with(|state| {
+            state
+                .new_substate(
+                    created_vault,
+                    Vault::new(ResourceContainer::public_fungible(f.resource_address, Amount::new(7))),
+                )
+                .unwrap();
+        });
+        let created_component = f
+            .runtime
+            .tracker
+            .new_component(
+                tari_bor::to_value(&created_vault).unwrap(),
+                SubstateOwnerRule::None,
+                ComponentAccessRules::new(),
+                None,
+                UpdateRule::Locked,
+                RulesUpdater::Locked,
+            )
+            .unwrap();
+        push_hook_frame(&f, f.other_component, f.owner_component);
+
+        let balance: Amount = f
+            .runtime
+            .vault_invoke(
+                VaultRef::Ref(created_vault),
+                VaultAction::GetBalance,
+                EngineArgs::default(),
+            )
+            .unwrap()
+            .decode()
+            .unwrap();
+        assert_eq!(balance, Amount::new(7));
+        f.runtime.pop_call_frame(&IndexedWellKnownTypes::new()).unwrap();
+        f.runtime
+            .pop_call_frame(
+                &IndexedWellKnownTypes::from_value(&tari_bor::to_value(&created_component).unwrap()).unwrap(),
+            )
+            .unwrap();
     }
 
     #[test]
     fn hook_frame_rejects_writes_to_vaults_of_the_acting_component() {
         let f = setup_vault_scope_fixture();
+        push_acting_frame(&f, f.owner_component, LockFlag::Read);
         push_hook_frame(&f, f.other_component, f.owner_component);
 
         let expected_id = SubstateId::Vault(f.vault_id);
@@ -6216,6 +6373,7 @@ mod tests {
                 "expected SubstateNotOwned for {action:?}, got {err:?}"
             );
         }
+        f.runtime.pop_call_frame(&IndexedWellKnownTypes::new()).unwrap();
         f.runtime.pop_call_frame(&IndexedWellKnownTypes::new()).unwrap();
     }
 

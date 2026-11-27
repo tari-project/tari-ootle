@@ -501,7 +501,8 @@ pub const fn engine_response_points(bytes: u64, items: u64) -> u64 {
 ///
 /// A resource auth hook acting on the caller's state is charged the same for counting and copying
 /// that state into the hook's arguments. The hook's call then pays for decoding and indexing them
-/// as a cross-template call's arguments, at [`engine_arg_points`].
+/// as a cross-template call's arguments, at [`engine_arg_points`]. The hook frame's reads of the
+/// caller's vaults resolve through the caller frame's scope, which that frame's load paid for.
 ///
 /// Measured with `cargo run -p tari_engine --release --example component_load_points_calibrate`,
 /// which times method calls on components whose states fill `max_internal_call_size` in each item

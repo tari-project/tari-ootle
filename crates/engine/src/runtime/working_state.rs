@@ -2365,6 +2365,13 @@ impl<TStore: StateReader> WorkingState<TStore> {
         &self.store
     }
 
+    /// Writes the store directly, around the validation [`Self::modify_component_with`] applies, so a test can put
+    /// the state into a shape execution never produces.
+    #[cfg(test)]
+    pub(super) fn store_mut(&mut self) -> &mut WorkingStateStore<TStore> {
+        &mut self.store
+    }
+
     pub fn check_component_scope<T: Into<ActionIdent>>(
         &self,
         address: &SubstateId,
@@ -2373,7 +2380,8 @@ impl<TStore: StateReader> WorkingState<TStore> {
         // A substate in scope was either created by this frame or is reachable from the component the frame executes
         // on. Both are private to this frame: a component's substates are dropped from the scope when the frame is
         // popped, so they stay reachable only through that component.
-        if self.current_call_scope()?.is_substate_in_scope(address) {
+        let scope = self.current_call_scope()?;
+        if scope.is_substate_in_scope(address) {
             return Ok(());
         }
 
@@ -2382,18 +2390,16 @@ impl<TStore: StateReader> WorkingState<TStore> {
             &action,
             ActionIdent::Native(NativeAction::Vault(vault_action)) if !vault_action.requires_write_access()
         );
+        if is_vault_read && self.is_acting_component_vault(address) {
+            return Ok(());
+        }
 
-        let component_lock = self
-            .current_call_scope()?
+        let component_lock = scope
             .get_current_component_lock()
             .ok_or(RuntimeError::NotInComponentContext { action })?;
 
         let component = self.get_component(component_lock)?;
         if component.contains_substate(address)? {
-            return Ok(());
-        }
-
-        if is_vault_read && self.is_owned_by_acting_component(address)? {
             return Ok(());
         }
 
@@ -2409,15 +2415,31 @@ impl<TStore: StateReader> WorkingState<TStore> {
         })
     }
 
-    /// Whether the current frame is a resource auth hook frame and `address` is owned by the component whose
-    /// action triggered the hook. The acting component's frame is suspended for the hook call and the hook frame
-    /// cannot write it, so its loaded state is the state the action ran against.
-    fn is_owned_by_acting_component(&self, address: &SubstateId) -> Result<bool, RuntimeError> {
-        let Some(acting_component) = self.current_call_scope()?.acting_component().copied() else {
-            return Ok(false);
+    /// Whether the current frame is a resource auth hook frame and `address` is a vault the acting frame's component
+    /// state, or the state of a component that frame created, holds. The hook frame is pushed directly on the acting
+    /// component's frame, which holds that component's lock, so the frame below is the acting frame exactly when its
+    /// lock is on the acting component. That frame's component-owned scope was indexed when the frame was pushed,
+    /// which its load paid for, and is extended as states written in the frame attach vaults, so the check is a
+    /// lookup. See [`CallScope::is_component_owned`].
+    fn is_acting_component_vault(&self, address: &SubstateId) -> bool {
+        if !address.is_vault() {
+            return false;
+        }
+        let Some((hook_frame, frames_below)) = self.call_frames.split_last() else {
+            return false;
         };
-        let component = self.store.get_loaded_component(acting_component)?;
-        Ok(component.contains_substate(address)?)
+        let Some(acting_component) = hook_frame.scope().acting_component() else {
+            return false;
+        };
+        let Some(acting_frame) = frames_below.last() else {
+            return false;
+        };
+        let holds_acting_lock = acting_frame
+            .scope()
+            .get_current_component_lock()
+            .and_then(|lock| lock.substate_id().as_component_address())
+            .is_some_and(|locked| locked == *acting_component);
+        holds_acting_lock && acting_frame.scope().is_component_owned(address)
     }
 
     /// Enforces the stealth-transfer limits, runs the structural checks of [`CheckedStealthTransfer`] (commitment

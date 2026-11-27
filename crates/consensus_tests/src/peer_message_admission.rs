@@ -524,8 +524,11 @@ async fn catch_up_blocks_citing_unknown_transactions_do_not_stay_parked() {
     *request.lock().unwrap() = None;
     let victim_leaf = test.get_validator(&victim).get_leaf_block().height();
     withhold_from.store((victim_leaf + NodeHeight(2)).as_u64(), Ordering::SeqCst);
-    // The committee may stop committing while the victim is behind: with its pages held it cannot propose, so its
-    // slot in the rotation times out every round. Wait for the request itself rather than for a commit.
+    // The committee may stop committing while the victim is behind. The victim never voted on the blocks it was not
+    // sent, but it joins each timeout view the others reach, so its NEWVIEW can complete the leader's timeout
+    // certificate before the one carrying the last vote for the block below its failed slot. That block is then
+    // abandoned, which in a committee of four leaves no three consecutive blocks to commit. Wait for the request
+    // itself rather than for a commit.
     let mut outstanding = None;
     for _ in 0..300 {
         outstanding = request.lock().unwrap().clone();

@@ -18,6 +18,7 @@ use tari_template_lib_types::{
     ComponentAddress,
     Hash32,
     OwnerRule,
+    access_rules::ComponentAccessRules,
     constants::TARI_TOKEN,
     crypto::RistrettoPublicKeyBytes,
     stealth::StealthTransferStatement,
@@ -457,8 +458,12 @@ fn calc_instruction_weight(instruction: &Instruction) -> u64 {
                 Some(OwnerRule::ByAccessRule(rule)) => rule.num_nodes() as u64,
                 _ => 0,
             };
-            let access_rule_nodes = access_rules.as_ref().map(|a| a.num_nodes() as u64).unwrap_or(0);
-            (owner_rule_nodes + access_rule_nodes + workspace_id.as_ref().map(|_| 1).unwrap_or(0)).max(INVOCATION_FLOOR)
+            let access_rules_weight = access_rules
+                .as_ref()
+                .map(calc_component_access_rules_weight)
+                .unwrap_or(0);
+            (owner_rule_nodes + access_rules_weight + workspace_id.as_ref().map(|_| 1).unwrap_or(0))
+                .max(INVOCATION_FLOOR)
         },
         Instruction::CallFunction { args, .. } => calc_args_weight(args).max(INVOCATION_FLOOR),
         Instruction::CallMethod { args, .. } => calc_args_weight(args).max(INVOCATION_FLOOR),
@@ -480,12 +485,25 @@ fn calc_instruction_weight(instruction: &Instruction) -> u64 {
         Instruction::UpdateComponentTemplate { migrate, .. } => {
             (1 + migrate.as_ref().map(|m| calc_args_weight(&m.args)).unwrap_or(0)).max(INVOCATION_FLOOR)
         },
-        Instruction::SetComponentAccessRules { access_rules, .. } => 1 + access_rules.num_nodes() as u64,
+        Instruction::SetComponentAccessRules { access_rules, .. } => {
+            1 + calc_component_access_rules_weight(access_rules)
+        },
         Instruction::SetComponentOwnerRule { owner_rule, .. } => match owner_rule {
             OwnerRule::ByAccessRule(rule) => 1 + rule.num_nodes() as u64,
             _ => 1,
         },
     }
+}
+
+/// Weight of component access rules: one per rule node, plus the bytes of the method names the rules are keyed by, at
+/// the literal-argument rate. Method names are unbounded strings, so their bytes are weighed like literal argument
+/// bytes.
+fn calc_component_access_rules_weight(access_rules: &ComponentAccessRules) -> u64 {
+    let method_name_bytes: u64 = access_rules
+        .method_access_rules_iter()
+        .map(|(name, _)| name.len() as u64)
+        .sum();
+    access_rules.num_nodes() as u64 + method_name_bytes / LITERAL_BYTE_DIVISOR
 }
 
 fn calc_stealth_statement_weight(statement: &StealthTransferStatement) -> u64 {
@@ -1163,6 +1181,34 @@ mod weight_tests {
             owner_rule: OwnerRule::None,
         };
         assert_eq!(calc_instruction_weight(&set_owner_none), 1);
+    }
+
+    #[test]
+    fn component_access_rules_weight_counts_method_name_bytes() {
+        // One method rule is a single node, however long the method name it is keyed by.
+        let access_rules = ComponentAccessRules::new().add_method_rule("m".repeat(30_000), AccessRule::AllowAll);
+        assert_eq!(access_rules.num_nodes(), 1);
+        let expected = 1 + 30_000 / LITERAL_BYTE_DIVISOR;
+
+        let set_access_rules = Instruction::SetComponentAccessRules {
+            component: ComponentAddress::new(ObjectKey::default()).into(),
+            access_rules: access_rules.clone(),
+        };
+        assert_eq!(calc_instruction_weight(&set_access_rules), 1 + expected);
+
+        let create_account = Instruction::CreateAccount {
+            owner_public_key: RistrettoPublicKeyBytes::zero(),
+            owner_rule: None,
+            access_rules: Some(access_rules),
+            bucket_workspace_id: None,
+        };
+        assert_eq!(calc_instruction_weight(&create_account), expected);
+
+        // Splitting the bytes over several method names does not lower the weight.
+        let split = ComponentAccessRules::new()
+            .add_method_rule("m".repeat(15_000), AccessRule::AllowAll)
+            .add_method_rule("n".repeat(15_000), AccessRule::AllowAll);
+        assert!(calc_component_access_rules_weight(&split) >= expected);
     }
 
     #[test]

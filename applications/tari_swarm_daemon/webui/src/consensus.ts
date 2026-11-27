@@ -33,12 +33,10 @@ export function readChannels(validators: ValidatorNode[], details: Record<number
   const rows = validators.map((vn) => {
     const detail = details[vn.instance_id];
     const consensus = vn.is_running ? (detail?.consensus ?? null) : null;
-    const epoch = consensus && typeof consensus.epoch === "number" && Number.isFinite(consensus.epoch)
-      ? consensus.epoch
-      : null;
-    const height = consensus && typeof consensus.height === "number" && Number.isFinite(consensus.height)
-      ? consensus.height
-      : null;
+    const epoch =
+      consensus && typeof consensus.epoch === "number" && Number.isFinite(consensus.epoch) ? consensus.epoch : null;
+    const height =
+      consensus && typeof consensus.height === "number" && Number.isFinite(consensus.height) ? consensus.height : null;
     return {
       vn,
       detail,

@@ -28,11 +28,12 @@ import Tabs from "@mui/material/Tabs";
 import Typography from "@mui/material/Typography";
 import * as React from "react";
 import { ISettingsMenu } from "../Settings";
+import { resolveActiveTabIndex } from "./settingsTabsHelpers";
 
 interface TabPanelProps {
   children?: React.ReactNode;
   index: number;
-  value: number;
+  value: number | false;
 }
 
 function CustomTabPanel(props: TabPanelProps) {
@@ -63,20 +64,24 @@ function a11yProps(index: number) {
 }
 
 export default function SettingsTabs({ menuItems }: { menuItems: ISettingsMenu[] }) {
-  const [value, setValue] = React.useState(0);
+  const [selectedLabel, setSelectedLabel] = React.useState<string | null>(menuItems[0]?.label ?? null);
   const theme = useTheme();
+  const activeIndex = resolveActiveTabIndex(menuItems, selectedLabel);
 
-  const handleChange = (event: React.SyntheticEvent, newValue: number) => {
-    setValue(newValue);
+  const handleChange = (_event: React.SyntheticEvent, newValue: number) => {
+    const nextItem = menuItems[newValue];
+    if (nextItem) {
+      setSelectedLabel(nextItem.label);
+    }
   };
 
   const menuLabels = menuItems.map((item, index) => {
-    return <Tab label={item.label} {...a11yProps(index)} key={index} style={{ minWidth: 150 }} />;
+    return <Tab label={item.label} {...a11yProps(index)} key={item.label} style={{ minWidth: 150 }} />;
   });
 
   const menuContents = menuItems.map((item, index) => {
     return (
-      <CustomTabPanel value={value} index={index} key={index}>
+      <CustomTabPanel value={activeIndex} index={index} key={item.label}>
         <Typography
           variant="h5"
           style={{
@@ -96,7 +101,7 @@ export default function SettingsTabs({ menuItems }: { menuItems: ISettingsMenu[]
     <Box sx={{ width: "100%" }}>
       <Box sx={{ borderBottom: 1, borderColor: "divider" }}>
         <Tabs
-          value={value}
+          value={activeIndex}
           onChange={handleChange}
           aria-label="settings tabs"
           variant="scrollable"

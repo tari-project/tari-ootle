@@ -64,7 +64,7 @@ mod gated_resource {
             .create()
         }
 
-        /// Accepts a caller-supplied withdraw `rule`, stores it in component state, and gates withdrawals on it.
+        /// Accepts a caller-supplied `withdraw_rule`, stores it in component state, and gates withdrawals on it.
         pub fn new_with_withdraw_rule(withdraw_rule: AccessRule) -> Component<Self> {
             let tokens = ResourceBuilder::public_fungible()
                 .with_owner_rule(OwnerRule::None)

@@ -236,6 +236,8 @@ fn caller_badge_resources_hold_no_tokens() {
     }
 }
 
+/// `any_caller_*` rules name only engine-reserved resources, so they cross every frame boundary (arguments,
+/// component state, return values, and `CreateAccount` rules) while still gating withdrawals on the caller.
 #[test]
 fn any_caller_rules_are_accepted_in_arguments_state_returns_and_create_account() {
     let mut test = TemplateTest::new(CRATE_PATH, TEMPLATES);

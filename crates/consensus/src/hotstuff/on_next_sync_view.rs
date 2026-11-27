@@ -31,8 +31,9 @@ pub struct OnNextSyncViewHandler<TConsensusSpec: ConsensusSpec> {
     outbound_messaging: TConsensusSpec::OutboundMessaging,
     leader_strategy: TConsensusSpec::LeaderStrategy,
     signer_service: TConsensusSpec::SignerService,
-    /// The timeout vote this node last sent. A NEWVIEW for the same view re-sends it rather than signing again, so
-    /// a member that already counted it receives the identical vote.
+    /// The timeout vote this node first signed for the view it last named. Members other than the leader receive it
+    /// unchanged for as long as the view stays the same, so a member that already holds it can tell a re-send from
+    /// a vote signed again.
     last_sent: Option<TimeoutVote>,
 }
 
@@ -104,25 +105,23 @@ impl<TConsensusSpec: ConsensusSpec> OnNextSyncViewHandler<TConsensusSpec> {
         );
 
         let high_pc_height = high_pc.height();
+        // Members other than the leader count the vote for pacing only, which never reads its `high_pc_height`
+        // claim, so they get the vote first signed for the view even after a higher certificate arrives.
         let timeout = match self.last_sent.take() {
-            Some(vote)
-                if vote.epoch == epoch && vote.height == timeout_height && vote.high_pc_height == high_pc_height =>
-            {
-                vote
-            },
-            _ => sign_timeout_vote(
-                &self.signer_service,
-                self.config.network,
-                epoch,
-                timeout_height,
-                high_pc_height,
-            ),
+            Some(vote) if vote.epoch == epoch && vote.height == timeout_height => vote,
+            _ => self.sign_timeout(epoch, timeout_height, high_pc_height),
+        };
+        // The leader checks the claim against the certificate in the NEWVIEW, so its copy claims the one sent.
+        let leader_timeout = if timeout.high_pc_height == high_pc_height {
+            timeout.clone()
+        } else {
+            self.sign_timeout(epoch, timeout_height, high_pc_height)
         };
         let local_public_key = timeout.signature.public_key;
         let message = NewViewMessage {
             high_pc,
             last_vote: last_sent_vote.map(|vote| vote.vote),
-            timeout: timeout.clone(),
+            timeout: leader_timeout,
         };
 
         self.outbound_messaging
@@ -161,6 +160,10 @@ impl<TConsensusSpec: ConsensusSpec> OnNextSyncViewHandler<TConsensusSpec> {
         })?;
 
         Ok(timeout_height)
+    }
+
+    fn sign_timeout(&self, epoch: Epoch, height: NodeHeight, high_pc_height: NodeHeight) -> TimeoutVote {
+        sign_timeout_vote(&self.signer_service, self.config.network, epoch, height, high_pc_height)
     }
 }
 

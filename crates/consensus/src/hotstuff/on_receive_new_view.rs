@@ -481,14 +481,16 @@ impl SenderQuota {
 ///
 /// An honest validator's sustained timeout rate is bounded by the pacemaker's leader timer: at most one per
 /// [`PaceMaker::min_leader_timeout_interval`]. Each timeout reaches the leader of its view as a NEWVIEW and every
-/// other member as a [`TimeoutVote`], so a receiver gets one of the two and both draw on one quota. A member that has
-/// counted a view out answers each vote re-sent by a member still waiting for it, so its answers to that member come
-/// no faster than the member's own timeouts. A validator also
+/// other member as a [`TimeoutVote`], so a receiver gets one of the two and both draw on one quota. A validator also
 /// times out without waiting for the timer each time it declines to vote on a live proposal, and each time it joins a
 /// view that more than the tolerated faulty power has timed out; the [`MAX_NEWVIEW_BURST_PER_SENDER`] burst covers
 /// these, and a throttled sender regains tokens at the timer rate. Replenishing one token per minimum leader-timeout
 /// interval admits arbitrary-duration recovery and transient delivery bursts while rejecting unbounded future-height
 /// floods before database or signature work.
+///
+/// A member that has counted a view out also answers each vote re-sent by a member still waiting for it, so the
+/// waiting member receives up to two messages from it per leader timeout on one quota. Over a long wait that drains
+/// the burst, and the answering member is then throttled at the waiting member to the refill rate.
 struct NewViewRateLimiter<TAddr> {
     epoch: Option<Epoch>,
     refill_interval: Duration,

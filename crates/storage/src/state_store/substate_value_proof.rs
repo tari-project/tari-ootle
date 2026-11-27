@@ -364,7 +364,8 @@ pub fn verify_substate_down_proof_against_roots(
         .map_err(|e| SubstateProofVerifyError::Decode(e.to_string()))?;
     if up_anchor.state_merkle_root() != up_root.root() ||
         up_anchor.epoch() != up_root.epoch() ||
-        up_anchor.height() != up_root.height()
+        up_anchor.height() != up_root.height() ||
+        up_anchor.shard_group().ok() != Some(up_root.shard_group())
     {
         return Err(SubstateProofVerifyError::DownProofAnchorMismatch);
     }
@@ -908,6 +909,26 @@ mod tests {
             let target = scenario.target.clone();
             let proof = scenario.honest(&target);
             let result = scenario.verify(&proof, &target, scenario.r1(3));
+            assert!(
+                matches!(result, Err(SubstateProofVerifyError::DownProofAnchorMismatch)),
+                "{result:?}"
+            );
+
+            let other_group = ShardGroup::new(Shard::from_u32(1), Shard::from_u32(NUM_PRESHARDS.as_u32()));
+            assert_ne!(other_group, scenario.group());
+            let mut r1_tip = scenario.r1_tip(2);
+            r1_tip.shard_group = other_group;
+            let mut r2_tip = scenario.r2_tip();
+            r2_tip.shard_group = other_group;
+            let result = verify_substate_down_proof_against_roots(
+                &tari_bor::serde_codec::to_vec(&proof).unwrap(),
+                target.substate_id(),
+                target.version(),
+                NETWORK,
+                NUM_PRESHARDS,
+                &DownProofAnchor::from(r1_tip),
+                &DownProofAnchor::from(r2_tip),
+            );
             assert!(
                 matches!(result, Err(SubstateProofVerifyError::DownProofAnchorMismatch)),
                 "{result:?}"

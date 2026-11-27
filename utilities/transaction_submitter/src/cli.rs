@@ -36,4 +36,7 @@ pub struct StressTestArgs {
     pub transaction_file: PathBuf,
     #[clap(long, short = 'y')]
     pub no_confirm: bool,
+    /// Also write the summary and each transaction's outcome to this file as JSON.
+    #[clap(long)]
+    pub report: Option<PathBuf>,
 }

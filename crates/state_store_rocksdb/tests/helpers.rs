@@ -154,6 +154,7 @@ pub fn build_substate_value(entity_id: Option<EntityId>) -> SubstateValue {
             access_rules: ComponentAccessRules::allow_all(),
             entity_id,
             upgrade_rule: Default::default(),
+            rules_updater: None,
         },
         body: ComponentBody {
             state: cbor!({
@@ -241,6 +242,7 @@ pub fn substate_value_for_entity(entity_id: EntityId) -> SubstateValue {
             access_rules: ComponentAccessRules::allow_all(),
             entity_id,
             upgrade_rule: Default::default(),
+            rules_updater: None,
         },
         body: ComponentBody {
             state: cbor!({

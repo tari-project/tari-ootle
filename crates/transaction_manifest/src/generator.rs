@@ -4,6 +4,7 @@
 use std::collections::HashMap;
 
 use proc_macro2::Ident;
+use tari_engine_types::substate::SubstateId;
 use tari_ootle_transaction::{
     Blob,
     BlobIndex,
@@ -20,7 +21,17 @@ use crate::{
     ManifestValue,
     ast::ManifestAst,
     error::ManifestError,
-    parser::{InvokeIntent, ManifestIntent, ManifestLiteral, OrVar, OutputBinding, SpecialLiteral},
+    parser::{
+        ComponentRulesChangeExpr,
+        InvokeIntent,
+        ManifestIntent,
+        ManifestLiteral,
+        OrVar,
+        OutputBinding,
+        SetComponentRulesIntent,
+        SpecialLiteral,
+    },
+    rules::RuleVariables,
     value::{MAX_LIST_DEPTH, address_value, arg_to_value, lit_to_arg},
 };
 
@@ -125,7 +136,14 @@ impl ManifestInstructionGenerator {
 
         let mut fee_instructions = Vec::with_capacity(ast.parsed.fee_instruction_intents.len());
         for intent in ast.parsed.fee_instruction_intents {
-            fee_instructions.extend(self.translate_intent(intent)?);
+            for instruction in self.translate_intent(intent)? {
+                if !instruction.is_allowed_in_fee_intent() {
+                    return Err(ManifestError::InvalidInstruction {
+                        reason: format!("Instruction {instruction} is not permitted in fee_main()"),
+                    });
+                }
+                fee_instructions.push(instruction);
+            }
         }
 
         Ok(ManifestInstructions {
@@ -185,21 +203,7 @@ impl ManifestInstructionGenerator {
                     .as_ref()
                     .expect("AST parse should have failed: no component ident for ComponentInvoke statement")
                     .to_string();
-                let call = match self.resolve(&component_ident)? {
-                    Resolved::Value(value) => ComponentReference::Address(Self::extract_component_address(value)?),
-                    Resolved::Workspace(workspace_offset) => {
-                        if workspace_offset.offset().is_some() {
-                            return Err(ManifestError::InvalidInstruction {
-                                reason: format!(
-                                    "Tuple-destructured variable '{component_ident}' cannot be used as a component \
-                                     reference. Use a single variable binding instead."
-                                ),
-                            });
-                        }
-                        ComponentReference::Workspace(workspace_offset.id())
-                    },
-                    Resolved::Blob => return Err(Self::misplaced_blob(&component_ident)),
-                };
+                let call = self.resolve_component(&component_ident)?;
                 let mut instructions = vec![Instruction::CallMethod {
                     call,
                     method: function_name
@@ -312,6 +316,19 @@ impl ManifestInstructionGenerator {
                     })?;
                 Ok(vec![Instruction::PublishTemplate { binary, metadata_hash }])
             },
+            ManifestIntent::SetComponentRules(SetComponentRulesIntent { component, change }) => {
+                let component = self.resolve_component(&component.to_string())?;
+                Ok(vec![match change {
+                    ComponentRulesChangeExpr::AccessRules(rules) => Instruction::SetComponentAccessRules {
+                        component,
+                        access_rules: rules.build(self)?,
+                    },
+                    ComponentRulesChangeExpr::OwnerRule(rule) => Instruction::SetComponentOwnerRule {
+                        component,
+                        owner_rule: rule.build(self)?,
+                    },
+                }])
+            },
             ManifestIntent::CallLocalFunction(ident) => {
                 if self.call_depth >= MAX_CALL_DEPTH {
                     return Err(ManifestError::MaxCallDepthExceeded { max: MAX_CALL_DEPTH });
@@ -398,13 +415,13 @@ impl ManifestInstructionGenerator {
             ManifestLiteral::Special(SpecialLiteral::NonFungibleId(id)) => Ok(call_arg!(id)),
             ManifestLiteral::Special(SpecialLiteral::Cbor(value)) => Ok(InstructionArg::literal(value)?),
             ManifestLiteral::Special(SpecialLiteral::Metadata(metadata)) => Ok(call_arg!(metadata)),
-            ManifestLiteral::Special(SpecialLiteral::SubstateId(id_or_var)) => match id_or_var {
-                OrVar::Var(ident) => self.get_ident(&ident.to_string()),
-                OrVar::Value(id) => Ok(call_arg!(id)),
+            ManifestLiteral::Special(SpecialLiteral::SubstateId(id_or_var)) => {
+                self.resolve_id_or_var(id_or_var, "substate_id", |id| Ok(call_arg!(id)))
             },
-            ManifestLiteral::Special(SpecialLiteral::Address(var_or_id)) => match var_or_id {
-                OrVar::Var(ident) => self.get_ident(&ident.to_string()),
-                OrVar::Value(id) => Ok(InstructionArg::literal(address_value(&id)?)?),
+            ManifestLiteral::Special(SpecialLiteral::Address(var_or_id)) => {
+                self.resolve_id_or_var(var_or_id, "address", |id| {
+                    Ok(InstructionArg::literal(address_value(id)?)?)
+                })
             },
         }
     }
@@ -469,6 +486,25 @@ impl ManifestInstructionGenerator {
         self.globals
             .get(name)
             .ok_or_else(|| ManifestError::UndefinedGlobal { name: name.to_string() })
+    }
+
+    /// The component a method call or rule change names: an input component address or a single workspace value.
+    fn resolve_component(&self, name: &str) -> Result<ComponentReference, ManifestError> {
+        match self.resolve(name)? {
+            Resolved::Value(value) => Ok(ComponentReference::Address(Self::extract_component_address(value)?)),
+            Resolved::Workspace(workspace_offset) => {
+                if workspace_offset.offset().is_some() {
+                    return Err(ManifestError::InvalidInstruction {
+                        reason: format!(
+                            "Tuple-destructured variable '{name}' cannot be used as a component reference. Use a \
+                             single variable binding instead."
+                        ),
+                    });
+                }
+                Ok(ComponentReference::Workspace(workspace_offset.id()))
+            },
+            Resolved::Blob => Err(Self::misplaced_blob(name)),
+        }
     }
 
     fn extract_component_address(value: &ManifestValue) -> Result<ComponentAddress, ManifestError> {
@@ -542,6 +578,30 @@ impl ManifestInstructionGenerator {
         }
     }
 
+    /// Resolves the argument of `substate_id!(..)` or `address!(..)`. An input variable must hold a substate ID and is
+    /// written with the macro's own encoding, so the variable and literal forms produce the same bytes.
+    fn resolve_id_or_var(
+        &self,
+        id_or_var: OrVar<SubstateId>,
+        macro_name: &str,
+        encode: impl FnOnce(&SubstateId) -> Result<InstructionArg, ManifestError>,
+    ) -> Result<InstructionArg, ManifestError> {
+        match id_or_var {
+            OrVar::Value(id) => encode(&id),
+            OrVar::Var(ident) => {
+                let name = ident.to_string();
+                match self.resolve(&name)? {
+                    Resolved::Value(ManifestValue::SubstateId(id)) => encode(id),
+                    Resolved::Value(other) => Err(ManifestError::InvalidVariableType(format!(
+                        "Expected a substate address in {macro_name}!({name}), got {other:?}"
+                    ))),
+                    Resolved::Workspace(id) => Ok(InstructionArg::Workspace(id)),
+                    Resolved::Blob => Err(Self::misplaced_blob(&name)),
+                }
+            },
+        }
+    }
+
     fn get_ident(&self, name: &str) -> Result<InstructionArg, ManifestError> {
         match self.resolve(name)? {
             Resolved::Value(value) => value.to_arg(),
@@ -555,5 +615,11 @@ impl ManifestInstructionGenerator {
             "'{name}' is bound to a blob, which only publish_template!({name}) accepts; pass blob!(..) directly to \
              use a blob as an argument"
         ))
+    }
+}
+
+impl RuleVariables for ManifestInstructionGenerator {
+    fn rule_variable(&self, name: &str) -> Result<&ManifestValue, ManifestError> {
+        self.resolve_value(name)
     }
 }

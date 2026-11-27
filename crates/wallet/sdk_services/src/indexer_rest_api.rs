@@ -2,6 +2,7 @@
 //   SPDX-License-Identifier: BSD-3-Clause
 
 use std::{
+    collections::HashMap,
     ops::Deref,
     sync::{Arc, Mutex},
     time::Duration,
@@ -28,6 +29,7 @@ use tari_indexer_client::{
         GetCommitteeRequest,
         GetLatestEpochCheckpointRequest,
         GetSubstateRequest,
+        GetSubstateVersionsRequest,
         GetSubstatesRequest,
         GetTransactionResultRequest,
         GetUtxoUpdatesRequest,
@@ -400,9 +402,22 @@ impl WalletNetworkInterface for IndexerRestApiNetworkInterface {
                         include_proofs,
                     }),
                     |resp| {
-                        resp.substates
-                            .iter()
-                            .try_for_each(|(id, substate)| check_encoded_substate_type(id, substate.value()))
+                        for (id, substate) in &resp.substates {
+                            if !chunk.contains(id) {
+                                return Err(IndexerRestApiNetworkInterfaceError::UnrequestedSubstate {
+                                    substate_id: id.clone(),
+                                });
+                            }
+                            check_encoded_substate_type(id, substate.value())?;
+                        }
+                        for id in resp.proofs.keys() {
+                            if !chunk.contains(id) {
+                                return Err(IndexerRestApiNetworkInterfaceError::UnrequestedSubstate {
+                                    substate_id: id.clone(),
+                                });
+                            }
+                        }
+                        Ok(())
                     },
                 )
                 .await?;
@@ -412,6 +427,36 @@ impl WalletNetworkInterface for IndexerRestApiNetworkInterface {
         }
 
         Ok(fetched)
+    }
+
+    async fn get_substate_versions(
+        &self,
+        substate_ids: &[SubstateId],
+    ) -> Result<HashMap<SubstateId, SubstateVersion>, Self::Error> {
+        let client = self.tracked_client();
+        let mut versions = HashMap::with_capacity(substate_ids.len());
+        for chunk in substate_ids.chunks(MAX_SUBSTATES_PER_FETCH) {
+            let ids = chunk.to_vec().try_into().map_err(|_| {
+                IndexerRestApiNetworkInterfaceError::IndexerClientError(IndexerRestClientError::RequestInvariant {
+                    details: "Too many substate IDs requested".to_string(),
+                })
+            })?;
+            let resp = self
+                .observe_checked(
+                    &client,
+                    client.get_substate_versions(GetSubstateVersionsRequest { substate_ids: ids }),
+                    |resp| match resp.versions.keys().find(|id| !chunk.contains(id)) {
+                        Some(id) => Err(IndexerRestApiNetworkInterfaceError::UnrequestedSubstateVersion {
+                            substate_id: id.clone(),
+                        }),
+                        None => Ok(()),
+                    },
+                )
+                .await?;
+            versions.extend(resp.versions);
+        }
+
+        Ok(versions)
     }
 
     async fn submit_transaction(&self, transaction: Transaction) -> Result<TransactionId, Self::Error> {
@@ -785,6 +830,10 @@ pub enum IndexerRestApiNetworkInterfaceError {
         substate_id: SubstateId,
         version: SubstateVersion,
     },
+    #[error("Indexer answered with the version of {substate_id}, which was not asked for")]
+    UnrequestedSubstateVersion { substate_id: SubstateId },
+    #[error("Indexer answered a substate fetch with {substate_id}, which the fetch did not request")]
+    UnrequestedSubstate { substate_id: SubstateId },
     #[error("Indexer returned an invalid UTXO page cursor {next_cursor:?} after {cursor:?}")]
     InvalidUtxoPageCursor {
         cursor: Option<UtxoId>,
@@ -853,6 +902,8 @@ impl TransactionStatusResponseError for IndexerRestApiNetworkInterfaceError {
             IndexerRestApiNetworkInterfaceError::SubstateTypeMismatch(_) |
             IndexerRestApiNetworkInterfaceError::UndecodableValue { .. } |
             IndexerRestApiNetworkInterfaceError::UnrequestedDownAnswer { .. } |
+            IndexerRestApiNetworkInterfaceError::UnrequestedSubstateVersion { .. } |
+            IndexerRestApiNetworkInterfaceError::UnrequestedSubstate { .. } |
             IndexerRestApiNetworkInterfaceError::InvalidUtxoPageCursor { .. } => ResponseErrorStatus::InternalError {
                 message: self.to_string(),
             },
@@ -1006,15 +1057,21 @@ mod tests {
         prost::Message,
         types::{
             GetSubstateResponse,
+            GetSubstateVersionsResponse,
             GetSubstatesResponse,
             GetTransactionResultResponse,
             GetUtxosResponse,
             SubmitTransactionDryRunResponse,
+            SubstateProof,
+            SubstateProofAnchor,
         },
     };
+    use tari_ootle_common_types::ShardGroup;
     use tari_template_lib_types::{
         ComponentAddress,
         EncryptedData,
+        Hash32,
+        VaultId,
         constants::TARI_TOKEN,
         crypto::UtxoTag,
         stealth::SpendAuthorization,
@@ -1389,6 +1446,184 @@ mod tests {
             err,
             IndexerRestApiNetworkInterfaceError::SubstateTypeMismatch(_)
         ));
+    }
+
+    #[tokio::test]
+    async fn substate_versions_are_served_for_the_ids_asked_for() {
+        let body = serde_json::to_string(&GetSubstateVersionsResponse {
+            versions: HashMap::from([(component_id(), SubstateVersion::new(3))]),
+        })
+        .unwrap();
+        let network = network_answering_with(body).await;
+
+        let versions = network.get_substate_versions(&[component_id()]).await.unwrap();
+
+        assert_eq!(versions, HashMap::from([(component_id(), SubstateVersion::new(3))]));
+    }
+
+    /// A version for an id the wallet did not ask for would be pinned as an input it never chose.
+    #[tokio::test]
+    async fn a_substate_version_that_was_not_asked_for_is_refused() {
+        let other: SubstateId = ComponentAddress::from_array([2; 32]).into();
+        let body = serde_json::to_string(&GetSubstateVersionsResponse {
+            versions: HashMap::from([(other.clone(), SubstateVersion::new(1))]),
+        })
+        .unwrap();
+        let network = network_answering_with(body).await;
+
+        let err = network.get_substate_versions(&[component_id()]).await.unwrap_err();
+
+        assert!(
+            matches!(
+                &err,
+                IndexerRestApiNetworkInterfaceError::UnrequestedSubstateVersion { substate_id } if substate_id == &other
+            ),
+            "{err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn fetched_substates_with_an_unrequested_id_are_refused_and_failed_over() {
+        let unrequested: SubstateId = VaultId::from_array([2; 32]).into();
+        let body = serde_json::to_string(&GetSubstatesResponse::new(
+            HashMap::from([(
+                unrequested.clone(),
+                EncodedSubstate::encode(&Substate::new(1, vault_value())).unwrap(),
+            )]),
+            [],
+        ))
+        .unwrap();
+        let invalid = spawn_status_server("200 OK", body).await;
+        let other = spawn_status_server("503 Service Unavailable", "{}").await;
+        let network = IndexerRestApiNetworkInterface::init(vec![invalid.clone()]).unwrap();
+        network.set_endpoints(vec![invalid.clone(), other.clone()]).unwrap();
+
+        for _ in 0..FAILOVER_THRESHOLD {
+            assert_eq!(network.get_endpoint(), invalid);
+            let err = network.get_substates(&[component_id()], false).await.unwrap_err();
+            assert!(
+                matches!(
+                    &err,
+                    IndexerRestApiNetworkInterfaceError::UnrequestedSubstate { substate_id }
+                        if *substate_id == unrequested
+                ),
+                "{err}"
+            );
+        }
+
+        assert_eq!(network.get_endpoint(), other);
+    }
+
+    fn dummy_substate_proof(commit_proof: Vec<u8>) -> SubstateProof {
+        SubstateProof {
+            anchor: SubstateProofAnchor {
+                epoch: Epoch(1),
+                shard_group: ShardGroup::new(0, 1),
+                height: 1,
+                block_id: Hash32::from([7; 32]),
+                state_merkle_root: Hash32::from([8; 32]),
+            },
+            commit_proof,
+            value_proof: vec![9],
+            value_hash_epoch: Epoch(1),
+            down_proof: None,
+        }
+    }
+
+    /// Serves two chunks: chunk 1 answers `first_id` with its proof, and chunk 2 answers its own substate together
+    /// with a proof for `first_id` (outside chunk 2, which would overwrite chunk 1's proof through `extend`).
+    async fn spawn_chunk_proof_overwrite_server(first_id: SubstateId) -> Url {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = Url::parse(&format!("http://{}/", listener.local_addr().unwrap())).unwrap();
+        tokio::spawn(async move {
+            loop {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut request = Vec::new();
+                let mut buf = [0u8; 4096];
+                let body = loop {
+                    let n = socket.read(&mut buf).await.unwrap();
+                    request.extend_from_slice(&buf[..n]);
+                    let text = String::from_utf8_lossy(&request);
+                    if let Some((head, body)) = text.split_once("\r\n\r\n") {
+                        let len = head
+                            .lines()
+                            .find_map(|line| line.to_ascii_lowercase().strip_prefix("content-length: ")?.parse().ok())
+                            .unwrap_or(0);
+                        if body.len() >= len {
+                            break body.to_string();
+                        }
+                    }
+                };
+                let req: GetSubstatesRequest = serde_json::from_str(&body).unwrap();
+                let chunk_first = req.requests.as_slice()[0].clone();
+                let encoded = EncodedSubstate::encode(&Substate::new(1, vault_value())).unwrap();
+                let resp = if chunk_first == first_id {
+                    GetSubstatesResponse::new(HashMap::from([(first_id.clone(), encoded)]), [(
+                        first_id.clone(),
+                        dummy_substate_proof(vec![1]),
+                    )])
+                } else {
+                    GetSubstatesResponse::new(HashMap::from([(chunk_first, encoded)]), [(
+                        first_id.clone(),
+                        dummy_substate_proof(vec![2]),
+                    )])
+                };
+                let resp_body = serde_json::to_string(&resp).unwrap();
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: \
+                     close\r\n\r\n{resp_body}",
+                    resp_body.len()
+                );
+                let _ignore = socket.write_all(response.as_bytes()).await;
+            }
+        });
+        url
+    }
+
+    #[tokio::test]
+    async fn fetched_substates_with_a_proof_outside_the_chunk_are_refused_and_failed_over() {
+        let ids = (0..=MAX_SUBSTATES_PER_FETCH as u8)
+            .map(|seed| SubstateId::from(VaultId::from_array([seed; 32])))
+            .collect::<Vec<_>>();
+        let first_id = ids[0].clone();
+        let invalid = spawn_chunk_proof_overwrite_server(first_id.clone()).await;
+        let other = spawn_status_server("503 Service Unavailable", "{}").await;
+        let network = IndexerRestApiNetworkInterface::init(vec![invalid.clone()]).unwrap();
+        network.set_endpoints(vec![invalid.clone(), other.clone()]).unwrap();
+
+        // Across two chunks, chunk 2 carries a proof for `first_id` (requested in chunk 1, not chunk 2): refused
+        // before `fetched.proofs.extend` can overwrite chunk 1's proof.
+        let err = network.get_substates(&ids, true).await.unwrap_err();
+        assert!(
+            matches!(
+                &err,
+                IndexerRestApiNetworkInterfaceError::UnrequestedSubstate { substate_id }
+                    if *substate_id == first_id
+            ),
+            "{err}"
+        );
+
+        // Consecutive single-chunk fetches answered with an unrequested proof count towards failover.
+        let second_id = ids[1].clone();
+        let network = IndexerRestApiNetworkInterface::init(vec![invalid.clone()]).unwrap();
+        network.set_endpoints(vec![invalid.clone(), other.clone()]).unwrap();
+        for _ in 0..FAILOVER_THRESHOLD {
+            assert_eq!(network.get_endpoint(), invalid);
+            let err = network
+                .get_substates(std::slice::from_ref(&second_id), true)
+                .await
+                .unwrap_err();
+            assert!(
+                matches!(
+                    &err,
+                    IndexerRestApiNetworkInterfaceError::UnrequestedSubstate { substate_id }
+                        if *substate_id == first_id
+                ),
+                "{err}"
+            );
+        }
+
+        assert_eq!(network.get_endpoint(), other);
     }
 
     /// An accepted execution whose diff brings up `component_id()` with a vault value.

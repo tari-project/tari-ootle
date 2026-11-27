@@ -31,7 +31,7 @@ use crate::{
 /// the input length must be a multiple of 32). Pass an empty slice to build a revealed-only statement.
 pub fn build_stealth_inputs_statement(
     input_commitments: &[u8],
-    revealed_amount_microtari: u64,
+    revealed_amount_microtari: u128,
 ) -> Result<String, OotleWasmError> {
     if !input_commitments
         .len()
@@ -53,7 +53,7 @@ pub fn build_stealth_inputs_statement(
 
     let statement = StealthInputsStatement {
         inputs,
-        revealed_amount: Amount::from_u64(revealed_amount_microtari),
+        revealed_amount: Amount::new(revealed_amount_microtari),
     };
     Ok(serde_json::to_string(&statement)?)
 }
@@ -68,13 +68,13 @@ pub fn build_stealth_inputs_statement(
 /// still be included in the same call as `{"commitment": <hex>, "witness": "KeyPath"}`.
 pub fn build_stealth_inputs_statement_from_inputs(
     inputs_json: &str,
-    revealed_amount_microtari: u64,
+    revealed_amount_microtari: u128,
 ) -> Result<String, OotleWasmError> {
     let inputs: Vec<StealthInput> = serde_json::from_str(inputs_json)?;
     ensure_unique_input_commitments(&inputs)?;
     let statement = StealthInputsStatement {
         inputs,
-        revealed_amount: Amount::from_u64(revealed_amount_microtari),
+        revealed_amount: Amount::new(revealed_amount_microtari),
     };
     Ok(serde_json::to_string(&statement)?)
 }
@@ -158,6 +158,18 @@ mod tests {
         let stmt: StealthInputsStatement = serde_json::from_str(&json).unwrap();
         assert!(stmt.inputs.is_empty());
         assert_eq!(stmt.revealed_amount, Amount::from_u64(1000));
+    }
+
+    #[test]
+    fn revealed_amount_above_u64_max_is_preserved() {
+        let revealed = u128::from(u64::MAX) + 7;
+        let json = build_stealth_inputs_statement(&[], revealed).unwrap();
+        let stmt: StealthInputsStatement = serde_json::from_str(&json).unwrap();
+        assert_eq!(stmt.revealed_amount, Amount::new(revealed));
+
+        let json = build_stealth_inputs_statement_from_inputs("[]", revealed).unwrap();
+        let stmt: StealthInputsStatement = serde_json::from_str(&json).unwrap();
+        assert_eq!(stmt.revealed_amount, Amount::new(revealed));
     }
 
     #[test]

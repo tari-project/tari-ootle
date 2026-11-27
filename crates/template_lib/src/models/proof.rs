@@ -43,6 +43,10 @@ const TAG: u64 = BinaryTag::ProofId.as_u64();
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct ProofId(BorTag<u32, TAG>);
 
+impl tari_bor::Tagged for ProofId {
+    const TAG: u64 = TAG;
+}
+
 impl From<u32> for ProofId {
     fn from(value: u32) -> Self {
         Self(BorTag::new(value))

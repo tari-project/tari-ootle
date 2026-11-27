@@ -1,7 +1,7 @@
 //   Copyright 2026 The Tari Project
 //   SPDX-License-Identifier: BSD-3-Clause
 
-use ootle_ledger_common::arg_types::{KeyType, SignMode, SigningField};
+use ootle_ledger_common::arg_types::{KeyType, SignMode, SignStreamState};
 
 use crate::hashing::MessageHasher;
 
@@ -30,22 +30,5 @@ pub struct SigningState {
     /// `Some` for a confidential (stealth) transfer: the spent UTXO's sender public nonce `R`. When
     /// set, signing uses the stealth-derived key `c + k` instead of the raw account key.
     pub stealth_public_nonce: Option<[u8; 32]>,
-    /// Index into the expected canonical field sequence for `mode`.
-    pub field_cursor: usize,
-    /// `Some` while the bytes of a large field are still arriving across multiple chunks.
-    pub in_field: Option<SigningField>,
-    /// Human-readable summary, parsed from the same bytes fed into `hasher`.
-    pub display: TxDisplay,
-}
-
-/// Minimal transaction summary shown to the user before signing. Every value here is parsed from
-/// the canonical preimage bytes that are hashed, so what is displayed is what is signed.
-#[derive(Default, Clone, Copy)]
-pub struct TxDisplay {
-    pub network: u8,
-    pub fee_instruction_count: u32,
-    pub instruction_count: u32,
-    pub input_count: u32,
-    pub min_epoch: Option<u64>,
-    pub max_epoch: u64,
+    pub stream: SignStreamState,
 }

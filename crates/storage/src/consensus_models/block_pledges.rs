@@ -333,6 +333,7 @@ mod tests {
                 access_rules: ComponentAccessRules::allow_all(),
                 entity_id: EntityId::from_array([seed; EntityId::LENGTH]),
                 upgrade_rule: Default::default(),
+                rules_updater: None,
             },
             body: ComponentBody::empty(),
         })

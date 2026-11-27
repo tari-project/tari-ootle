@@ -17,7 +17,9 @@ fn well_known(kind: WellKnownType) -> Type {
 #[test]
 fn the_definition_tags_the_library_types() {
     let module = compile_template(TEMPLATE, &[]).unwrap();
-    let def = WasmModule::validate_code(module.code()).unwrap();
+    let def = WasmModule::validate_and_load(module.code())
+        .unwrap()
+        .into_template_def();
 
     let take = def.get_function("take").unwrap();
     let types = take.arguments.iter().map(|a| a.arg_type.clone()).collect::<Vec<_>>();

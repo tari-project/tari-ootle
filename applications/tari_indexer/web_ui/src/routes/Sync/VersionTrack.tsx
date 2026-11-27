@@ -28,19 +28,21 @@ export default function VersionTrack({ shard }: { shard: ShardSyncStatus }) {
   const base = verified ?? -1;
   const end = Math.max(staged, tip ?? -1, base);
   const span = end - base;
-  const frontier = 1 - HISTORY_SHARE;
+  const historyEnd = verified === null ? 0 : span <= 0 ? 1 : HISTORY_SHARE;
+  const frontier = 1 - historyEnd;
   const at = (version: number) => {
     if (span <= 0) return 1;
     const share = (version - base) / span;
-    return HISTORY_SHARE + frontier * share;
+    return historyEnd + frontier * share;
   };
   const widen = (from: number, to: number) => (to > from ? Math.max(to - from, MIN_SEGMENT) : 0);
 
-  const historyEnd = verified === null ? 0 : span <= 0 ? 1 : HISTORY_SHARE;
+  const hasUnstreamed = tip !== null && tip > staged;
   const stagedFrom = historyEnd;
-  const stagedWidth = staged > base ? widen(stagedFrom, at(staged)) : 0;
+  const maxStagedWidth = Math.max(0, 1 - stagedFrom - (hasUnstreamed ? MIN_SEGMENT : 0));
+  const stagedWidth = staged > base ? Math.min(widen(stagedFrom, at(staged)), maxStagedWidth) : 0;
   const unstreamedFrom = stagedFrom + stagedWidth;
-  const unstreamedWidth = tip !== null && tip > staged ? Math.max(1 - unstreamedFrom, MIN_SEGMENT) : 0;
+  const unstreamedWidth = hasUnstreamed ? Math.max(0, 1 - unstreamedFrom) : 0;
 
   const width = 600;
   const height = 22;
@@ -56,7 +58,7 @@ export default function VersionTrack({ shard }: { shard: ShardSyncStatus }) {
         height={height}
         preserveAspectRatio="none"
         role="img"
-        aria-label={`Verified to ${verified === null ? "nothing" : `v${verified}`}, staged to v${staged < 0 ? "none" : staged}, tip ${tip === null ? "unknown" : `v${tip}`}`}
+        aria-label={`Verified to ${verified === null ? "nothing" : `v${verified}`}, staged to ${staged < 0 ? "none" : `v${staged}`}, tip ${tip === null ? "unknown" : `v${tip}`}`}
       >
         <defs>
           <pattern id={hatch} width={6} height={6} patternUnits="userSpaceOnUse" patternTransform="rotate(45)">

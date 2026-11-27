@@ -21,13 +21,14 @@ import {
 import { Account, OutputStatus, TARI_TOKEN, UtxoInfo } from "@tari-project/ootle-ts-bindings";
 import {
   bigintToDecimalString,
+  clampPageIndex,
   emptyRows,
   handleChangePage,
   handleChangeRowsPerPage,
   shortenString,
   substateIdToString,
 } from "@utils/helpers";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { IoExpandOutline } from "react-icons/io5";
 import { useParams } from "react-router-dom";
 import PlaceHolder from "./components/PlaceHolder";
@@ -68,6 +69,25 @@ function StealthUtxoList({ account }: { account: Account }) {
     statusFilter === "all" ? null : statusFilter,
   );
 
+  const utxos = data?.utxos ?? [];
+  const currentPage = clampPageIndex(page, rowsPerPage, utxos.length);
+
+  useEffect(() => {
+    setPage(0);
+    setSelectedUtxo(null);
+  }, [account.component_address, resourceAddress]);
+
+  useEffect(() => {
+    if (data !== undefined && page !== currentPage) {
+      setPage(currentPage);
+    }
+  }, [data, page, currentPage]);
+
+  const handleStatusFilterChange = (status: OutputStatus | "all") => {
+    setStatusFilter(status);
+    setPage(0);
+  };
+
   const columnWidths = {
     1: "15%",
     2: "20%",
@@ -91,7 +111,7 @@ function StealthUtxoList({ account }: { account: Account }) {
                   <SortableHeader
                     title="Status"
                     currentFilter={statusFilter}
-                    onFilterChange={setStatusFilter}
+                    onFilterChange={handleStatusFilterChange}
                     getDisplayName={getStatusDisplayName}
                   />
                 </TableCell>
@@ -104,42 +124,48 @@ function StealthUtxoList({ account }: { account: Account }) {
               </TableRow>
             </TableHead>
             <TableBody>
-              {data?.utxos && data.utxos.length > 0 ? (
+              {utxos.length > 0 ? (
                 <>
-                  {data.utxos.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage).map((utxo, index) => (
-                    <TableRow key={`${utxo.address.id}-${index}`}>
-                      <DataTableCell>
-                        {shortenString(utxo.address.id)}
-                        <CopyToClipboard copy={utxo.address.id} />
-                      </DataTableCell>
-                      <DataTableCell>
-                        {bigintToDecimalString(utxo.value, divisibility)} {currencySymbol}
-                      </DataTableCell>
-                      <DataTableCell>
-                        <StatusChip status={utxo.status} tooltip={JSON.stringify(utxo.auth)} />
-                      </DataTableCell>
-                      <DataTableCell>
-                        {utxo.sender_address ? (
-                          <SenderAddress address={utxo.sender_address} />
-                        ) : (
-                          <Memo memo={utxo.memo} />
-                        )}
-                      </DataTableCell>
-                      <DataTableCell>{utxo.is_burnt ? "Yes" : "No"}</DataTableCell>
-                      <DataTableCell>{utxo.is_frozen ? "Yes" : "No"}</DataTableCell>
-                      <DataTableCell align="center">
-                        <Tooltip title="View details" arrow>
-                          <IconButton size="small" aria-label="view utxo details" onClick={() => setSelectedUtxo(utxo)}>
-                            <IoExpandOutline style={{ height: 16, width: 16 }} />
-                          </IconButton>
-                        </Tooltip>
-                      </DataTableCell>
-                    </TableRow>
-                  ))}
-                  {emptyRows(page, rowsPerPage, data.utxos) > 0 && (
+                  {utxos
+                    .slice(currentPage * rowsPerPage, currentPage * rowsPerPage + rowsPerPage)
+                    .map((utxo, index) => (
+                      <TableRow key={`${utxo.address.id}-${index}`}>
+                        <DataTableCell>
+                          {shortenString(utxo.address.id)}
+                          <CopyToClipboard copy={utxo.address.id} />
+                        </DataTableCell>
+                        <DataTableCell>
+                          {bigintToDecimalString(utxo.value, divisibility)} {currencySymbol}
+                        </DataTableCell>
+                        <DataTableCell>
+                          <StatusChip status={utxo.status} tooltip={JSON.stringify(utxo.auth)} />
+                        </DataTableCell>
+                        <DataTableCell>
+                          {utxo.sender_address ? (
+                            <SenderAddress address={utxo.sender_address} />
+                          ) : (
+                            <Memo memo={utxo.memo} />
+                          )}
+                        </DataTableCell>
+                        <DataTableCell>{utxo.is_burnt ? "Yes" : "No"}</DataTableCell>
+                        <DataTableCell>{utxo.is_frozen ? "Yes" : "No"}</DataTableCell>
+                        <DataTableCell align="center">
+                          <Tooltip title="View details" arrow>
+                            <IconButton
+                              size="small"
+                              aria-label="view utxo details"
+                              onClick={() => setSelectedUtxo(utxo)}
+                            >
+                              <IoExpandOutline style={{ height: 16, width: 16 }} />
+                            </IconButton>
+                          </Tooltip>
+                        </DataTableCell>
+                      </TableRow>
+                    ))}
+                  {emptyRows(currentPage, rowsPerPage, utxos) > 0 && (
                     <TableRow
                       style={{
-                        height: 57 * emptyRows(page, rowsPerPage, data.utxos),
+                        height: 57 * emptyRows(currentPage, rowsPerPage, utxos),
                       }}
                     >
                       <TableCell colSpan={7} />
@@ -157,13 +183,13 @@ function StealthUtxoList({ account }: { account: Account }) {
               )}
             </TableBody>
           </Table>
-          {data?.utxos && data.utxos.length > 0 && (
+          {utxos.length > 0 && (
             <TablePagination
               rowsPerPageOptions={[10, 25, 50]}
               component="div"
-              count={data.utxos.length}
+              count={utxos.length}
               rowsPerPage={rowsPerPage}
-              page={page}
+              page={currentPage}
               onPageChange={(event, newPage) => handleChangePage(event, newPage, setPage)}
               onRowsPerPageChange={(event) => handleChangeRowsPerPage(event, setRowsPerPage, setPage)}
             />

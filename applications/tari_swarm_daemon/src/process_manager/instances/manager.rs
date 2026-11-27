@@ -300,10 +300,10 @@ impl InstanceManager {
         let mut allocated_ports = ports.unwrap_or_else(|| self.port_allocator.create(instance_type));
 
         let processes_path = self.base_path.join("processes");
-        let base_path = match base_path_override {
+        let base_path = match &base_path_override {
             Some(base_path) => {
                 if base_path.is_absolute() {
-                    base_path
+                    base_path.clone()
                 } else {
                     processes_path.join(base_path)
                 }
@@ -369,6 +369,7 @@ impl InstanceManager {
             instance_type,
             child,
             allocated_ports,
+            base_path_override.clone(),
             // This saves us from having to join the network string to the path all over the place, since everything we
             // want is under {base_dir}/{network}
             base_path.join(self.network.to_string()),
@@ -477,18 +478,20 @@ impl InstanceManager {
 
     pub async fn wait(&mut self, id: InstanceId) -> anyhow::Result<ExitStatus> {
         let instance = self.get_instance_mut(id).ok_or_else(|| anyhow!("Instance not found"))?;
-        let status = instance.child_mut().wait().await?;
-        Ok(status)
+        instance.wait().await
     }
 
     pub async fn start_instance(&mut self, id: InstanceId, executable: &Executable) -> anyhow::Result<()> {
         let instance = self
-            .instances()
+            .instances_mut()
             .find(|i| i.id() == id)
             .ok_or_else(|| anyhow!("Instance not found"))?;
 
+        instance.terminate().await?;
+
         let instance_type = instance.instance_type();
         let instance_name = instance.name().to_string();
+        let base_path_override = instance.base_path_override().cloned();
         let settings = instance.settings().clone();
         let ports = instance.allocated_ports().clone();
         let envs = instance.envs().to_vec();
@@ -499,7 +502,7 @@ impl InstanceManager {
             executable,
             instance_type,
             instance_name,
-            None,
+            base_path_override,
             envs,
             settings,
             Some(ports),
@@ -725,6 +728,87 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn start_instance_terminates_running_process_and_reuses_process_dir() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let base_path = temp_dir.path().to_path_buf();
+        let executable = stub_executable(&base_path).await;
+        let mut manager = InstanceManager::new(base_path.clone(), Network::LocalNet, HashMap::new(), vec![], 47400);
+
+        let id = manager
+            .fork_new(
+                &executable,
+                InstanceType::MinoTariNode,
+                "node-1".to_string(),
+                Some(PathBuf::from("custom-node-dir")),
+                vec![],
+                HashMap::new(),
+            )
+            .await
+            .unwrap();
+
+        let (first_pid, first_process_dir, first_base_path) = {
+            let instance = manager.get_instance_mut(id).unwrap();
+            assert!(instance.is_running());
+            (
+                instance.child().id().expect("running child must have a pid"),
+                instance.process_dir().clone(),
+                instance.base_path().clone(),
+            )
+        };
+        assert_eq!(first_process_dir, base_path.join("processes").join("custom-node-dir"));
+
+        manager.start_instance(id, &executable).await.unwrap();
+
+        assert_eq!(
+            nix::sys::signal::kill(nix::unistd::Pid::from_raw(first_pid as i32), None),
+            Err(nix::errno::Errno::ESRCH),
+            "previous child process should be terminated and reaped"
+        );
+
+        let instance = manager.get_instance_mut(id).unwrap();
+        assert!(instance.is_running());
+        let second_pid = instance.child().id().expect("restarted child must have a pid");
+        assert_ne!(first_pid, second_pid);
+        assert_eq!(instance.process_dir(), &first_process_dir);
+        assert_eq!(instance.base_path(), &first_base_path);
+
+        manager.stop_instance(id).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn wait_records_exit_status_so_is_running_returns_false() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let base_path = temp_dir.path().to_path_buf();
+        let path = base_path.join("stub_create_key");
+        fs::write(&path, "#!/bin/sh\nexit 0\n").await.unwrap();
+        fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
+            .await
+            .unwrap();
+        let executable = Executable {
+            instance_type: InstanceType::TariWalletDaemonCreateKey,
+            path,
+        };
+        let mut manager = InstanceManager::new(base_path, Network::LocalNet, HashMap::new(), vec![], 47500);
+
+        let id = manager
+            .fork_new(
+                &executable,
+                InstanceType::TariWalletDaemonCreateKey,
+                "create-key".to_string(),
+                None,
+                vec![],
+                HashMap::new(),
+            )
+            .await
+            .unwrap();
+
+        assert!(manager.get_instance_mut(id).unwrap().is_running());
+        let status = manager.wait(id).await.unwrap();
+        assert!(status.success());
+        assert!(!manager.get_instance_mut(id).unwrap().is_running());
+    }
+
+    #[tokio::test]
     async fn create_instance_forks_a_new_name_with_the_configured_settings_and_rejects_a_taken_one() {
         let temp_dir = tempfile::tempdir().unwrap();
         let base_path = temp_dir.path().to_path_buf();
@@ -934,5 +1018,41 @@ mod tests {
             .unwrap();
         manager.apply_config_update(HashMap::new(), &[vn_config, without_explicit]);
         assert_eq!(claim_key(&manager, file_vn_id), (key("rotated-claim-key"), true));
+    }
+
+    #[tokio::test]
+    async fn restarting_an_instance_preserves_its_base_path_override() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let base_path = temp_dir.path().to_path_buf();
+        let executable = stub_executable(&base_path).await;
+        let custom_dir = PathBuf::from("custom-node-dir");
+
+        let mut manager = InstanceManager::new(base_path.clone(), Network::LocalNet, HashMap::new(), vec![], 47100);
+
+        let id = manager
+            .fork_new(
+                &executable,
+                InstanceType::MinoTariNode,
+                "node-0".to_string(),
+                Some(custom_dir.clone()),
+                vec![],
+                HashMap::new(),
+            )
+            .await
+            .unwrap();
+
+        let initial_path = manager.instances().find(|i| i.id() == id).unwrap().base_path().clone();
+        assert_eq!(
+            initial_path,
+            base_path.join("processes").join(&custom_dir).join("localnet")
+        );
+
+        manager.stop_instance(id).await.unwrap();
+        manager.start_instance(id, &executable).await.unwrap();
+
+        let restarted = manager.instances().find(|i| i.id() == id).unwrap();
+        assert_eq!(restarted.base_path(), &initial_path);
+        assert_eq!(restarted.base_path_override(), Some(&custom_dir));
+        manager.stop_instance(id).await.unwrap();
     }
 }

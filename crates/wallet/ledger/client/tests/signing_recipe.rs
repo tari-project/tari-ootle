@@ -7,8 +7,8 @@
 //! exact byte recipe the Ledger device follows to (1) recompute a transaction's 64-byte signing
 //! message from the streamed preimage segments and (2) produce an sr25519 signature. It then proves
 //! the result against `tari_ootle_transaction`:
-//!   - the reference message equals `create_message_v1` (domain separation + borsh feeding), and
-//!   - the reference signature verifies via `verify_v1` (sr25519 challenge + `s = e*k + r`).
+//!   - the reference message equals `create_message` (domain separation + borsh feeding), and
+//!   - the reference signature verifies via `verify_message` (sr25519 challenge + `s = e*k + r`).
 //!
 //! If this passes, the device recipe is correct by construction; only the SDK's Blake2b and the
 //! APDU transport remain to be exercised on Speculos.
@@ -16,32 +16,39 @@
 use blake2::{Blake2b512, Digest};
 use curve25519_dalek::{Scalar, constants::RISTRETTO_BASEPOINT_TABLE, ristretto::CompressedRistretto};
 use indexmap::IndexSet;
-use ootle_ledger_common::signing::{
-    NONCE_DOMAIN,
-    SIGNING_CONTEXT,
-    STEALTH_OWNER_LABEL,
-    TX_DOMAIN,
-    TX_DOMAIN_VERSION,
-    TX_LABEL_SEAL,
-    TX_LABEL_SIGNATURE,
-    WALLET_DOMAIN,
-    WALLET_DOMAIN_VERSION,
+use ootle_ledger_common::{
+    OotleStatusWord,
+    arg_types::{SEGMENT_LAST_CHUNK, SignMode, SignStreamState, SigningField, TxDisplay},
+    signing::{
+        NONCE_DOMAIN,
+        SIGNING_CONTEXT,
+        STEALTH_OWNER_LABEL,
+        TX_DOMAIN,
+        TX_DOMAIN_VERSION,
+        TX_LABEL_SEAL,
+        TX_LABEL_SIGNATURE,
+        WALLET_DOMAIN,
+        WALLET_DOMAIN_VERSION,
+    },
 };
 use rand::Rng;
-use tari_ootle_common_types::signature::Sr25519SignatureBytes;
+use tari_ootle_common_types::{InputDeclaration, signature::Sr25519SignatureBytes};
 use tari_ootle_transaction::{
+    AuthorizationContext,
+    AuthorizerSet,
     Blob,
     Blobs,
     Epoch,
     Instruction,
     MainSigner,
     PreimageSegment,
+    SchemaVersion,
     TransactionSealSignature,
     TransactionSignature,
     UnsealedTransactionV1,
     UnsignedTransactionV1,
 };
-use tari_template_lib_types::crypto::RistrettoPublicKeyBytes;
+use tari_template_lib_types::{ComponentAddress, crypto::RistrettoPublicKeyBytes};
 
 // ---- reference reimplementation of the device recipe (mirrors src/hashing.rs) -------------------
 
@@ -205,6 +212,10 @@ fn signing_context_matches_protocol() {
         SIGNING_CONTEXT,
         tari_ootle_transaction::TRANSACTION_SIGNING_CONTEXT.as_bytes()
     );
+    assert_eq!(
+        ootle_ledger_common::arg_types::EXPECTED_SCHEMA_VERSION,
+        tari_ootle_transaction::SchemaVersion::CURRENT.as_u16()
+    );
 }
 
 #[test]
@@ -212,8 +223,8 @@ fn preimage_field_tags_match_protocol() {
     use ootle_ledger_common::arg_types::SigningField;
     use tari_ootle_transaction::PreimageField;
 
-    // The host maps PreimageField -> SigningField by numeric tag, and the device validates field
-    // order by the same tags. They must agree.
+    // The host maps PreimageField -> SigningField by numeric tag, and the device checks each
+    // segment's tag against its expected sequence. They must agree.
     let pairs = [
         (PreimageField::SchemaVersion, SigningField::SchemaVersion),
         (PreimageField::SealSigner, SigningField::SealSigner),
@@ -228,6 +239,7 @@ fn preimage_field_tags_match_protocol() {
         (PreimageField::Nonce, SigningField::TransactionNonce),
         (PreimageField::BlobHashes, SigningField::BlobHashes),
         (PreimageField::Signatures, SigningField::Signatures),
+        (PreimageField::Authorizers, SigningField::Authorizers),
     ];
     for (preimage, wire) in pairs {
         assert_eq!(preimage as u8, wire as u8, "tag mismatch for {preimage:?}");
@@ -240,7 +252,9 @@ fn expected_field_sequences_match_preimage_v1() {
 
     let seal_signer = pk_bytes(&random_scalar());
     let tx = sample_unsigned();
-    let add_signer_segments = TransactionSignature::signing_preimage_v1(&seal_signer, &tx);
+    let authorizers: AuthorizerSet = [pk_bytes(&random_scalar())].into_iter().collect();
+    let add_signer_segments =
+        TransactionSignature::signing_preimage(AuthorizationContext::new(&seal_signer, &authorizers), &tx);
     let add_signer_fields: Vec<SigningField> = add_signer_segments
         .iter()
         .map(|s| SigningField::try_from(s.field as u8).unwrap())
@@ -248,7 +262,7 @@ fn expected_field_sequences_match_preimage_v1() {
     assert_eq!(add_signer_fields, SignMode::AddSigner.expected_fields());
 
     let unsealed = UnsealedTransactionV1::new(tx, vec![]);
-    let seal_segments = TransactionSealSignature::signing_preimage_v1(&unsealed);
+    let seal_segments = TransactionSealSignature::signing_preimage(&unsealed);
     let seal_fields: Vec<SigningField> = seal_segments
         .iter()
         .map(|s| SigningField::try_from(s.field as u8).unwrap())
@@ -261,15 +275,17 @@ fn add_signer_recipe_matches_and_verifies() {
     let seal_signer = pk_bytes(&random_scalar());
     let signer = random_scalar();
     let tx = sample_unsigned();
+    let authorizers: AuthorizerSet = [pk_bytes(&signer), pk_bytes(&random_scalar())].into_iter().collect();
+    let context = AuthorizationContext::new(&seal_signer, &authorizers);
 
-    // (1) message recipe == create_message_v1
+    // (1) message recipe == create_message
     let m = message(
         TX_LABEL_SIGNATURE,
-        &TransactionSignature::signing_preimage_v1(&seal_signer, &tx),
+        &TransactionSignature::signing_preimage(context, &tx),
     );
     assert_eq!(
         &m,
-        TransactionSignature::create_message_v1(&seal_signer, &tx).as_bytes(),
+        TransactionSignature::create_message(context, &tx).as_bytes(),
         "message mismatch"
     );
 
@@ -277,7 +293,7 @@ fn add_signer_recipe_matches_and_verifies() {
     let (pk, sig) = sign(&signer, &m);
     let signature = TransactionSignature::new(RistrettoPublicKeyBytes::from_bytes(&pk).unwrap(), sig_bytes(&sig));
     assert!(
-        signature.verify_v1(&seal_signer, &tx),
+        signature.verify_message(TransactionSignature::create_message(context, &tx)),
         "authorization signature failed to verify"
     );
 }
@@ -290,9 +306,10 @@ fn seal_recipe_matches_and_verifies() {
 
     // A prior authorization signature (its bytes are bound by the seal).
     let signer = random_scalar();
+    let authorizers: AuthorizerSet = [pk_bytes(&signer)].into_iter().collect();
     let auth_msg = message(
         TX_LABEL_SIGNATURE,
-        &TransactionSignature::signing_preimage_v1(&seal_signer_pk, &unsigned),
+        &TransactionSignature::signing_preimage(AuthorizationContext::new(&seal_signer_pk, &authorizers), &unsigned),
     );
     let (auth_pk, auth_sig) = sign(&signer, &auth_msg);
     let prior = TransactionSignature::new(
@@ -302,18 +319,21 @@ fn seal_recipe_matches_and_verifies() {
 
     let unsealed = UnsealedTransactionV1::new(unsigned, vec![prior]);
 
-    // (1) seal message recipe == create_message_v1
-    let m = message(TX_LABEL_SEAL, &TransactionSealSignature::signing_preimage_v1(&unsealed));
+    // (1) seal message recipe == create_message
+    let m = message(TX_LABEL_SEAL, &TransactionSealSignature::signing_preimage(&unsealed));
     assert_eq!(
         &m,
-        TransactionSealSignature::create_message_v1(&unsealed).as_bytes(),
+        TransactionSealSignature::create_message(&unsealed).as_bytes(),
         "seal message mismatch"
     );
 
     // (2) seal signature verifies
     let (pk, sig) = sign(&seal_signer, &m);
     let seal = TransactionSealSignature::new(RistrettoPublicKeyBytes::from_bytes(&pk).unwrap(), sig_bytes(&sig));
-    assert!(seal.verify_v1(&unsealed), "seal signature failed to verify");
+    assert!(
+        seal.verify_message(TransactionSealSignature::create_message(&unsealed)),
+        "seal signature failed to verify"
+    );
 }
 
 #[test]
@@ -358,14 +378,18 @@ fn stealth_recipe_matches_and_verifies() {
     // (3) an authorization signature produced with the stealth key verifies under tari_crypto
     let seal_signer = pk_bytes(&random_scalar());
     let tx = sample_unsigned();
+    let authorizers: AuthorizerSet = [RistrettoPublicKeyBytes::from_bytes(&public_key(&got)).unwrap()]
+        .into_iter()
+        .collect();
+    let context = AuthorizationContext::new(&seal_signer, &authorizers);
     let m = message(
         TX_LABEL_SIGNATURE,
-        &TransactionSignature::signing_preimage_v1(&seal_signer, &tx),
+        &TransactionSignature::signing_preimage(context, &tx),
     );
     let (pk, sig) = sign(&got, &m);
     let signature = TransactionSignature::new(RistrettoPublicKeyBytes::from_bytes(&pk).unwrap(), sig_bytes(&sig));
     assert!(
-        signature.verify_v1(&seal_signer, &tx),
+        signature.verify_message(TransactionSignature::create_message(context, &tx)),
         "stealth authorization signature failed to verify"
     );
 
@@ -431,7 +455,11 @@ fn stealth_recipe_matches_and_verifies() {
 fn nonce_differs_from_the_tari_schnorr_app() {
     let secret = random_scalar();
     let pk = public_key(&secret);
-    let m = *TransactionSignature::create_message_v1(&pk_bytes(&random_scalar()), &sample_unsigned()).as_bytes();
+    let m = *TransactionSignature::create_message(
+        AuthorizationContext::new(&pk_bytes(&random_scalar()), &AuthorizerSet::new()),
+        &sample_unsigned(),
+    )
+    .as_bytes();
 
     let mut h = Blake2b512::new();
     h.update(b"com.tari.ootle.ledger.schnorr_nonce.v1");
@@ -442,4 +470,151 @@ fn nonce_differs_from_the_tari_schnorr_app() {
     let tari_schnorr_nonce = Scalar::from_bytes_mod_order_wide(&out);
 
     assert_ne!(deterministic_nonce(&secret, &pk, &m), tari_schnorr_nonce);
+}
+
+// ---- device stream validation (`SignStreamState`) ----------------------------------------------
+
+type StreamSegments = Vec<(SigningField, Vec<u8>)>;
+
+/// Feeds `segments` through a fresh [`SignStreamState`] as the host transport does: each field
+/// split into APDU chunks of at most `max_chunk` bytes, with [`SEGMENT_LAST_CHUNK`] on the last.
+fn run_stream(
+    mode: SignMode,
+    segments: &[(SigningField, Vec<u8>)],
+    max_chunk: usize,
+) -> Result<TxDisplay, OotleStatusWord> {
+    let mut stream = SignStreamState::new(mode);
+    for (field, bytes) in segments {
+        let tag = field.as_tag();
+        if bytes.is_empty() {
+            stream.accept_segment(tag | SEGMENT_LAST_CHUNK, &[])?;
+            continue;
+        }
+        let mut chunks = bytes.chunks(max_chunk).peekable();
+        while let Some(chunk) = chunks.next() {
+            let p1 = if chunks.peek().is_none() {
+                tag | SEGMENT_LAST_CHUNK
+            } else {
+                tag
+            };
+            stream.accept_segment(p1, chunk)?;
+        }
+    }
+    stream.finish()
+}
+
+fn to_stream_segments(segments: Vec<PreimageSegment>) -> StreamSegments {
+    segments
+        .into_iter()
+        .map(|segment| (SigningField::try_from(segment.field as u8).unwrap(), segment.bytes))
+        .collect()
+}
+
+fn segment_bytes_mut(segments: &mut StreamSegments, field: SigningField) -> &mut Vec<u8> {
+    let (_, bytes) = segments
+        .iter_mut()
+        .find(|(segment_field, _)| *segment_field == field)
+        .unwrap();
+    bytes
+}
+
+/// What the host recipe streams for one transaction: the authorization preimage, the seal
+/// preimage over three prior signatures, and the summary the device must extract from either.
+struct StreamFixture {
+    add_signer: StreamSegments,
+    seal: StreamSegments,
+    display: TxDisplay,
+}
+
+fn stream_fixture() -> StreamFixture {
+    let seal_signer = pk_bytes(&random_scalar());
+    let authorizer = pk_bytes(&random_scalar());
+    let mut tx = sample_unsigned();
+    tx.min_epoch = Some(Epoch(7));
+    tx.max_epoch = Epoch(99);
+    tx.main_signer = MainSigner::Authorizer(authorizer);
+    tx.inputs
+        .insert(InputDeclaration::read(ComponentAddress::from_array([0x11; 32])));
+    for i in 0..8u8 {
+        tx.blobs.push(Blob::from(vec![i; 16])).unwrap();
+    }
+
+    let authorizers: AuthorizerSet = [authorizer].into_iter().collect();
+    let context = AuthorizationContext::new(&seal_signer, &authorizers);
+    let add_signer_preimage = TransactionSignature::signing_preimage(context, &tx);
+    let (auth_pk, auth_sig) = sign(&random_scalar(), &message(TX_LABEL_SIGNATURE, &add_signer_preimage));
+    let prior = TransactionSignature::new(
+        RistrettoPublicKeyBytes::from_bytes(&auth_pk).unwrap(),
+        sig_bytes(&auth_sig),
+    );
+    let display = TxDisplay {
+        network: tx.network,
+        fee_instruction_count: u32::try_from(tx.fee_instructions.len()).unwrap(),
+    };
+    let unsealed = UnsealedTransactionV1::new(tx, vec![prior.clone(), prior.clone(), prior]);
+
+    StreamFixture {
+        add_signer: to_stream_segments(add_signer_preimage),
+        seal: to_stream_segments(TransactionSealSignature::signing_preimage(&unsealed)),
+        display,
+    }
+}
+
+#[test]
+fn sign_stream_state_accepts_current_schema_preimages() {
+    let fixture = stream_fixture();
+    // The device reads the leading `u32` count of FeeInstructions from that field's first chunk, so
+    // 4 bytes is the smallest chunk size it accepts.
+    for max_chunk in [250, 64, 4] {
+        assert_eq!(
+            run_stream(SignMode::AddSigner, &fixture.add_signer, max_chunk),
+            Ok(fixture.display)
+        );
+        assert_eq!(
+            run_stream(SignMode::Seal, &fixture.seal, max_chunk),
+            Ok(fixture.display)
+        );
+    }
+}
+
+#[test]
+fn sign_stream_state_rejects_v1_schema() {
+    let fixture = stream_fixture();
+    let v1 = SchemaVersion::V1.as_u16().to_le_bytes().to_vec();
+    for (mode, mut segments) in [
+        (SignMode::AddSigner, fixture.add_signer),
+        (SignMode::Seal, fixture.seal),
+    ] {
+        *segment_bytes_mut(&mut segments, SigningField::SchemaVersion) = v1.clone();
+        assert_eq!(run_stream(mode, &segments, 250), Err(OotleStatusWord::BadRequest));
+    }
+}
+
+#[test]
+fn sign_stream_state_rejects_boundary_spoofing() {
+    let fixture = stream_fixture();
+
+    // A trailing byte on SchemaVersion shifts the network byte the device displays and derives
+    // stealth keys under.
+    let mut shifted_network = fixture.seal.clone();
+    segment_bytes_mut(&mut shifted_network, SigningField::SchemaVersion).push(0x00);
+    assert_eq!(
+        run_stream(SignMode::Seal, &shifted_network, 250),
+        Err(OotleStatusWord::BadRequest)
+    );
+
+    let mut extended_seal_signer = fixture.add_signer;
+    segment_bytes_mut(&mut extended_seal_signer, SigningField::SealSigner).push(0x00);
+    assert_eq!(
+        run_stream(SignMode::AddSigner, &extended_seal_signer, 250),
+        Err(OotleStatusWord::BadRequest)
+    );
+
+    // Trailing bytes on Network shift the displayed fee instruction count.
+    let mut shifted_fee_count = fixture.seal;
+    segment_bytes_mut(&mut shifted_fee_count, SigningField::Network).extend_from_slice(&[0u8, 0, 0, 0]);
+    assert_eq!(
+        run_stream(SignMode::Seal, &shifted_fee_count, 250),
+        Err(OotleStatusWord::BadRequest)
+    );
 }

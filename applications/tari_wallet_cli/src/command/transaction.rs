@@ -39,6 +39,7 @@ use tari_engine_types::{
 use tari_ootle_address::OotleAddress;
 use tari_ootle_common_types::{Epoch, InputDeclaration, SubstateAddress};
 use tari_ootle_transaction::{
+    Blob,
     Instruction,
     Transaction,
     TransactionId,
@@ -64,6 +65,7 @@ use tari_ootle_walletd_client::{
     },
 };
 use tari_template_lib::types::{
+    ComponentAddress,
     NonFungibleAddress,
     NonFungibleId,
     ResourceAddress,
@@ -71,7 +73,7 @@ use tari_template_lib::types::{
     constants::STEALTH_TARI_RESOURCE_ADDRESS,
     crypto::RistrettoPublicKeyBytes,
 };
-use tari_transaction_manifest::{ManifestValue, parse_manifest};
+use tari_transaction_manifest::{ManifestInstructions, ManifestValue, parse_manifest};
 
 use crate::from_hex::FromHex;
 
@@ -150,6 +152,9 @@ pub struct SubmitManifestArgs {
     manifest: PathBuf,
     #[clap(long, short = 'g')]
     input_variables: Vec<String>,
+    /// Named blob inputs referenced by `blob!(name)` or `publish_template!(name)` (`<name>=<path>`).
+    #[clap(long = "blob", short = 'b')]
+    blobs: Vec<String>,
     #[clap(flatten)]
     common: CommonSubmitArgs,
 }
@@ -235,39 +240,29 @@ async fn handle_get(args: GetArgs, client: &mut WalletDaemonClient) -> Result<()
     Ok(())
 }
 
-pub async fn handle_submit(args: SubmitArgs, client: &mut WalletDaemonClient) -> Result<(), anyhow::Error> {
-    let SubmitArgs { instruction, common } = args;
-    let instruction = match instruction {
-        CliInstruction::CallFunction {
-            template_address,
-            function_name,
-            args,
-        } => Instruction::CallFunction {
-            address: template_address.into_inner(),
-            function: function_name.try_into()?,
-            args: args.into_iter().map(|s| s.into_arg()).collect(),
-        },
-        CliInstruction::CallMethod {
-            component_address,
-            method_name,
-            args,
-        } => Instruction::CallMethod {
-            call: component_address
-                .as_component_address()
-                .ok_or_else(|| anyhow!("Invalid component address: {}", component_address))?
-                .into(),
-            method: method_name.try_into()?,
-            args: args.into_iter().map(|s| s.into_arg()).collect(),
-        },
-    };
+struct TxBuildContext<'a> {
+    fee_account_address: ComponentAddress,
+    network_byte: u8,
+    max_epoch: Epoch,
+    dump_account_address: Option<ComponentAddress>,
+    common: &'a CommonSubmitArgs,
+}
 
-    let fee_account;
-    if let Some(fee_account_name) = common.fee_account.clone() {
-        fee_account = client.accounts_get(fee_account_name).await?.account;
+struct PreparedSubmission<'a> {
+    transaction: UnsignedTransaction,
+    owner_key_id: tari_ootle_wallet_sdk::models::KeyId,
+    common: &'a CommonSubmitArgs,
+}
+
+async fn resolve_submit_context<'a>(
+    common: &'a CommonSubmitArgs,
+    client: &mut WalletDaemonClient,
+) -> Result<(TxBuildContext<'a>, tari_ootle_wallet_sdk::models::KeyId), anyhow::Error> {
+    let fee_account = if let Some(fee_account_name) = common.fee_account.clone() {
+        client.accounts_get(fee_account_name).await?.account
     } else {
-        fee_account = client.accounts_get_default().await?.account;
-    }
-
+        client.accounts_get_default().await?.account
+    };
     let owner_key_id = fee_account
         .owner_key_id
         .ok_or_else(|| anyhow!("Fee account does not have an owner key ID"))?;
@@ -280,25 +275,114 @@ pub async fn handle_submit(args: SubmitArgs, client: &mut WalletDaemonClient) ->
     } = client.get_settings().await?;
     let max_epoch = common.resolve_max_epoch(current_epoch, default_transaction_validity_epochs)?;
 
-    let mut builder = Transaction::builder(network.byte, max_epoch)
-        .call_method(fee_account.component_address, "withdraw", args![common.max_fee,])
-        .put_last_instruction_output_on_workspace("fee_bucket")
-        .pay_fee_from_bucket("fee_bucket")
-        .add_instruction(instruction)
-        .with_inputs(common.inputs)
-        .with_min_epoch(common.min_epoch.map(Epoch));
-
-    if let Some(dump_account) = common.dump_outputs_into {
+    let dump_account_address = if let Some(dump_account) = common.dump_outputs_into.clone() {
         let AccountGetResponse { account, .. } = client.accounts_get(dump_account).await?;
+        Some(account.component_address)
+    } else {
+        None
+    };
 
-        builder = builder.put_last_instruction_output_on_workspace("bucket").call_method(
-            account.component_address,
-            "deposit",
-            args![Workspace("bucket")],
-        );
+    Ok((
+        TxBuildContext {
+            fee_account_address: fee_account.component_address,
+            network_byte: network.byte,
+            max_epoch,
+            dump_account_address,
+            common,
+        },
+        owner_key_id,
+    ))
+}
+
+fn cli_instruction_to_instruction(instruction: CliInstruction) -> Result<Instruction, anyhow::Error> {
+    match instruction {
+        CliInstruction::CallFunction {
+            template_address,
+            function_name,
+            args,
+        } => Ok(Instruction::CallFunction {
+            address: template_address.into_inner(),
+            function: function_name.try_into()?,
+            args: args.into_iter().map(|s| s.into_arg()).collect(),
+        }),
+        CliInstruction::CallMethod {
+            component_address,
+            method_name,
+            args,
+        } => Ok(Instruction::CallMethod {
+            call: component_address
+                .as_component_address()
+                .ok_or_else(|| anyhow!("Invalid component address: {}", component_address))?
+                .into(),
+            method: method_name.try_into()?,
+            args: args.into_iter().map(|s| s.into_arg()).collect(),
+        }),
+    }
+}
+
+/// Builds an unsigned single-instruction transaction that pays fees from the fee account via `pay_fee` in the fee
+/// phase, and deposits the instruction's output into the dump account when one is set.
+fn build_submit_transaction(ctx: &TxBuildContext<'_>, instruction: Instruction) -> UnsignedTransaction {
+    let mut builder = Transaction::builder(ctx.network_byte, ctx.max_epoch)
+        .pay_fee_from_component(ctx.fee_account_address, ctx.common.max_fee)
+        .add_instruction(instruction)
+        .with_inputs(ctx.common.inputs.clone())
+        .with_min_epoch(ctx.common.min_epoch.map(Epoch));
+
+    if let Some(dump_account) = ctx.dump_account_address {
+        builder =
+            builder
+                .put_last_instruction_output_on_workspace("bucket")
+                .call_method(dump_account, "deposit", args![Workspace("bucket")]);
     }
 
-    let transaction = builder.build_unsigned();
+    builder.build_unsigned()
+}
+
+/// Builds an unsigned manifest transaction that falls back to `fee_account.pay_fee(max_fee)` only when
+/// the manifest has no fee instructions, routes outputs to `dump_account_address` when requested, and
+/// attaches all referenced manifest blobs in declaration order.
+fn build_manifest_transaction(
+    ctx: &TxBuildContext<'_>,
+    instructions: ManifestInstructions,
+) -> Result<UnsignedTransaction, anyhow::Error> {
+    let fee_account = ctx.fee_account_address;
+    let max_fee = ctx.common.max_fee;
+    let mut builder = Transaction::builder(ctx.network_byte, ctx.max_epoch)
+        .with_fee_instructions_builder(|builder| {
+            if instructions.fee_instructions.is_empty() {
+                builder.call_method(fee_account, "pay_fee", args![max_fee])
+            } else {
+                builder.with_instructions(instructions.fee_instructions)
+            }
+        })
+        .with_instructions(instructions.instructions)
+        .with_inputs(ctx.common.inputs.clone())
+        .with_min_epoch(ctx.common.min_epoch.map(Epoch));
+
+    if let Some(dump_account) = ctx.dump_account_address {
+        builder =
+            builder
+                .put_last_instruction_output_on_workspace("bucket")
+                .call_method(dump_account, "deposit", args![Workspace("bucket")]);
+    }
+
+    let mut transaction = builder.build_unsigned();
+    for blob in instructions.blobs.iter().cloned() {
+        transaction.add_blob(blob)?;
+    }
+    Ok(transaction)
+}
+
+async fn submit_or_dry_run_transaction(
+    submission: PreparedSubmission<'_>,
+    client: &mut WalletDaemonClient,
+) -> Result<(), anyhow::Error> {
+    let PreparedSubmission {
+        transaction,
+        owner_key_id,
+        common,
+    } = submission;
     summarize_transaction(&transaction);
 
     if common.dry_run {
@@ -317,102 +401,62 @@ pub async fn handle_submit(args: SubmitArgs, client: &mut WalletDaemonClient) ->
             })
             .await?;
         summarize(&resp.result.finalize, timer.elapsed());
-    } else {
-        let request = TransactionSubmitRequest {
-            transaction,
-            seal_signer: owner_key_id,
-            other_signers: vec![],
-            signatures: vec![],
-            detect_inputs: common.detect_inputs.unwrap_or(true),
-            detect_inputs_use_unversioned: true,
-            lock_ids: vec![],
-        };
-        let resp = client.submit_transaction(&request).await?;
-        wait_transaction_result(resp.transaction_id, common.wait_for_result_timeout_secs, client).await?;
+        return Ok(());
     }
+
+    let request = TransactionSubmitRequest {
+        transaction,
+        seal_signer: owner_key_id,
+        other_signers: vec![],
+        signatures: vec![],
+        detect_inputs: common.detect_inputs.unwrap_or(true),
+        detect_inputs_use_unversioned: true,
+        lock_ids: vec![],
+    };
+    let resp = client.submit_transaction(&request).await?;
+    wait_transaction_result(resp.transaction_id, common.wait_for_result_timeout_secs, client).await?;
     Ok(())
+}
+
+pub async fn handle_submit(args: SubmitArgs, client: &mut WalletDaemonClient) -> Result<(), anyhow::Error> {
+    let SubmitArgs { instruction, common } = args;
+    let instruction = cli_instruction_to_instruction(instruction)?;
+    let (ctx, owner_key_id) = resolve_submit_context(&common, client).await?;
+    let transaction = build_submit_transaction(&ctx, instruction);
+    submit_or_dry_run_transaction(
+        PreparedSubmission {
+            transaction,
+            owner_key_id,
+            common: &common,
+        },
+        client,
+    )
+    .await
 }
 
 async fn handle_submit_manifest(
     args: SubmitManifestArgs,
     client: &mut WalletDaemonClient,
 ) -> Result<(), anyhow::Error> {
-    let timer = Instant::now();
     let contents = fs::read_to_string(&args.manifest).map_err(|e| anyhow!("Failed to read manifest: {}", e))?;
     let instructions = parse_manifest(
         &contents,
         parse_globals(args.input_variables)?,
         Default::default(),
-        Default::default(),
+        parse_blobs(args.blobs)?,
     )?;
     let common = args.common;
-
-    let fee_account;
-    if let Some(fee_account_name) = common.fee_account.clone() {
-        fee_account = client.accounts_get(fee_account_name).await?.account;
-    } else {
-        fee_account = client.accounts_get_default().await?.account;
-    }
-
-    let owner_key_id = fee_account
-        .owner_key_id
-        .ok_or_else(|| anyhow!("Fee account does not have an owner key ID"))?;
-
-    let SettingsGetResponse {
-        network,
-        current_epoch,
-        default_transaction_validity_epochs,
-        ..
-    } = client.get_settings().await?;
-    let max_epoch = common.resolve_max_epoch(current_epoch, default_transaction_validity_epochs)?;
-
-    let builder = Transaction::builder(network.byte, max_epoch)
-        .with_fee_instructions_builder(|builder| {
-            builder.with_instructions(instructions.fee_instructions).call_method(
-                fee_account.component_address,
-                "pay_fee",
-                args![common.max_fee],
-            )
-        })
-        .with_instructions(instructions.instructions)
-        .with_inputs(common.inputs)
-        .with_min_epoch(common.min_epoch.map(Epoch));
-
-    let transaction = builder.build_unsigned();
-    summarize_transaction(&transaction);
-
-    if common.dry_run {
-        println!("NOTE: Dry run is enabled. This transaction will not be processed by the network.");
-        println!();
-
-        let resp = client
-            .submit_transaction_dry_run(TransactionSubmitDryRunRequest {
-                transaction,
-                seal_signer: owner_key_id,
-                other_signers: vec![],
-                signatures: vec![],
-                detect_inputs: common.detect_inputs.unwrap_or(true),
-                detect_inputs_use_unversioned: true,
-                lock_ids: vec![],
-            })
-            .await?;
-        summarize(&resp.result.finalize, timer.elapsed());
-    } else {
-        let request = TransactionSubmitRequest {
+    let (ctx, owner_key_id) = resolve_submit_context(&common, client).await?;
+    let transaction = build_manifest_transaction(&ctx, instructions)?;
+    submit_or_dry_run_transaction(
+        PreparedSubmission {
             transaction,
-            seal_signer: owner_key_id,
-            other_signers: vec![],
-            signatures: vec![],
-            detect_inputs: common.detect_inputs.unwrap_or(true),
-            detect_inputs_use_unversioned: true,
-            lock_ids: vec![],
-        };
-
-        let resp = client.submit_transaction(&request).await?;
-        wait_transaction_result(resp.transaction_id, common.wait_for_result_timeout_secs, client).await?;
-    }
-
-    Ok(())
+            owner_key_id,
+            common: &common,
+        },
+        client,
+    )
+    .await
 }
 
 pub async fn handle_send(args: SendArgs, client: &mut WalletDaemonClient) -> Result<(), anyhow::Error> {
@@ -724,7 +768,7 @@ impl FromStr for CliArg {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if let Some(file) = s.strip_prefix('@') {
             let base64_data = fs::read_to_string(file).map_err(|e| anyhow!("Failed to read file {}: {}", file, e))?;
-            return Ok(CliArg::Blob(decode_exact(&base64_decode(base64_data)?)?));
+            return Ok(CliArg::Blob(decode_exact(&base64_decode(base64_data.trim())?)?));
         }
 
         if let Ok(v) = s.parse::<u64>() {
@@ -755,12 +799,12 @@ impl FromStr for CliArg {
             return Ok(CliArg::Bool(v));
         }
 
-        if let Ok(v) = s.parse::<SubstateId>() {
-            return Ok(CliArg::SubstateId(v));
-        }
-
         if let Some(v) = parse_template_address(s) {
             return Ok(CliArg::TemplateAddress(v));
+        }
+
+        if let Ok(v) = s.parse::<SubstateId>() {
+            return Ok(CliArg::SubstateId(v));
         }
 
         if let Some(("nft", nft_id)) = s.split_once('_') {
@@ -825,7 +869,8 @@ impl FromStr for NewResourceOutput {
         let (template_address, token_symbol) = s
             .split_once(':')
             .ok_or_else(|| anyhow!("Expected template address and token symbol"))?;
-        let template_address = TemplateAddress::from_hex(template_address)?;
+        let template_address =
+            parse_template_address(template_address).map_or_else(|| TemplateAddress::from_hex(template_address), Ok)?;
         Ok(NewResourceOutput {
             template_address,
             token_symbol: token_symbol.to_string(),
@@ -859,10 +904,7 @@ impl FromStr for SpecificNonFungibleMintOutput {
         let resource_address = resource_address
             .as_resource_address()
             .ok_or_else(|| anyhow!("Expected resource address but got {}", resource_address))?;
-        let non_fungible_id = non_fungible_id
-            .split_once('_')
-            .map(|(_, b)| b)
-            .unwrap_or(non_fungible_id);
+        let non_fungible_id = non_fungible_id.strip_prefix("nft_").unwrap_or(non_fungible_id);
         let non_fungible_id =
             NonFungibleId::try_from_canonical_string(non_fungible_id).map_err(|e| anyhow!("{:?}", e))?;
         Ok(SpecificNonFungibleMintOutput {
@@ -925,7 +967,207 @@ fn parse_globals(globals: Vec<String>) -> Result<HashMap<String, ManifestValue>,
     Ok(result)
 }
 
+fn parse_blobs(blobs: Vec<String>) -> Result<HashMap<String, Blob>, anyhow::Error> {
+    let mut result = HashMap::with_capacity(blobs.len());
+    for entry in blobs {
+        let (name, path) = entry
+            .split_once('=')
+            .ok_or_else(|| anyhow!("Invalid blob argument '{}' (expected <name>=<path>)", entry))?;
+        let bytes = fs::read(path).map_err(|err| anyhow!("Failed to read blob file '{}': {}", path, err))?;
+        result.insert(name.to_string(), Blob::from(bytes));
+    }
+    Ok(result)
+}
+
 fn base64_decode<T: AsRef<[u8]>>(s: T) -> Result<Vec<u8>, base64::DecodeError> {
     use base64::Engine;
     base64::prelude::BASE64_STANDARD.decode(s)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use base64::Engine;
+    use tari_ootle_transaction::{Blobs, ComponentReference, args::WorkspaceOffsetId};
+    use tari_template_lib::types::Amount;
+
+    use super::*;
+
+    #[test]
+    fn cli_arg_parses_template_address_and_trimmed_base64_file() {
+        let hex = "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20";
+        let canonical = format!("template_{hex}");
+        let arg = CliArg::from_str(&canonical).unwrap();
+        assert!(matches!(arg, CliArg::TemplateAddress(addr) if addr == TemplateAddress::from_hex(hex).unwrap()));
+
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock after epoch")
+            .as_nanos();
+        let file_path = std::env::temp_dir().join(format!("tari_wallet_cli_arg_{}_{}.b64", std::process::id(), nanos));
+        let cbor_bytes = tari_bor::encode(&42u64).unwrap();
+        let encoded = format!("{}\n", base64::prelude::BASE64_STANDARD.encode(&cbor_bytes));
+        fs::write(&file_path, encoded).unwrap();
+
+        let file_arg = format!("@{}", file_path.display());
+        let parsed = CliArg::from_str(&file_arg).unwrap();
+        let _unused = fs::remove_file(&file_path);
+        assert!(matches!(parsed, CliArg::Blob(tari_bor::Value::Integer(42))));
+    }
+
+    #[test]
+    fn specific_non_fungible_mint_output_parses_canonical_and_prefixed_ids() {
+        let res_str = "resource_0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20";
+        let out_u32 = SpecificNonFungibleMintOutput::from_str(&format!("{res_str},u32_42")).unwrap();
+        assert_eq!(out_u32.non_fungible_id, NonFungibleId::from_u32(42));
+
+        let out_prefixed = SpecificNonFungibleMintOutput::from_str(&format!("{res_str},nft_str_my_token")).unwrap();
+        assert_eq!(
+            out_prefixed.non_fungible_id,
+            NonFungibleId::try_from_string("my_token").unwrap()
+        );
+    }
+
+    #[test]
+    fn new_resource_output_accepts_canonical_and_hex_template_address() {
+        let hex = "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20";
+        let from_hex = NewResourceOutput::from_str(&format!("{hex}:TKN")).unwrap();
+        let from_canonical = NewResourceOutput::from_str(&format!("template_{hex}:TKN")).unwrap();
+        assert_eq!(from_hex.template_address, from_canonical.template_address);
+        assert_eq!(from_canonical.token_symbol, "TKN");
+    }
+
+    fn sample_common_args(max_fee: u64) -> CommonSubmitArgs {
+        CommonSubmitArgs {
+            wait_for_result_timeout_secs: None,
+            inputs: vec![],
+            detect_inputs: None,
+            version: None,
+            dump_outputs_into: None,
+            dry_run: false,
+            max_fee,
+            fee_account: None,
+            min_epoch: Some(3),
+            max_epoch: Some(15),
+        }
+    }
+
+    #[test]
+    fn build_submit_transaction_pays_fee_in_fee_phase_and_routes_dump_output() {
+        let fee_account = ComponentAddress::from_array([0x11; 32]);
+        let dump_account = ComponentAddress::from_array([0x22; 32]);
+        let target_template = TemplateAddress::from_array([0x33; 32]);
+        let common = sample_common_args(1_500);
+        let ctx = TxBuildContext {
+            fee_account_address: fee_account,
+            network_byte: 0x10,
+            max_epoch: Epoch(15),
+            dump_account_address: Some(dump_account),
+            common: &common,
+        };
+        let instruction = Instruction::CallFunction {
+            address: target_template,
+            function: "mint".try_into().unwrap(),
+            args: vec![],
+        };
+
+        let tx = build_submit_transaction(&ctx, instruction.clone());
+
+        assert_eq!(tx.min_epoch(), Some(Epoch(3)));
+        assert_eq!(tx.max_epoch(), Epoch(15));
+        assert_eq!(tx.fee_instructions(), &[Instruction::CallMethod {
+            call: ComponentReference::Address(fee_account),
+            method: "pay_fee".try_into().unwrap(),
+            args: vec![call_arg!(Amount::from(1_500u64))],
+        }]);
+        assert_eq!(tx.instructions(), &[
+            instruction,
+            Instruction::PutLastInstructionOutputOnWorkspace { key: 0 },
+            Instruction::CallMethod {
+                call: ComponentReference::Address(dump_account),
+                method: "deposit".try_into().unwrap(),
+                args: vec![InstructionArg::Workspace(WorkspaceOffsetId::new(0))],
+            },
+        ]);
+    }
+
+    #[test]
+    fn build_manifest_transaction_uses_default_pay_fee_when_manifest_fee_is_empty() {
+        let fee_account = ComponentAddress::from_array([0x44; 32]);
+        let common = sample_common_args(2_000);
+        let ctx = TxBuildContext {
+            fee_account_address: fee_account,
+            network_byte: 0x10,
+            max_epoch: Epoch(15),
+            dump_account_address: None,
+            common: &common,
+        };
+        let manifest_instructions = ManifestInstructions {
+            instructions: vec![Instruction::DropAllProofsInWorkspace],
+            fee_instructions: vec![],
+            blobs: Blobs::empty(),
+        };
+
+        let tx = build_manifest_transaction(&ctx, manifest_instructions).unwrap();
+
+        assert_eq!(tx.fee_instructions(), &[Instruction::CallMethod {
+            call: ComponentReference::Address(fee_account),
+            method: "pay_fee".try_into().unwrap(),
+            args: vec![call_arg!(2_000u64)],
+        }]);
+        assert_eq!(tx.instructions(), &[Instruction::DropAllProofsInWorkspace]);
+        assert!(tx.blobs().is_empty());
+    }
+
+    #[test]
+    fn build_manifest_transaction_preserves_custom_fee_blobs_and_dump_account() {
+        let fee_account = ComponentAddress::from_array([0x55; 32]);
+        let custom_fee_component = ComponentAddress::from_array([0x66; 32]);
+        let dump_account = ComponentAddress::from_array([0x77; 32]);
+        let common = sample_common_args(2_500);
+        let ctx = TxBuildContext {
+            fee_account_address: fee_account,
+            network_byte: 0x10,
+            max_epoch: Epoch(15),
+            dump_account_address: Some(dump_account),
+            common: &common,
+        };
+        let custom_fee = Instruction::CallMethod {
+            call: ComponentReference::Address(custom_fee_component),
+            method: "pay_custom_fee".try_into().unwrap(),
+            args: vec![call_arg!(900u64)],
+        };
+        let blob = Blob::from(vec![0xde, 0xad, 0xbe, 0xef]);
+        let manifest_instructions = ManifestInstructions {
+            instructions: vec![
+                Instruction::PublishTemplate {
+                    binary: 0,
+                    metadata_hash: None,
+                },
+                Instruction::PutLastInstructionOutputOnWorkspace { key: 0 },
+            ],
+            fee_instructions: vec![custom_fee.clone()],
+            blobs: Blobs::from_vec(vec![blob.clone()]),
+        };
+
+        let tx = build_manifest_transaction(&ctx, manifest_instructions).unwrap();
+
+        assert_eq!(tx.fee_instructions(), &[custom_fee]);
+        assert_eq!(tx.blobs().as_slice(), &[blob]);
+        assert!(tx.validate_blob_references().is_ok());
+        assert_eq!(tx.instructions(), &[
+            Instruction::PublishTemplate {
+                binary: 0,
+                metadata_hash: None,
+            },
+            Instruction::PutLastInstructionOutputOnWorkspace { key: 0 },
+            Instruction::PutLastInstructionOutputOnWorkspace { key: 1 },
+            Instruction::CallMethod {
+                call: ComponentReference::Address(dump_account),
+                method: "deposit".try_into().unwrap(),
+                args: vec![InstructionArg::Workspace(WorkspaceOffsetId::new(1))],
+            },
+        ]);
+    }
 }

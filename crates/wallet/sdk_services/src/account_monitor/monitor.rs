@@ -126,7 +126,7 @@ where
                 }
 
                 _ = utxo_scan_interval.tick(), if self.enable_periodic_scanning_of_utxos => {
-                    self.on_utxo_scan_tick();
+                    self.on_utxo_scan_tick().await;
                 }
 
                 Some(req) = self.request_rx.recv() => {
@@ -203,20 +203,20 @@ where
         }
     }
 
-    fn on_utxo_scan_tick(&self) {
-        if let Err(err) = self.request_all_stealth_utxo_scans() {
+    async fn on_utxo_scan_tick(&self) {
+        if let Err(err) = self.request_all_stealth_utxo_scans().await {
             error!(target: LOG_TARGET, "Error requesting UTXO scans for all accounts: {}", err);
         }
     }
 
-    fn request_all_stealth_utxo_scans(&self) -> Result<(), AccountMonitorError> {
+    async fn request_all_stealth_utxo_scans(&self) -> Result<(), AccountMonitorError> {
         let accounts_api = self.wallet_sdk.accounts_api();
         const PAGE_SIZE: usize = 10;
         let mut offset = 0;
         loop {
             let accounts = accounts_api.get_many(offset, PAGE_SIZE)?;
             for account in &accounts {
-                self.refresh_stealth_utxos(*account.component_address())?;
+                self.refresh_stealth_utxos(*account.component_address()).await?;
             }
             offset += accounts.len();
             if accounts.len() < PAGE_SIZE {
@@ -280,7 +280,7 @@ where
             .refresh_account_with_source(account_address, source)
             .await?;
         if scan_for_utxos {
-            self.refresh_stealth_utxos(account_address)?;
+            self.refresh_stealth_utxos(account_address).await?;
         }
         if is_updated {
             info!(
@@ -296,7 +296,8 @@ where
         Ok(is_updated)
     }
 
-    fn refresh_stealth_utxos(&self, account_address: ComponentAddress) -> Result<(), AccountMonitorError> {
+    async fn refresh_stealth_utxos(&self, account_address: ComponentAddress) -> Result<(), AccountMonitorError> {
+        self.scanner.associate_live_stealth_resources(&account_address).await?;
         let associated_resources = self
             .wallet_sdk
             .accounts_api()
@@ -326,8 +327,8 @@ where
                 }
             },
             WalletEvent::TransactionFinalized(event) => {
+                let new_account = self.pending_accounts.remove(&event.transaction_id);
                 if let Some(diff) = event.finalize.result.any_accept() {
-                    let new_account = self.pending_accounts.remove(&event.transaction_id);
                     self.scanner
                         .process_result(event.transaction_id, diff, new_account)
                         .await?;

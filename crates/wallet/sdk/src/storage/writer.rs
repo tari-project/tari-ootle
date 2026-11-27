@@ -63,8 +63,6 @@ use crate::{
 pub trait WalletStoreWriter: CommittableStore {
     // Key manager
     fn key_manager_insert_or_ignore(&mut self, branch: &str, index: u64) -> Result<(), WalletStorageError>;
-    fn key_manager_set_active_index(&mut self, branch: &str, index: u64) -> Result<(), WalletStorageError>;
-    fn key_manager_reset_index(&mut self, branch: &str, index: u64) -> Result<(), WalletStorageError>;
     fn key_manager_insert_imported_key(
         &mut self,
         label: &str,
@@ -175,6 +173,15 @@ pub trait WalletStoreWriter: CommittableStore {
         lock_id: WalletLockId,
     ) -> Result<ConfidentialOutputModel, WalletStorageError>;
     fn confidential_outputs_insert(&mut self, output: ConfidentialOutputModel) -> Result<(), WalletStorageError>;
+    /// Transitions confidential outputs in `vault_id` matching `commitments` from `from_status` to `to_status`,
+    /// returning the number of rows updated.
+    fn confidential_outputs_set_status_by_commitments(
+        &mut self,
+        vault_id: &VaultId,
+        commitments: &[PedersenCommitmentBytes],
+        from_status: OutputStatus,
+        to_status: OutputStatus,
+    ) -> Result<usize, WalletStorageError>;
     /// Release outputs that were locked and remove pending unconfirmed outputs for this proof
     fn confidential_outputs_release_by_lock_id(&mut self, lock_id: WalletLockId) -> Result<(), WalletStorageError>;
 

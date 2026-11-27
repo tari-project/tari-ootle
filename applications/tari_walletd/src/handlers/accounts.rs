@@ -54,6 +54,7 @@ use tari_ootle_wallet_sdk::{
     },
     models::{
         AccountWithAddress,
+        DerivedKeyIndex,
         KeyBranch,
         NewAccountData,
         TransactionContext,
@@ -173,20 +174,7 @@ pub async fn handle_create(
         .unwrap_or_else(|| accounts_api.has_default_account().map(|b| !b))?;
 
     ensure_seed_recovery_finished(sdk)?;
-    let owner_address = match req.key_index {
-        Some(id) => sdk.key_manager_api().derive_account_address(id)?,
-        None => sdk.key_manager_api().next_account_address()?,
-    };
-
-    let acc = accounts_api
-        .create_account(req.account_name.as_deref(), set_as_default, owner_address)
-        .map_err(|e| {
-            if e.is_name_exists_error() {
-                invalid_request(e)
-            } else {
-                general_error(e)
-            }
-        })?;
+    let acc = create_derived_account(context, req.account_name.as_deref(), set_as_default, req.key_index)?;
 
     info!(
         target: LOG_TARGET,
@@ -245,20 +233,12 @@ pub async fn handle_create_or_get(
         .unwrap_or_else(|| accounts_api.has_default_account().map(|b| !b))?;
 
     ensure_seed_recovery_finished(sdk)?;
-    let wallet_keys = match req.key_index {
-        Some(id) => sdk.key_manager_api().derive_account_address(id)?,
-        None => sdk.key_manager_api().next_account_address()?,
-    };
-
-    let acc = accounts_api
-        .create_account(req.account.as_ref().and_then(|a| a.name()), set_as_default, wallet_keys)
-        .map_err(|e| {
-            if e.is_name_exists_error() {
-                invalid_request(e)
-            } else {
-                general_error(e)
-            }
-        })?;
+    let acc = create_derived_account(
+        context,
+        req.account.as_ref().and_then(|a| a.name()),
+        set_as_default,
+        req.key_index,
+    )?;
 
     info!(
         target: LOG_TARGET,
@@ -269,6 +249,27 @@ pub async fn handle_create_or_get(
         account: acc.account,
         address: acc.address,
         created: true,
+    })
+}
+
+/// Creates a derived account at `key_index`, or at the lowest account key index no account uses.
+fn create_derived_account(
+    context: &HandlerContext,
+    account_name: Option<&str>,
+    is_default: bool,
+    key_index: Option<DerivedKeyIndex>,
+) -> Result<AccountWithAddress, anyhow::Error> {
+    let accounts_api = context.wallet_sdk().accounts_api();
+    let created = match key_index {
+        Some(index) => accounts_api.create_account_at_index(account_name, is_default, index),
+        None => accounts_api.create_next_account(account_name, is_default),
+    };
+    created.map_err(|e| {
+        if e.is_name_exists_error() || e.is_account_exists_error() {
+            invalid_request(e)
+        } else {
+            general_error(e)
+        }
     })
 }
 
@@ -1274,6 +1275,7 @@ pub async fn handle_transfer(
 
                     // Found it
                     found_dest_vault = Some(*vault_id);
+                    break;
                 },
             }
         }
@@ -1510,6 +1512,14 @@ pub async fn handle_stealth_transfer(
         Crud::Create,
         Some(*owner_account.component_address()),
     )])?;
+    // Naming exact UTXOs (and thus learning their decrypted totals through the balance check) requires scoped
+    // stealth-UTXO read authority in addition to the transfer-create scope.
+    if req.inputs.is_some() {
+        enforce_scopes(&granted, &[Permission::StealthUtxos(
+            Crud::Read,
+            Some(*owner_account.component_address()),
+        )])?;
+    }
     if owner_account.owner_key_id().is_none() {
         return Err(invalid_params(
             "owner_account",
@@ -1517,6 +1527,255 @@ pub async fn handle_stealth_transfer(
         ));
     };
 
+    // Link the source account, plus any recipients that are the wallet's own accounts. Resolved before
+    // `req` is consumed below and before `owner_account` is moved into the transfer task.
+    let mut linked_accounts = vec![*owner_account.component_address()];
+    for transfer in &req.transfers {
+        if let Some(acc) = sdk
+            .accounts_api()
+            .get_account_by_public_key(transfer.destination_address.account_public_key())
+            .optional()?
+        {
+            linked_accounts.push(acc.account.component_address);
+        }
+    }
+
+    let max_epoch = context.transaction_max_epoch().await?;
+    let mut params = prepare_stealth_transfer_params(&owner_account, req, network, max_epoch)?;
+
+    let transaction_service = context.transaction_service().clone();
+
+    // Spawn here is to prevent the async block from being aborted if the caller aborts the request early as this can
+    // cause funds to remain locked indefinitely.
+    task::spawn(async move {
+        // A dry run's estimate is only worth anything if it describes the transaction that will be
+        // submitted, and the fee is an input to that: input selection targets `amount + max_fee`, so
+        // the fee decides which UTXOs are spent and whether any change is left over. A change output
+        // is another stealth output, and another output is another `PER_OUTPUT` of verification —
+        // enough that an estimate taken at the caller's guessed fee prices a shape the real
+        // submission will not have.
+        //
+        // Settling that costs nothing when the shape is one the static estimate prices: rebuild
+        // locally until a build pays for itself, and spend a single round trip confirming it.
+        // Otherwise fall back to settling over the wire — rebuild at each figure reported until
+        // building at it needs no more than it, then answer with the run that named it, which is a
+        // figure the caller can submit at.
+        let fee_rates = fee_rates_by_network(network);
+        let mut candidate: Option<StealthTransferResponse> = None;
+        let mut rounds = 0usize;
+        let mut static_rounds = 0usize;
+        // Whether the static estimate is still trusted for this request. It is dropped for good the
+        // first time a dry run disagrees with it: past that the wire rounds settle the fee alone.
+        let mut settle_statically = true;
+
+        loop {
+            let max_fee_this_round = params.max_fee;
+            let build = sdk
+                .stealth_transfer_api()
+                .transfer(owner_account.clone(), params.clone())
+                .await;
+            // Only an estimate names a round, and only an estimate raises the fee between builds:
+            // a later round widens the selection target to `amount + max_fee`, so it can exhaust an
+            // account that funded the earlier one, and the failure needs to say which fee did it.
+            // The cause is interpolated rather than added as context: `anyhow::Error` renders only
+            // its outermost layer under `{}`, which is what the caller and the log see.
+            let (lock, transfer) = if params.is_dry_run {
+                build.map_err(|e| {
+                    anyhow!(
+                        "building the transfer at a max fee of {max_fee_this_round} (fee estimate round {}): {e}",
+                        rounds + 1
+                    )
+                })?
+            } else {
+                build?
+            };
+
+            let transaction = transfer.transaction;
+            let spent_inputs = transfer.inputs;
+            let main_pk = transfer.main_signer.public_key().to_byte_type();
+
+            // The additional signer and every UTXO spend key authorize together, each over the set of all their keys.
+            let additional_signers: Vec<_> = transfer.additional_signer.iter().map(|s| s.key_id).collect();
+            let transaction = sdk.signer_api().authorize(
+                &main_pk,
+                &additional_signers,
+                &transfer.utxo_spend_keys,
+                transaction.finish(),
+            )?;
+
+            // Sign and seal the final transaction
+            let transaction = sdk.signer_api().sign(transfer.main_signer.key_id, transaction)?;
+
+            if params.is_dry_run {
+                // Price the shape this build produced and rebuild until the price agrees with the
+                // fee the build was made at. Rebuilding costs local proof generation and nothing
+                // else, so the fixed point is reached without a round trip.
+                //
+                // Both directions matter. An estimate above the fee says the shape cannot pay for
+                // itself, so the next build selects differently and dry-running this one would
+                // measure a transaction that is about to change. An estimate below it says the
+                // caller's `max_fee` is a ceiling rather than a price, and answering with the
+                // ceiling would have them reveal — unrefundably — far more than the transfer costs.
+                let mut settled_statically = false;
+                if let Some(shape) = transfer.statically_priced_shape.filter(|_| settle_statically) {
+                    let (input_bytes, input_fanout) = DeclaredInputPricing::fetch(
+                        &sdk,
+                        transaction.all_inputs_iter().map(|input| input.substate_id().clone()),
+                    )
+                    .await?
+                    .measure(&transaction);
+                    let estimate = shape
+                        .with_transaction(
+                            transaction.calculate_transaction_weight().as_u64(),
+                            input_bytes,
+                            input_fanout,
+                        )
+                        .estimate_fee(&fee_rates)
+                        .saturating_add(FEE_ESTIMATE_ALLOWANCE);
+                    if estimate != params.max_fee && static_rounds < MAX_STATIC_SETTLE_ROUNDS {
+                        params.max_fee = estimate;
+                        static_rounds += 1;
+                        // No round named this fee, so an earlier round's answer no longer describes
+                        // the build about to be made at it.
+                        candidate = None;
+                        lock.release();
+                        continue;
+                    }
+                    // Out of static rounds without agreement, the fee still stands if it covers the
+                    // estimate; if it does not, the rounds below settle it over the wire.
+                    settled_statically = estimate <= params.max_fee;
+                }
+
+                // Release the lock immediately as dry run does not submit the transaction
+                // TODO: maybe transfer() should not lock the outputs if it's a dry run
+                lock.release();
+                let result = transaction_service
+                    .submit_dry_run_transaction(transaction)
+                    .await
+                    .map_err(|e| {
+                        anyhow::anyhow!(
+                            "Dry run transaction failed at a max fee of {max_fee_this_round} (fee estimate round {}): \
+                             {e}",
+                            rounds + 1
+                        )
+                    })?;
+
+                let required_fees = result.finalize.required_fees();
+                // What this round's shape actually costs, without the estimate allowance that
+                // `required_fees` carries on top. That allowance is the caller's margin against the
+                // metering drift a wider `max_fee` causes; testing against it here would treat a fee
+                // that pays in full as insufficient and spend another round chasing it.
+                let charged = result.finalize.charged_fees();
+                // A statically settled fee is the figure to report, not the lower one the run turns
+                // out to need: input selection targets `amount + max_fee`, so a submission at
+                // anything other than a fee some build was made at picks a different set of UTXOs
+                // and prices a different transaction. The difference is the estimate's own margin,
+                // single-digit microtari, and it is what buys the settlement in a single round trip.
+                let response = StealthTransferResponse {
+                    transaction_id: result.finalize.transaction_hash.into(),
+                    required_fees: Some(if settled_statically {
+                        params.max_fee
+                    } else {
+                        required_fees
+                    }),
+                    inputs: Some(spent_inputs.clone()),
+                    dry_run_result: Some(result),
+                };
+                rounds += 1;
+
+                // The estimator priced under the engine — the one thing `stealth_fee_estimate.rs`
+                // exists to prevent. This round's response names the fee it was built at, which the run
+                // has just shown insufficient, so that response must not become the answer: drop the
+                // static estimate for the rest of the request and let the wire rounds settle, as
+                // they did before there was an estimate.
+                if settled_statically && charged > params.max_fee {
+                    warn!(
+                        target: LOG_TARGET,
+                        "❗️ Static stealth fee estimate came in under the charge (built at {} but cost {charged}); \
+                         settling over the wire",
+                        params.max_fee
+                    );
+                    settle_statically = false;
+                    candidate = None;
+                    params.max_fee = required_fees;
+                    continue;
+                }
+
+                match next_fee_estimate_step(
+                    params.max_fee,
+                    charged,
+                    required_fees,
+                    candidate.is_some() || settled_statically,
+                    rounds,
+                ) {
+                    FeeEstimateStep::Settle => {
+                        // A statically settled fee was confirmed by this very round, so this round's
+                        // response is the one that names it. Otherwise the answer is the round that
+                        // named the fee this one was built at.
+                        if settled_statically {
+                            return Ok(response);
+                        }
+                        // This round was built at the candidate's fee, so its inputs are the ones a
+                        // submission at that fee spends.
+                        let mut answer = candidate.expect("BUG: Settle needs a candidate or a static settle");
+                        answer.inputs = Some(spent_inputs);
+                        return Ok(answer);
+                    },
+                    FeeEstimateStep::GiveUp => {
+                        warn!(
+                            target: LOG_TARGET,
+                            "Stealth transfer fee estimate did not settle in {MAX_FEE_ESTIMATE_ROUNDS} rounds (built \
+                             at {} but cost {charged})",
+                            params.max_fee
+                        );
+                        // A statically settled round either settles or is diverted above, so this
+                        // response carries `required_fees` — a figure above what the round cost —
+                        // rather than a settled fee the run disagreed with.
+                        return Ok(response);
+                    },
+                    FeeEstimateStep::Retry { max_fee } => {
+                        params.max_fee = max_fee;
+                        candidate = Some(response);
+                        continue;
+                    },
+                }
+            }
+
+            let tx_id = transaction_service
+                .submit_transaction_with_opts(
+                    transaction,
+                    Some(TransactionContext::with_accounts(linked_accounts)),
+                    Some(lock.id()),
+                )
+                .await
+                .map_err(|e| anyhow!("Transaction failed to submit: {e}"))?;
+
+            // Transaction submitted, we're home free, make sure to allow the lock to persist past this call.
+            // The wallet will monitor the transaction and release the lock when it's finalized.
+            lock.keep_locked();
+
+            notifier.notify(TransactionSubmittedEvent {
+                transaction_id: tx_id,
+                context: None,
+            });
+
+            return Ok(StealthTransferResponse {
+                transaction_id: tx_id,
+                required_fees: None,
+                inputs: None,
+                dry_run_result: None,
+            });
+        }
+    })
+    .await?
+}
+
+fn prepare_stealth_transfer_params(
+    owner_account: &AccountWithAddress,
+    req: StealthTransferRequest,
+    network: tari_ootle_address::Network,
+    max_epoch: Epoch,
+) -> anyhow::Result<StealthTransferParams> {
     // The sender's own address keys (account public key + view public key), used when an output opts in to
     // attaching the sender address as its memo. Network is omitted; the recipient implies it from its own wallet.
     let owner_addr = owner_account.address();
@@ -1534,19 +1793,6 @@ pub async fn handle_stealth_transfer(
         .destination_tag()
         .map(|p| p.as_bytes().to_vec())
         .unwrap_or_default();
-
-    // Link the source account, plus any recipients that are the wallet's own accounts. Resolved before
-    // `req.transfers` is consumed below and before `owner_account` is moved into the transfer task.
-    let mut linked_accounts = vec![*owner_account.component_address()];
-    for transfer in &req.transfers {
-        if let Some(acc) = sdk
-            .accounts_api()
-            .get_account_by_public_key(transfer.destination_address.account_public_key())
-            .optional()?
-        {
-            linked_accounts.push(acc.account.component_address);
-        }
-    }
 
     let outputs = req
         .transfers
@@ -1626,12 +1872,13 @@ pub async fn handle_stealth_transfer(
         })
         .collect::<anyhow::Result<_>>()?;
 
-    let mut params = StealthTransferParams {
-        max_epoch: context.transaction_max_epoch().await?,
+    let params = StealthTransferParams {
+        max_epoch,
         fee_params: req.fee_params,
         input_selection: req.input_selection,
+        inputs: req.inputs,
         resource_address: req.resource_address,
-        max_fee: req.max_fee,
+        max_fee: req.max_fee.max(1),
         badge_usage: req.badge_usage,
         outputs,
         is_dry_run: req.dry_run,
@@ -1639,230 +1886,7 @@ pub async fn handle_stealth_transfer(
     if let Err(err) = params.validate(network) {
         return Err(invalid_params("params", Some(err)));
     }
-
-    let transaction_service = context.transaction_service().clone();
-
-    // Spawn here is to prevent the async block from being aborted if the caller aborts the request early as this can
-    // cause funds to remain locked indefinitely.
-    task::spawn(async move {
-        // A dry run's estimate is only worth anything if it describes the transaction that will be
-        // submitted, and the fee is an input to that: input selection targets `amount + max_fee`, so
-        // the fee decides which UTXOs are spent and whether any change is left over. A change output
-        // is another stealth output, and another output is another `PER_OUTPUT` of verification —
-        // enough that an estimate taken at the caller's guessed fee prices a shape the real
-        // submission will not have.
-        //
-        // Settling that costs nothing when the shape is one the static estimate prices: rebuild
-        // locally until a build pays for itself, and spend a single round trip confirming it.
-        // Otherwise fall back to settling over the wire — rebuild at each figure reported until
-        // building at it needs no more than it, then answer with the run that named it, which is a
-        // figure the caller can submit at.
-        let fee_rates = fee_rates_by_network(network);
-        let mut candidate: Option<StealthTransferResponse> = None;
-        let mut rounds = 0usize;
-        let mut static_rounds = 0usize;
-        // Whether the static estimate is still trusted for this request. It is dropped for good the
-        // first time a dry run disagrees with it: past that the wire rounds settle the fee alone.
-        let mut settle_statically = true;
-
-        loop {
-            let max_fee_this_round = params.max_fee;
-            let build = sdk
-                .stealth_transfer_api()
-                .transfer(owner_account.clone(), params.clone())
-                .await;
-            // Only an estimate names a round, and only an estimate raises the fee between builds:
-            // a later round widens the selection target to `amount + max_fee`, so it can exhaust an
-            // account that funded the earlier one, and the failure needs to say which fee did it.
-            // The cause is interpolated rather than added as context: `anyhow::Error` renders only
-            // its outermost layer under `{}`, which is what the caller and the log see.
-            let (lock, transfer) = if req.dry_run {
-                build.map_err(|e| {
-                    anyhow!(
-                        "building the transfer at a max fee of {max_fee_this_round} (fee estimate round {}): {e}",
-                        rounds + 1
-                    )
-                })?
-            } else {
-                build?
-            };
-
-            let transaction = transfer.transaction;
-            let main_pk = transfer.main_signer.public_key().to_byte_type();
-
-            // Signer api which sign transaction types that require the seal signer public key
-            let main_signer = sdk.signer_api().with_context(&main_pk);
-            // Add additional signature if needed
-            let transaction = match transfer.additional_signer.as_ref() {
-                Some(s) => main_signer.sign(s.key_id, transaction)?,
-                None => transaction.finish(),
-            };
-
-            // Add required UTXO spend key signatures
-            let transaction = transfer
-                .utxo_spend_keys
-                .iter()
-                .try_fold(transaction, |tx, key| main_signer.sign_with_stealth_key(key, tx))?;
-
-            // Sign and seal the final transaction
-            let transaction = sdk.signer_api().sign(transfer.main_signer.key_id, transaction)?;
-
-            if req.dry_run {
-                // Price the shape this build produced and rebuild until the price agrees with the
-                // fee the build was made at. Rebuilding costs local proof generation and nothing
-                // else, so the fixed point is reached without a round trip.
-                //
-                // Both directions matter. An estimate above the fee says the shape cannot pay for
-                // itself, so the next build selects differently and dry-running this one would
-                // measure a transaction that is about to change. An estimate below it says the
-                // caller's `max_fee` is a ceiling rather than a price, and answering with the
-                // ceiling would have them reveal — unrefundably — far more than the transfer costs.
-                let mut settled_statically = false;
-                if let Some(shape) = transfer.statically_priced_shape.filter(|_| settle_statically) {
-                    let (input_bytes, input_fanout) = DeclaredInputPricing::fetch(
-                        &sdk,
-                        transaction.all_inputs_iter().map(|input| input.substate_id().clone()),
-                    )
-                    .await?
-                    .measure(&transaction);
-                    let estimate = shape
-                        .with_transaction(
-                            transaction.calculate_transaction_weight().as_u64(),
-                            input_bytes,
-                            input_fanout,
-                        )
-                        .estimate_fee(&fee_rates)
-                        .saturating_add(FEE_ESTIMATE_ALLOWANCE);
-                    if estimate != params.max_fee && static_rounds < MAX_STATIC_SETTLE_ROUNDS {
-                        params.max_fee = estimate;
-                        static_rounds += 1;
-                        // No round named this fee, so an earlier round's answer no longer describes
-                        // the build about to be made at it.
-                        candidate = None;
-                        lock.release();
-                        continue;
-                    }
-                    // Out of static rounds without agreement, the fee still stands if it covers the
-                    // estimate; if it does not, the rounds below settle it over the wire.
-                    settled_statically = estimate <= params.max_fee;
-                }
-
-                // Release the lock immediately as dry run does not submit the transaction
-                // TODO: maybe transfer() should not lock the outputs if it's a dry run
-                lock.release();
-                let result = transaction_service
-                    .submit_dry_run_transaction(transaction)
-                    .await
-                    .map_err(|e| {
-                        anyhow::anyhow!(
-                            "Dry run transaction failed at a max fee of {max_fee_this_round} (fee estimate round {}): \
-                             {e}",
-                            rounds + 1
-                        )
-                    })?;
-
-                let required_fees = result.finalize.required_fees();
-                // What this round's shape actually costs, without the estimate allowance that
-                // `required_fees` carries on top. That allowance is the caller's margin against the
-                // metering drift a wider `max_fee` causes; testing against it here would treat a fee
-                // that pays in full as insufficient and spend another round chasing it.
-                let charged = result.finalize.charged_fees();
-                // A statically settled fee is the figure to report, not the lower one the run turns
-                // out to need: input selection targets `amount + max_fee`, so a submission at
-                // anything other than a fee some build was made at picks a different set of UTXOs
-                // and prices a different transaction. The difference is the estimate's own margin,
-                // single-digit microtari, and it is what buys the settlement in a single round trip.
-                let response = StealthTransferResponse {
-                    transaction_id: result.finalize.transaction_hash.into(),
-                    required_fees: Some(if settled_statically {
-                        params.max_fee
-                    } else {
-                        required_fees
-                    }),
-                    dry_run_result: Some(result),
-                };
-                rounds += 1;
-
-                // The estimator priced under the engine — the one thing `stealth_fee_estimate.rs`
-                // exists to prevent. This round's response names the fee it was built at, which the run
-                // has just shown insufficient, so that response must not become the answer: drop the
-                // static estimate for the rest of the request and let the wire rounds settle, as
-                // they did before there was an estimate.
-                if settled_statically && charged > params.max_fee {
-                    warn!(
-                        target: LOG_TARGET,
-                        "❗️ Static stealth fee estimate came in under the charge (built at {} but cost {charged}); \
-                         settling over the wire",
-                        params.max_fee
-                    );
-                    settle_statically = false;
-                    candidate = None;
-                    params.max_fee = required_fees;
-                    continue;
-                }
-
-                match next_fee_estimate_step(
-                    params.max_fee,
-                    charged,
-                    required_fees,
-                    candidate.is_some() || settled_statically,
-                    rounds,
-                ) {
-                    FeeEstimateStep::Settle => {
-                        // A statically settled fee was confirmed by this very round, so this round's
-                        // response is the one that names it. Otherwise the answer is the round that
-                        // named the fee this one was built at.
-                        if settled_statically {
-                            return Ok(response);
-                        }
-                        return Ok(candidate.expect("BUG: Settle needs a candidate or a static settle"));
-                    },
-                    FeeEstimateStep::GiveUp => {
-                        warn!(
-                            target: LOG_TARGET,
-                            "Stealth transfer fee estimate did not settle in {MAX_FEE_ESTIMATE_ROUNDS} rounds (built \
-                             at {} but cost {charged})",
-                            params.max_fee
-                        );
-                        // A statically settled round either settles or is diverted above, so this
-                        // response carries `required_fees` — a figure above what the round cost —
-                        // rather than a settled fee the run disagreed with.
-                        return Ok(response);
-                    },
-                    FeeEstimateStep::Retry { max_fee } => {
-                        params.max_fee = max_fee;
-                        candidate = Some(response);
-                        continue;
-                    },
-                }
-            }
-
-            let tx_id = transaction_service
-                .submit_transaction_with_opts(
-                    transaction,
-                    Some(TransactionContext::with_accounts(linked_accounts)),
-                    Some(lock.id()),
-                )
-                .await
-                .map_err(|e| anyhow!("Transaction failed to submit: {e}"))?;
-
-            // Transaction submitted, we're home free, make sure to allow the lock to persist past this call.
-            // The wallet will monitor the transaction and release the lock when it's finalized.
-            lock.keep_locked();
-
-            notifier.notify(TransactionSubmittedEvent {
-                transaction_id: tx_id,
-                context: None,
-            });
-
-            return Ok(StealthTransferResponse {
-                transaction_id: tx_id,
-                required_fees: None,
-                dry_run_result: None,
-            });
-        }
-    })
-    .await?
+    Ok(params)
 }
 
 /// How many times the static estimate may rebuild before giving up and letting the dry-run rounds
@@ -3782,6 +3806,7 @@ mod create_stealth_transfer_statement_handler_tests {
             owner_account: watch.clone(),
             fee_params: TransferFeeParams::new(UtxoInputSelection::PreferRevealed),
             input_selection: UtxoInputSelection::PreferRevealed,
+            inputs: None,
             resource_address: test.stealth_resource,
             badge_usage: BadgeUsage::None,
             transfers: vec![],
@@ -3809,6 +3834,64 @@ mod create_stealth_transfer_statement_handler_tests {
         assert!(
             assert_invalid_params(&err).to_string().contains("view-only account"),
             "{err}"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn stealth_transfer_dry_run_clamps_zero_max_fee_to_one() {
+        use tari_ootle_wallet_crypto::pay_to::PayTo;
+        use tari_ootle_wallet_sdk::apis::{
+            confidential_transfer::UtxoInputSelection,
+            stealth_transfer::{BadgeUsage, TransferFeeParams},
+        };
+        use tari_ootle_walletd_client::types::StealthTransfer;
+
+        let test = setup().await;
+        let owner_account = test
+            .context
+            .wallet_sdk()
+            .accounts_api()
+            .get_account_by_address(&test.account)
+            .unwrap();
+        let req = StealthTransferRequest {
+            owner_account: test.account.into(),
+            fee_params: TransferFeeParams::new(UtxoInputSelection::PreferRevealed),
+            input_selection: UtxoInputSelection::PreferRevealed,
+            inputs: None,
+            resource_address: test.stealth_resource,
+            badge_usage: BadgeUsage::None,
+            transfers: vec![StealthTransfer {
+                destination_address: owner_account.address().clone(),
+                blinded_output_amount: 100,
+                revealed_output_amount: Amount::zero(),
+                output_memo: None,
+                pay_to: PayTo::StealthPublicKey,
+                attach_sender_address: false,
+                destination_tag: None,
+            }],
+            max_fee: 0,
+            dry_run: true,
+        };
+        let params = prepare_stealth_transfer_params(&owner_account, req, Network::LocalNet, Epoch(10)).unwrap();
+        assert_eq!(params.max_fee, 1);
+
+        let Err(err) = test
+            .context
+            .wallet_sdk()
+            .stealth_transfer_api()
+            .transfer(owner_account, params)
+            .await
+        else {
+            panic!("zero-balance account cannot fund the clamped 1-unit fee");
+        };
+        assert!(
+            matches!(
+                err,
+                StealthTransferApiError::OutputsApi(
+                    tari_ootle_wallet_sdk::apis::stealth_outputs::StealthOutputsApiError::InsufficientFunds
+                ) | StealthTransferApiError::InsufficientFunds { .. }
+            ),
+            "expected InsufficientFunds from clamped max_fee = 1, got: {err}"
         );
     }
 }
@@ -4266,5 +4349,35 @@ mod claim_burn_dry_run_failure_tests {
             ClaimBurnError::from_dry_run(TransactionServiceError::ServiceShutdown),
             ClaimBurnError::Network(_)
         ));
+    }
+}
+
+#[cfg(test)]
+mod create_account_handler_tests {
+    use super::*;
+    use crate::handlers::test_support::TestDaemon;
+
+    fn key_index(response: &AccountsCreateResponse) -> Option<DerivedKeyIndex> {
+        response.account.owner_key_id.and_then(|id| id.derived_index())
+    }
+
+    #[tokio::test]
+    async fn accounts_fill_the_lowest_key_index_around_an_explicit_one() {
+        let daemon = TestDaemon::start().await;
+        let create = |key_index| {
+            handle_create(&daemon.context, Some(&daemon.session), AccountsCreateRequest {
+                account_name: None,
+                is_default: None,
+                key_index,
+            })
+        };
+
+        let explicit = create(Some(1000)).await.unwrap();
+        assert_eq!(key_index(&explicit), Some(1000));
+        let next = create(None).await.unwrap();
+        assert_eq!(key_index(&next), Some(0));
+
+        let err = create(Some(1000)).await.unwrap_err();
+        assert!(err.to_string().contains("already exists"), "{err}");
     }
 }

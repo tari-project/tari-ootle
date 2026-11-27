@@ -86,6 +86,9 @@ where
 }
 
 pub fn handle_apdu_request(state_mut: &mut State, (comm, req): (&mut Comm, Request)) {
+    if !matches!(req.instruction, Instruction::SignTransaction) {
+        state_mut.reset();
+    }
     let res = match req.instruction {
         Instruction::GetVersion => handle(state_mut, comm, handlers::get_version),
         Instruction::GetAppName => handle(state_mut, comm, handlers::get_app_name),
@@ -151,7 +154,7 @@ fn confirm_sign(review: &SignReview) -> bool {
     .show()
 }
 
-fn ui_about_menu(comm: &mut Comm) -> Event<Request> {
+fn ui_about_menu(comm: &mut Comm) -> Option<Event<Request>> {
     pub const COPYRIGHT: &str = "(c) 2026 The Tari Project";
     let pages = [
         &Page::from(([LEDGER_APP_NAME, COPYRIGHT], true)),
@@ -159,8 +162,8 @@ fn ui_about_menu(comm: &mut Comm) -> Event<Request> {
     ];
     loop {
         match MultiPageMenu::new(comm, &pages).show() {
-            EventOrPageIndex::Event(e) => return e,
-            EventOrPageIndex::Index(1) => return ui_menu_main(comm),
+            EventOrPageIndex::Event(e) => return Some(e),
+            EventOrPageIndex::Index(1) => return None,
             EventOrPageIndex::Index(_) => (),
         }
     }
@@ -179,7 +182,11 @@ pub fn ui_menu_main(comm: &mut Comm) -> Event<Request> {
     loop {
         match MultiPageMenu::new(comm, &pages).show() {
             EventOrPageIndex::Event(e) => return e,
-            EventOrPageIndex::Index(2) => return ui_about_menu(comm),
+            EventOrPageIndex::Index(2) => {
+                if let Some(e) = ui_about_menu(comm) {
+                    return e;
+                }
+            },
             EventOrPageIndex::Index(3) => exit_app(0),
             EventOrPageIndex::Index(_) => (),
         }

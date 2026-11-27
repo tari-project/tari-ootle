@@ -158,11 +158,12 @@ impl Runner {
                     .finish();
 
                 // First sign with the account key to authorize the use of the account component
-                let transaction = self
-                    .sdk
-                    .signer_api()
-                    .with_context(&primary_account_pk)
-                    .sign(account.owner_key_id.expect("no owner key id"), transaction)?;
+                let transaction = self.sdk.signer_api().authorize(
+                    &primary_account_pk,
+                    &[account.owner_key_id.expect("no owner key id")],
+                    &[],
+                    transaction,
+                )?;
 
                 // Then sign with the primary account key to pay the fee
                 let transaction = self.sdk.signer_api().sign(primary_account_key.key_id(), transaction)?;
@@ -208,7 +209,7 @@ impl Runner {
                 account,
                 lp_vault,
                 SubstateVersion::ZERO,
-                tariswaps[0].lp_resource_address,
+                lp_resource,
                 ResourceType::NonFungible,
                 Some("LP".to_string()),
                 0,
@@ -277,11 +278,12 @@ impl Runner {
                     .call_method(account.component_address, "deposit", args![Workspace("swapped")])
                     .finish();
 
-                let transaction = self
-                    .sdk
-                    .signer_api()
-                    .with_context(&primary_account_pk)
-                    .sign(account.owner_key_id.expect("no owner key id"), transaction)?;
+                let transaction = self.sdk.signer_api().authorize(
+                    &primary_account_pk,
+                    &[account.owner_key_id.expect("no owner key id")],
+                    &[],
+                    transaction,
+                )?;
 
                 let transaction = self.sdk.signer_api().sign(primary_account_key.key_id(), transaction)?;
 
@@ -290,7 +292,7 @@ impl Runner {
 
             for (j, tx_id) in tx_ids.drain(..).enumerate() {
                 self.wait_for_transaction(tx_id).await?;
-                info!("Swap {n} for {amount_a_for_b} XTR -> FAUCET", n = (i + 1) * (j + 1));
+                info!("Swap {n} for {amount_a_for_b} XTR -> FAUCET", n = i * 200 + j + 1);
             }
         }
 
@@ -339,7 +341,7 @@ impl Runner {
 
             for (j, tx_id) in tx_ids.drain(..).enumerate() {
                 self.wait_for_transaction(tx_id).await?;
-                info!("Swap {n} for {amount_b_for_a} FAUCET -> XTR", n = (i + 1) * (j + 1) * 2);
+                info!("Swap {n} for {amount_b_for_a} FAUCET -> XTR", n = i * 200 + j + 1);
             }
         }
 

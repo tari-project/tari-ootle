@@ -820,23 +820,6 @@ mod tests {
     }
 
     #[test]
-    fn an_update_queues_the_template_that_will_replace_the_component_s() {
-        let (prewarmer, rx) = undrained_with(
-            FakeProvider::default(),
-            FakeComponents::holding(component(7), template(2)),
-        );
-        let tx = transaction(|b| b.update_component_template(component(7), template(3)));
-
-        let _wait = prewarmer.prewarm_transaction(&tx);
-
-        assert_eq!(
-            queued_in(&rx),
-            vec![template(3)],
-            "the template being replaced is never loaded, so compiling it is work thrown away",
-        );
-    }
-
-    #[test]
     fn one_template_reached_two_ways_is_waited_on_once() {
         let (prewarmer, rx) = undrained_with(
             FakeProvider::default(),

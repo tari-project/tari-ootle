@@ -20,19 +20,22 @@ import { LAG_SATURATION } from "./ShardCell";
 import ShardDetail from "./ShardDetail";
 import Sparkline from "./Sparkline";
 import {
+  BIAS_Z_SATURATION,
+  formatRate,
+  groupContains,
   MapMode,
+  networkActivity,
+  recentRate,
   STATE_DESCRIPTION,
   STATE_LABEL,
   STATE_ORDER,
-  formatRate,
-  groupContains,
-  networkActivity,
-  recentRate,
   stateColour,
+  VersionSpread,
+  versionSpread,
 } from "./model";
 
 const REFRESH_INTERVAL_MS = 3000;
-const MODES: MapMode[] = ["state", "lag", "activity"];
+const MODES: MapMode[] = ["state", "lag", "activity", "bias"];
 
 function useNowSec(): number {
   const [now, setNow] = useState(() => Math.floor(Date.now() / 1000));
@@ -119,6 +122,7 @@ function SyncBody({ data, nowSec, mode, onMode, selected, onSelect }: BodyProps)
     return counts;
   }, [data.shards]);
   const maxActivity = useMemo(() => Math.max(0, ...data.shards.map((s) => s.versions_last_minute)), [data.shards]);
+  const spread = useMemo(() => versionSpread(data.shards), [data.shards]);
   const activity = useMemo(() => networkActivity(data.shard_groups), [data.shard_groups]);
   const members = new Map(data.network_desc.shard_groups.map(([sg, n]) => [`${sg.start}-${sg.end_inclusive}`, n]));
   const selectedShard = data.shards.find((s) => s.shard === selected) ?? null;
@@ -189,7 +193,7 @@ function SyncBody({ data, nowSec, mode, onMode, selected, onSelect }: BodyProps)
         alignItems={{ sm: "center" }}
         justifyContent="space-between"
       >
-        <Legend mode={mode} counts={counts} maxActivity={maxActivity} />
+        <Legend mode={mode} counts={counts} maxActivity={maxActivity} spread={spread} />
         <ToggleButtonGroup
           size="small"
           exclusive
@@ -200,6 +204,7 @@ function SyncBody({ data, nowSec, mode, onMode, selected, onSelect }: BodyProps)
           <ToggleButton value="state">State</ToggleButton>
           <ToggleButton value="lag">Lag</ToggleButton>
           <ToggleButton value="activity">Activity</ToggleButton>
+          <ToggleButton value="bias">Bias</ToggleButton>
         </ToggleButtonGroup>
       </Stack>
 
@@ -214,6 +219,7 @@ function SyncBody({ data, nowSec, mode, onMode, selected, onSelect }: BodyProps)
             bucketSecs={bucketSecs}
             mode={mode}
             maxActivity={maxActivity}
+            spread={spread}
             nowSec={nowSec}
             selected={selected}
             onSelect={onSelect}
@@ -236,12 +242,17 @@ function Legend({
   mode,
   counts,
   maxActivity,
+  spread,
 }: {
   mode: MapMode;
   counts: Map<ShardSyncState, number>;
   maxActivity: number;
+  spread: VersionSpread | null;
 }) {
   const theme = useTheme();
+  if (mode === "bias") {
+    return <BiasLegend spread={spread} />;
+  }
   if (mode === "state") {
     return (
       <Stack
@@ -305,6 +316,45 @@ function Legend({
       </Typography>
       <Typography variant="caption" color="text.secondary">
         (log scale)
+      </Typography>
+    </Stack>
+  );
+}
+
+function BiasLegend({ spread }: { spread: VersionSpread | null }) {
+  const theme = useTheme();
+  if (!spread) {
+    return (
+      <Typography variant="caption" color="text.secondary">
+        Too few shards have a version to compare
+      </Typography>
+    );
+  }
+  const below = theme.palette.info.main;
+  const above = theme.palette.warning.main;
+  return (
+    <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+      <Typography variant="caption" color="text.secondary">
+        Fewer versions, z −{BIAS_Z_SATURATION}
+      </Typography>
+      <Box
+        title="z = (version − mean) / √mean: how far a shard sits from the mean, in units of the spread chance alone gives"
+        sx={{
+          width: 140,
+          height: 10,
+          borderRadius: "3px",
+          background: `linear-gradient(90deg, ${below}, ${alpha(below, 0.08)} 50%, ${alpha(above, 0.08)} 50%, ${above})`,
+        }}
+      />
+      <Typography variant="caption" color="text.secondary">
+        z +{BIAS_Z_SATURATION}, more versions
+      </Typography>
+      <Typography
+        variant="caption"
+        color="text.secondary"
+        title="Variance over mean of the preshards' versions: about 1 when versions land on shards by chance, well above 1 when some shards are favoured. Versions bump at most once per block, so under load this reads low."
+      >
+        Mean v{Math.round(spread.mean).toLocaleString()}, dispersion {spread.dispersion.toFixed(2)}
       </Typography>
     </Stack>
   );

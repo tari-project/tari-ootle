@@ -71,7 +71,8 @@ pub struct WalletDaemonConfig {
     #[serde(default = "return_default_rpc_address")]
     pub json_rpc_address: SocketAddr,
     /// The signaling server address for the webrtc
-    pub signaling_server_address: Option<SocketAddr>,
+    #[serde(default = "return_default_signaling_server_address")]
+    pub signaling_server_address: SocketAddr,
     /// Allow `webrtc.start`, which hands an app connected through the signaling
     /// server a token carrying the caller's permissions. Off unless an operator
     /// opts in, since any credential holding `webrtc` can open such a session.
@@ -94,12 +95,16 @@ pub struct WalletDaemonConfig {
     /// How long a person has to approve a transaction request. The locks
     /// holding the request's inputs are extended past this, so it also decides
     /// how long those funds stay unavailable if nobody ever answers.
+    /// A human duration, the same form as `jwt_expiry` (for example `"30m"`).
+    #[serde(with = "humantime_serde")]
     #[serde(default = "return_default_transaction_request_ttl")]
     pub transaction_request_ttl: Duration,
     /// How long a person has to approve a signing request when the requester
     /// does not set its own window. Co-signers of a council transaction are
     /// often not at their wallet, so this is longer than the transaction-request
     /// window.
+    /// A human duration, the same form as `jwt_expiry` (for example `"1day"`).
+    #[serde(with = "humantime_serde")]
     #[serde(default = "return_default_signing_request_ttl")]
     pub signing_request_ttl: Duration,
     /// If true, the wallet daemon will allow CORS requests from any origin. This is useful for development and
@@ -307,6 +312,10 @@ fn return_default_rpc_address() -> SocketAddr {
     SocketAddr::from(([127u8, 0, 0, 1], 5100))
 }
 
+fn return_default_signaling_server_address() -> SocketAddr {
+    SocketAddr::from(([127u8, 0, 0, 1], 9100))
+}
+
 impl Default for WalletDaemonConfig {
     fn default() -> Self {
         Self {
@@ -314,7 +323,7 @@ impl Default for WalletDaemonConfig {
             network: Network::MainNet,
             authentication: WalletDaemonAuth::default(),
             json_rpc_address: return_default_rpc_address(),
-            signaling_server_address: Some(SocketAddr::from(([127u8, 0, 0, 1], 9100))),
+            signaling_server_address: return_default_signaling_server_address(),
             indexer_api_urls: vec![
                 "http://127.0.0.1:18300"
                     .parse()
@@ -521,6 +530,25 @@ mod tests {
     }
 
     #[test]
+    fn approval_windows_load_as_human_durations_and_default_when_omitted() {
+        let configured = load(
+            "[ootle_wallet_daemon]\nindexer_api_url = \"http://a.example/\"\ntransaction_request_ttl = \
+             \"45m\"\nsigning_request_ttl = \"1day\"",
+        )
+        .unwrap();
+        assert_eq!(configured.transaction_request_ttl, Duration::from_secs(45 * 60));
+        assert_eq!(configured.signing_request_ttl, Duration::from_secs(24 * 60 * 60));
+        configured.validate().unwrap();
+
+        let defaults = load("[ootle_wallet_daemon]\nindexer_api_url = \"http://a.example/\"").unwrap();
+        assert_eq!(
+            defaults.transaction_request_ttl,
+            return_default_transaction_request_ttl()
+        );
+        assert_eq!(defaults.signing_request_ttl, return_default_signing_request_ttl());
+    }
+
+    #[test]
     fn max_fee_limit_loads_from_config() {
         let config =
             load("[ootle_wallet_daemon]\nindexer_api_url = \"http://a.example/\"\nmax_fee_limit = 5000000").unwrap();
@@ -593,5 +621,15 @@ mod tests {
             ..Default::default()
         };
         disabled.validate().unwrap();
+    }
+
+    #[test]
+    fn signaling_server_address_defaults_when_omitted() {
+        let config = load("[ootle_wallet_daemon]\nindexer_api_url = \"http://a.example/\"").unwrap();
+        assert_eq!(
+            config.signaling_server_address,
+            return_default_signaling_server_address()
+        );
+        config.validate().unwrap();
     }
 }

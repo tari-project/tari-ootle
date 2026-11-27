@@ -20,24 +20,27 @@ import {
 import FunctionItem from "@routes/Templates/components/FunctionItem";
 import { NestedCell } from "@routes/Templates/components/StyledTableComponents";
 import { useState } from "react";
+import { normalizeTemplateAddress, resolveTemplateLookupAction } from "./templateLookupHelpers";
 
 export default function TemplateLookup() {
   const [input, setInput] = useState("");
   const [address, setAddress] = useState("");
 
-  const templateAddress = address.startsWith("template_") ? address.slice("template_".length) : address;
+  const normalizedInput = normalizeTemplateAddress(input);
 
-  const { data, isLoading, isError, error } = useTemplateGet(
-    { template_address: templateAddress },
-    { enabled: !!templateAddress },
+  const { data, isFetching, isError, error, refetch } = useTemplateGet(
+    { template_address: address },
+    { enabled: !!address },
   );
 
   const functions = data?.template_definition?.V2?.functions || [];
 
   function handleLookup() {
-    const trimmed = input.trim();
-    if (trimmed) {
-      setAddress(trimmed);
+    const action = resolveTemplateLookupAction(input, address);
+    if (action.kind === "set-address") {
+      setAddress(action.address);
+    } else if (action.kind === "refetch" && !isFetching) {
+      void refetch();
     }
   }
 
@@ -72,8 +75,8 @@ export default function TemplateLookup() {
             },
           }}
         />
-        <Button variant="contained" onClick={handleLookup} disabled={!input.trim() || isLoading}>
-          {isLoading ? "Loading..." : "Fetch"}
+        <Button variant="contained" onClick={handleLookup} disabled={!normalizedInput || isFetching}>
+          {isFetching ? "Loading..." : "Fetch"}
         </Button>
       </Box>
 

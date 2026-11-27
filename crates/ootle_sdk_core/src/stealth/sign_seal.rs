@@ -13,7 +13,7 @@
 //! 3. **Ephemeral seal** (`can_sign_with_ephemeral_key()`): seal with a fresh random one-time ephemeral key.
 //!
 //! Every signature (auth + seal) is signed with a **fresh random nonce** ([`sign_random`]) over
-//! the `create_message_v1` digests, and [`crate::tx::bor_encode`] encodes the result. The
+//! the `create_message` digests, and [`crate::tx::bor_encode`] encodes the result. The
 //! `main_signer` is set to `SealSigner` before building the unsealed tx in every seal case: all three
 //! seal with a key the spender controls, so the seal signer is always an authority here. (The public
 //! path in [`crate::tx`] assigns it from the authorization-signature count instead, because a public
@@ -42,9 +42,7 @@ use tari_ootle_transaction::{
     TransactionId,
     TransactionMessage,
     TransactionSealSignature,
-    TransactionSignature,
     UnsealedTransactionV1,
-    UnsignedTransaction,
     UnsignedTransactionV1,
 };
 use tari_ootle_wallet_crypto::kdfs::owner_stealth_dh_secret;
@@ -139,33 +137,16 @@ fn derive_stealth_secret(
     ))
 }
 
-/// Builds one stealth-key (`c+k`) authorization [`TransactionSignature`] for `signer`.
-///
-/// The message commits to the **seal signer's** public key (`create_message_v1`'s `SealSigner`
-/// field); the signature is made with the signer's derived `c+k` secret and a random nonce; the
-/// verifying key recorded is `(c+k)·G`.
-fn build_stealth_auth_signature(
-    network: InternalNetwork,
-    secrets: &SpendSecrets,
-    signer: &StealthSignerEntry,
-    seal_signer_pk: &RistrettoPublicKeyBytes,
-    unsigned_v1: &UnsignedTransactionV1,
-) -> Result<TransactionSignature, OotleSdkError> {
-    let stealth_secret = derive_stealth_secret(network, secrets, signer)?;
-    let stealth_pk = public_key_bytes_from_secret(&stealth_secret);
-    let message = TransactionSignature::create_message_v1(seal_signer_pk, unsigned_v1);
-    let sig_bytes = sign_random(&stealth_secret, &message);
-    Ok(TransactionSignature::new(stealth_pk, sig_bytes))
-}
-
-/// The seal key selected for a given signature-requirements case, plus the authorization signatures to
-/// attach (in order) before sealing. The seal signature itself is drawn (random nonce) in
-/// [`finalize_seal`].
+/// The seal key selected for a given signature-requirements case, plus the keys that authorize the
+/// transaction. Every authorization signs over the whole set of authorizing keys, so the keys are
+/// all resolved here and signed together in [`finalize_seal`], each with a random nonce, as is the
+/// seal.
 struct SealPlan {
     /// The secret that seals the transaction.
     seal_secret: RistrettoSecretKey,
-    /// The authorization signatures to attach (in order) before sealing.
-    auth_signatures: Vec<TransactionSignature>,
+    /// The secrets that each contribute one authorization signature: the account key and stealth
+    /// `c+k` keys, whose verifying keys are `(c+k)·G`.
+    auth_secrets: Vec<RistrettoSecretKey>,
 }
 
 /// Resolves the seal key and authorization signatures for the given case. Every signature is made with
@@ -202,54 +183,32 @@ fn plan_seal(
     network: InternalNetwork,
     secrets: &SpendSecrets,
     sig_reqs: &StealthSignatureRequirementsState,
-    unsigned_v1: &UnsignedTransactionV1,
 ) -> Result<SealPlan, OotleSdkError> {
     let account_secret = &secrets.account;
     if sig_reqs.must_sign_with_account_key {
-        // Case (i): account key seals; account-key auth sig + stealth-key auth sigs for other signers.
-        let seal_pk = public_key_bytes_from_secret(account_secret);
-        let mut auth_signatures = Vec::with_capacity(sig_reqs.other_signers.len() + 1);
-
-        // The account-key authorization signature.
-        let account_auth_msg = TransactionSignature::create_message_v1(&seal_pk, unsigned_v1);
-        let account_auth_sig = sign_random(account_secret, &account_auth_msg);
-        auth_signatures.push(TransactionSignature::new(seal_pk, account_auth_sig));
-
-        // One stealth-key authorization signature per other signer.
+        // Case (i): account key seals; the account key and every other signer's stealth key authorize.
+        let mut auth_secrets = Vec::with_capacity(sig_reqs.other_signers.len() + 1);
+        auth_secrets.push(account_secret.clone());
         for signer in sig_reqs.other_signers_iter() {
-            auth_signatures.push(build_stealth_auth_signature(
-                network,
-                secrets,
-                signer,
-                &seal_pk,
-                unsigned_v1,
-            )?);
+            auth_secrets.push(derive_stealth_secret(network, secrets, signer)?);
         }
 
         Ok(SealPlan {
             seal_secret: account_secret.clone(),
-            auth_signatures,
+            auth_secrets,
         })
     } else if let Some(seal_secret) = seal_secret(network, secrets, sig_reqs)? {
-        // Case (ii): a stealth input seals with its one-time key c+k.
-        let seal_pk = public_key_bytes_from_secret(&seal_secret);
-
-        // Authorization signatures for the remaining required signers (the seal signer is skipped by
-        // `other_signers_iter` when it was the promoted first input).
-        let mut auth_signatures = Vec::new();
-        for signer in sig_reqs.other_signers_iter() {
-            auth_signatures.push(build_stealth_auth_signature(
-                network,
-                secrets,
-                signer,
-                &seal_pk,
-                unsigned_v1,
-            )?);
-        }
+        // Case (ii): a stealth input seals with its one-time key c+k. The remaining required signers
+        // authorize (the seal signer is skipped by `other_signers_iter` when it was the promoted first
+        // input).
+        let auth_secrets = sig_reqs
+            .other_signers_iter()
+            .map(|signer| derive_stealth_secret(network, secrets, signer))
+            .collect::<Result<_, _>>()?;
 
         Ok(SealPlan {
             seal_secret,
-            auth_signatures,
+            auth_secrets,
         })
     } else {
         // Case (iii): ephemeral key seal (no inputs to spend). A fresh random one-time key; no
@@ -257,7 +216,7 @@ fn plan_seal(
         let seal_secret = RistrettoSecretKey::random(&mut rand::rng());
         Ok(SealPlan {
             seal_secret,
-            auth_signatures: Vec::new(),
+            auth_secrets: Vec::new(),
         })
     }
 }
@@ -286,18 +245,18 @@ pub fn seal_and_encode_stealth_transfer(
     let secrets = SpendSecrets::parse(keys)?;
 
     let (unsigned, sig_reqs) = partial.into_parts();
-    let UnsignedTransaction::V1(mut unsigned_v1) = unsigned;
+    let mut unsigned_v1 = unsigned.into_body();
     unsigned_v1.main_signer = tari_ootle_transaction::MainSigner::SealSigner;
 
-    let plan = plan_seal(internal_network, &secrets, &sig_reqs, &unsigned_v1)?;
+    let plan = plan_seal(internal_network, &secrets, &sig_reqs)?;
 
     let transaction = finalize_seal(&mut unsigned_v1, plan)?;
     let id = transaction.calculate_id();
     encode(transaction, id)
 }
 
-/// Sets `main_signer`, builds the unsealed tx with the planned authorization signatures,
-/// computes the seal signature over the seal digest with the planned key (random nonce), and injects it.
+/// Sets `main_signer`, signs the planned authorizations over the set of their keys, computes the seal
+/// signature over the seal digest with the planned key (random nonce), and injects it.
 fn finalize_seal(unsigned_v1: &mut UnsignedTransactionV1, plan: SealPlan) -> Result<Transaction, OotleSdkError> {
     // The main signer is committed by the seal digest, so it must be settled before constructing the
     // unsealed tx. Every seal case here seals with a key the spender controls — the account key, a
@@ -309,9 +268,9 @@ fn finalize_seal(unsigned_v1: &mut UnsignedTransactionV1, plan: SealPlan) -> Res
     unsigned_v1.main_signer = tari_ootle_transaction::MainSigner::SealSigner;
 
     let seal_pk = public_key_bytes_from_secret(&plan.seal_secret);
-    let unsealed = UnsealedTransactionV1::new(unsigned_v1.clone(), plan.auth_signatures);
+    let unsealed = UnsealedTransactionV1::authorize(unsigned_v1.clone(), &seal_pk, &plan.auth_secrets);
 
-    let seal_message = TransactionSealSignature::create_message_v1(&unsealed);
+    let seal_message = TransactionSealSignature::create_message(&unsealed);
     let seal_sig_bytes = sign_random(&plan.seal_secret, &seal_message);
     let seal_sig = TransactionSealSignature::new(seal_pk, seal_sig_bytes);
 
@@ -430,7 +389,7 @@ mod tests {
             destination_account_pk: pk_bytes(3),
             destination_view_pk: pk_bytes(4),
             amount,
-            revealed_amount: 0,
+            revealed_amount: crate::types::U128::ZERO,
             resource_address: tari_resource(),
             resource_view_key: None,
             memo: None,
@@ -552,8 +511,8 @@ mod tests {
                 owner_account_pk: owner_pk_bytes,
             }],
             outputs: vec![output_spec(value)],
-            revealed_input_amount: 0,
-            revealed_output_amount: 0,
+            revealed_input_amount: crate::types::U128::ZERO,
+            revealed_output_amount: crate::types::U128::ZERO,
             min_epoch: None,
             max_epoch: 1,
             dry_run: false,
@@ -582,8 +541,8 @@ mod tests {
             fee: BoundaryAmount::new(2000),
             inputs: vec![],
             outputs: vec![output_spec(1_000_000)],
-            revealed_input_amount: 1_000_000,
-            revealed_output_amount: 0,
+            revealed_input_amount: crate::types::U128::from_u64(1_000_000),
+            revealed_output_amount: crate::types::U128::ZERO,
             min_epoch: None,
             max_epoch: 1,
             dry_run: false,

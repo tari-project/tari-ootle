@@ -12,6 +12,11 @@ fn u64_arg(name: &str, value: BigInt) -> Result<u64, JsError> {
     u64::try_from(value).map_err(|_| JsError::new(&format!("{name} must be an integer in [0, 2^64 - 1]")))
 }
 
+/// Revealed amounts are public and carry no range proof, so they take the full `Amount` width.
+fn u128_arg(name: &str, value: BigInt) -> Result<u128, JsError> {
+    u128::try_from(value).map_err(|_| JsError::new(&format!("{name} must be an integer in [0, 2^128 - 1]")))
+}
+
 /// Called automatically when the WASM module is instantiated. Do not call directly.
 #[wasm_bindgen(start)]
 fn on_start() {
@@ -105,15 +110,23 @@ pub fn seal_transaction(tx_json: &str, seal_signer_secret_key: &[u8]) -> Result<
 /// Add a signer to a transaction (unsigned or unsealed JSON).
 ///
 /// Accepts either an `UnsignedTransactionV1` or `UnsealedTransactionV1` JSON string.
-/// Returns the `UnsealedTransactionV1` (with the new signature appended) as a JSON string.
+/// `authorizer_public_keys` is the 32-byte public key of every authorizer, concatenated in any order and
+/// including this signer's: every authorizer signs over the same set, so it is fixed before anyone signs.
+/// Returns the `UnsealedTransactionV1` (with the new signature added) as a JSON string.
 #[wasm_bindgen(js_name = "addTransactionSigner")]
 pub fn add_transaction_signer(
     tx_json: &str,
     signer_secret_key: &[u8],
     seal_signer_public_key: &[u8],
+    authorizer_public_keys: &[u8],
 ) -> Result<String, JsError> {
-    ootle_wasm_core::transaction::add_transaction_signer_json(tx_json, signer_secret_key, seal_signer_public_key)
-        .map_err(|e| JsError::new(&e.to_string()))
+    ootle_wasm_core::transaction::add_transaction_signer_json(
+        tx_json,
+        signer_secret_key,
+        seal_signer_public_key,
+        authorizer_public_keys,
+    )
+    .map_err(|e| JsError::new(&e.to_string()))
 }
 
 /// Seal a transaction (unsigned or unsealed JSON) with a signature from an external signer (HSM, MPC).
@@ -136,21 +149,23 @@ pub fn attach_seal_signature(
 /// unsealed JSON).
 ///
 /// `signature` is the 64-byte sr25519 signature (scheme in the NPM README) over the hash from
-/// `hashUnsignedTransaction` for `seal_signer_public_key`, made by the key for
-/// `signer_public_key`. It is verified before it is appended.
-/// Returns the `UnsealedTransactionV1` (with the new signature appended) as a JSON string.
+/// `hashUnsignedTransaction` for `seal_signer_public_key` and `authorizer_public_keys`, made by the key
+/// for `signer_public_key`, which must be one of the authorizers. It is verified before it is added.
+/// Returns the `UnsealedTransactionV1` (with the new signature added) as a JSON string.
 #[wasm_bindgen(js_name = "attachTransactionSignature")]
 pub fn attach_transaction_signature(
     tx_json: &str,
     signer_public_key: &[u8],
     signature: &[u8],
     seal_signer_public_key: &[u8],
+    authorizer_public_keys: &[u8],
 ) -> Result<String, JsError> {
     ootle_wasm_core::transaction::attach_transaction_signature_json(
         tx_json,
         signer_public_key,
         signature,
         seal_signer_public_key,
+        authorizer_public_keys,
     )
     .map_err(|e| JsError::new(&e.to_string()))
 }
@@ -184,10 +199,21 @@ pub fn generate_keypair() -> KeypairResult {
 /// The message excludes attached signatures, so it is the same before and after `attachTransactionSignature`.
 ///
 /// `seal_signer_public_key` is the raw bytes of the seal signer's public key (account owner).
+/// `authorizer_public_keys` is the 32-byte public key of every authorizer, concatenated in any order.
+/// Every authorizer signs over the same set, and a transaction verifies only with an authorization from
+/// each of them attached.
 #[wasm_bindgen(js_name = "hashUnsignedTransaction")]
-pub fn hash_unsigned_transaction(unsigned_tx_json: &str, seal_signer_public_key: &[u8]) -> Result<Vec<u8>, JsError> {
-    ootle_wasm_core::hash::hash_unsigned_transaction_json(unsigned_tx_json, seal_signer_public_key)
-        .map_err(|e| JsError::new(&e.to_string()))
+pub fn hash_unsigned_transaction(
+    unsigned_tx_json: &str,
+    seal_signer_public_key: &[u8],
+    authorizer_public_keys: &[u8],
+) -> Result<Vec<u8>, JsError> {
+    ootle_wasm_core::hash::hash_unsigned_transaction_json(
+        unsigned_tx_json,
+        seal_signer_public_key,
+        authorizer_public_keys,
+    )
+    .map_err(|e| JsError::new(&e.to_string()))
 }
 
 /// Hash a transaction (unsigned or unsealed JSON) for sealing.
@@ -293,7 +319,7 @@ pub fn generate_stealth_outputs_statement(
 ) -> Result<StealthOutputsResult, JsError> {
     let result = ootle_wasm_core::stealth::outputs::generate_stealth_outputs_statement(
         witnesses_json,
-        u64_arg("revealed_output_amount_microtari", revealed_output_amount_microtari)?,
+        u128_arg("revealed_output_amount_microtari", revealed_output_amount_microtari)?,
         revealed_receiver,
     )
     .map_err(|e| JsError::new(&e.to_string()))?;
@@ -379,7 +405,7 @@ pub fn build_stealth_inputs_statement(
 ) -> Result<String, JsError> {
     ootle_wasm_core::stealth::inputs::build_stealth_inputs_statement(
         input_commitments,
-        u64_arg("revealed_amount_microtari", revealed_amount_microtari)?,
+        u128_arg("revealed_amount_microtari", revealed_amount_microtari)?,
     )
     .map_err(|e| JsError::new(&e.to_string()))
 }
@@ -401,7 +427,7 @@ pub fn build_stealth_inputs_statement_from_inputs(
 ) -> Result<String, JsError> {
     ootle_wasm_core::stealth::inputs::build_stealth_inputs_statement_from_inputs(
         inputs_json,
-        u64_arg("revealed_amount_microtari", revealed_amount_microtari)?,
+        u128_arg("revealed_amount_microtari", revealed_amount_microtari)?,
     )
     .map_err(|e| JsError::new(&e.to_string()))
 }
@@ -452,9 +478,9 @@ pub fn build_stealth_transfer_statement(
 ) -> Result<String, JsError> {
     ootle_wasm_core::stealth::transfer::build_stealth_transfer_statement(
         input_witnesses_json,
-        u64_arg("revealed_input_amount_microtari", revealed_input_amount_microtari)?,
+        u128_arg("revealed_input_amount_microtari", revealed_input_amount_microtari)?,
         output_witnesses_json,
-        u64_arg("revealed_output_amount_microtari", revealed_output_amount_microtari)?,
+        u128_arg("revealed_output_amount_microtari", revealed_output_amount_microtari)?,
         revealed_receiver,
     )
     .map_err(|e| JsError::new(&e.to_string()))

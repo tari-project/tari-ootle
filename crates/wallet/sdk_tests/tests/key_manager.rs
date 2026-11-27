@@ -21,7 +21,7 @@ mod support;
 #[test]
 fn it_generates_new_account_addresses() {
     let test = Test::new();
-    let account_addr = test.sdk().key_manager_api().next_account_address().unwrap();
+    let account_addr = test.sdk().key_manager_api().derive_account_address(0).unwrap();
     let addr = account_addr.address.to_byte_type().to_bech32_string();
 
     let decoded = OotleAddress::decode_bech32(&addr).unwrap();
@@ -36,7 +36,7 @@ fn it_generates_new_account_addresses() {
         account_addr.address.view_only_key().to_byte_type()
     );
 
-    let account_addr2 = test.sdk().key_manager_api().next_account_address().unwrap();
+    let account_addr2 = test.sdk().key_manager_api().derive_account_address(1).unwrap();
     assert_ne!(account_addr.address, account_addr2.address);
 }
 

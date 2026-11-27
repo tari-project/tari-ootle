@@ -41,6 +41,18 @@ export function InstanceControls({ id, isRunning }: { id: number; isRunning: boo
   );
 }
 
+function encodeLogPath(path: string): string | null {
+  try {
+    return encodeURIComponent(btoa(path));
+  } catch {
+    return null;
+  }
+}
+
+function fileBasename(path: string): string {
+  return path.split(/[\\/]/).pop() || path;
+}
+
 export function LogLinks({ files }: { files: InstanceLogs | undefined }) {
   const logs = files?.logs ?? [];
   const stdout = files?.stdout ?? [];
@@ -50,16 +62,32 @@ export function LogLinks({ files }: { files: InstanceLogs | undefined }) {
   }
   return (
     <div className="links">
-      {logs.map(([path]) => (
-        <Link key={path} to={`/log/${btoa(path)}/normal`}>
-          {path.split("/").pop()}
-        </Link>
-      ))}
-      {stdout.map(([path]) => (
-        <Link key={path} to={`/log/${btoa(path)}/stdout`}>
-          {path.endsWith("stderr.log") ? "stderr" : "stdout"}
-        </Link>
-      ))}
+      {logs.map(([path]) => {
+        const encoded = encodeLogPath(path);
+        const label = fileBasename(path);
+        return encoded ? (
+          <Link key={`log:${path}`} to={`/log/${encoded}/normal`}>
+            {label}
+          </Link>
+        ) : (
+          <span key={`log:${path}`} className="faint" title={`Cannot open log path: ${path}`}>
+            {label}
+          </span>
+        );
+      })}
+      {stdout.map(([path]) => {
+        const encoded = encodeLogPath(path);
+        const label = path.endsWith("stderr.log") ? "stderr" : "stdout";
+        return encoded ? (
+          <Link key={`stdout:${path}`} to={`/log/${encoded}/stdout`}>
+            {label}
+          </Link>
+        ) : (
+          <span key={`stdout:${path}`} className="faint" title={`Cannot open log path: ${path}`}>
+            {label}
+          </span>
+        );
+      })}
     </div>
   );
 }

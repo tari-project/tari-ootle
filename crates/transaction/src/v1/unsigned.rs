@@ -265,6 +265,28 @@ impl UnsignedTransactionV1 {
         let mut created_utxos = HashSet::<UtxoAddress>::new();
         for instruction in all_instructions {
             match instruction {
+                Instruction::CreateAccount {
+                    owner_rule,
+                    access_rules,
+                    ..
+                } => {
+                    if let Some(owner_rule) = owner_rule {
+                        let value = IndexedValue::from_type(owner_rule)?;
+                        substates.extend(
+                            value
+                                .referenced_substates()
+                                .filter(|id| id.is_declarable_input() && *id != TARI_TOKEN),
+                        );
+                    }
+                    if let Some(access_rules) = access_rules {
+                        let value = IndexedValue::from_type(access_rules)?;
+                        substates.extend(
+                            value
+                                .referenced_substates()
+                                .filter(|id| id.is_declarable_input() && *id != TARI_TOKEN),
+                        );
+                    }
+                },
                 Instruction::CallFunction { args, .. } => {
                     for arg in args.iter().filter_map(|a| a.as_literal_bytes()) {
                         let value = IndexedValue::from_raw(arg)?;

@@ -901,3 +901,79 @@ fn merge_keeps_other_builders_declared_inputs() {
         .collect::<Vec<_>>();
     assert_eq!(declared, vec![(merged_comp.into(), false)]);
 }
+
+/// Custom `owner_rule` and `access_rules` on `CreateAccount` cross into the account constructor's frame, so
+/// declarable non-XTR substates they reference are declared as read inputs and reported by `to_referenced_substates`.
+#[test]
+fn auto_filled_inputs_and_referenced_substates_include_create_account_rule_substates() {
+    use std::collections::HashSet;
+
+    use tari_engine_types::substate::SubstateId;
+    use tari_template_lib_types::{
+        NonFungibleAddress,
+        NonFungibleId,
+        ObjectKey,
+        OwnerRule,
+        ResourceAddress,
+        access_rules::ComponentAccessRules,
+        constants::TARI_TOKEN,
+        crypto::RistrettoPublicKeyBytes,
+        rule,
+    };
+
+    let owner_resource = ResourceAddress::new(ObjectKey::from_array([0x11; 32]));
+    let nft_resource = ResourceAddress::new(ObjectKey::from_array([0x12; 32]));
+    let owner_nft = NonFungibleAddress::new(nft_resource, NonFungibleId::from_u64(42));
+    let gate_component = ComponentAddress::new(ObjectKey::from_array([0x13; 32]));
+    let method_resource = ResourceAddress::new(ObjectKey::from_array([0x14; 32]));
+    let fee_resource = ResourceAddress::new(ObjectKey::from_array([0x15; 32]));
+    let caller_template = TemplateAddress::from_array([0x16; 32]);
+    let account_pk = RistrettoPublicKeyBytes::from([0x21; 32]);
+    let signer_pk = RistrettoPublicKeyBytes::from([0x22; 32]);
+
+    let owner_rule = OwnerRule::ByAccessRule(rule!(any_of(
+        resource(owner_resource),
+        non_fungible(owner_nft.clone()),
+        public_key(signer_pk),
+        any_caller_component,
+        resource(TARI_TOKEN),
+    )));
+    let access_rules = ComponentAccessRules::new()
+        .add_method_rule("withdraw", rule!(caller_component(gate_component)))
+        .add_method_rule("deposit", rule!(direct_caller_template(caller_template)))
+        .default(rule!(resource(method_resource)));
+
+    let tx = Transaction::builder_localnet(Epoch(1))
+        .with_auto_fill_inputs()
+        .with_fee_instructions_builder(|b| {
+            b.create_account_custom::<&str>(
+                account_pk,
+                Some(OwnerRule::ByAccessRule(rule!(resource(fee_resource)))),
+                None,
+                None,
+            )
+        })
+        .create_account_custom::<&str>(account_pk, Some(owner_rule), Some(access_rules), None)
+        .build_unsigned();
+
+    let expected = HashSet::from([
+        SubstateId::Resource(fee_resource),
+        SubstateId::Resource(owner_resource),
+        SubstateId::NonFungible(owner_nft),
+        SubstateId::Component(gate_component),
+        SubstateId::Resource(method_resource),
+    ]);
+
+    assert_eq!(tx.to_referenced_substates().unwrap(), expected);
+    let declared_ids = tx
+        .inputs()
+        .iter()
+        .map(|decl| decl.substate_id().clone())
+        .collect::<HashSet<_>>();
+    assert_eq!(declared_ids, expected);
+    assert!(
+        tx.inputs().iter().all(|decl| decl.is_read()),
+        "rule references are not mutated by CreateAccount: {:?}",
+        tx.inputs()
+    );
+}

@@ -995,6 +995,22 @@ impl<D> TransactionBuilder<D> {
         }
     }
 
+    fn add_inputs_for_type<T, F>(&mut self, value: &T, make_declaration: F)
+    where
+        T: tari_bor::Encode<()>,
+        F: FnMut(SubstateId) -> InputDeclaration,
+    {
+        if let Ok(indexed) = IndexedValue::from_type(value) {
+            declare_inputs(
+                self.unsigned_transaction.inputs_mut(),
+                indexed
+                    .referenced_substates()
+                    .filter(|id| id.is_declarable_input() && *id != TARI_TOKEN)
+                    .map(make_declaration),
+            );
+        }
+    }
+
     fn add_inputs_for_args(&mut self, args: &[InstructionArg]) {
         for arg in args {
             if let Some(bytes) = arg.as_literal_bytes() {
@@ -1009,6 +1025,20 @@ impl<D> TransactionBuilder<D> {
         }
 
         match instruction {
+            Instruction::CreateAccount {
+                owner_rule,
+                access_rules,
+                ..
+            } => {
+                // `CreateAccount` passes custom rules as arguments to the account constructor, which requires
+                // every declarable substate they name to be in scope without mutating those substates.
+                if let Some(owner_rule) = owner_rule {
+                    self.add_inputs_for_type(owner_rule, InputDeclaration::read);
+                }
+                if let Some(access_rules) = access_rules {
+                    self.add_inputs_for_type(access_rules, InputDeclaration::read);
+                }
+            },
             Instruction::CallFunction { args, .. } => {
                 self.add_inputs_for_args(args);
             },
@@ -1065,7 +1095,6 @@ impl<D> TransactionBuilder<D> {
                 assertion: Assertion::IsNotNull,
                 ..
             } |
-            Instruction::CreateAccount { .. } |
             Instruction::PutLastInstructionOutputOnWorkspace { .. } |
             Instruction::ClaimBurn { .. } |
             Instruction::DropAllProofsInWorkspace |

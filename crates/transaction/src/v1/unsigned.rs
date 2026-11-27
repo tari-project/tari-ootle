@@ -81,7 +81,8 @@ pub struct UnsignedTransactionV1 {
     )]
     #[cfg_attr(
         feature = "serde",
-        serde(deserialize_with = "tari_ootle_common_types::deserialize_input_declarations")
+        serde(deserialize_with = "tari_ootle_common_types::deserialize_input_declarations::<{ \
+                                  crate::MAX_TRANSACTION_INPUTS }, _>")
     )]
     pub inputs: IndexSet<InputDeclaration>,
     #[n(4)]

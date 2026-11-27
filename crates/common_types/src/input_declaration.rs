@@ -264,13 +264,16 @@ pub fn declare_inputs<I: IntoIterator<Item = InputDeclaration>>(inputs: &mut Ind
     }
 }
 
-/// Deserializes a transaction's declarations, rejecting a substate declared more than once.
+/// Deserializes a transaction's declarations, at most `MAX` of them, rejecting a substate declared more than once.
 ///
 /// A transaction's declarations are a set keyed on the substate id, so an encoding that names a
 /// substate twice has no single meaning: keeping either one would silently discard the other's intent.
-pub fn deserialize_input_declarations<'de, D>(deserializer: D) -> Result<IndexSet<InputDeclaration>, D::Error>
+/// `MAX` is the caller's count limit, the same one its CBOR decoder applies.
+pub fn deserialize_input_declarations<'de, const MAX: usize, D>(
+    deserializer: D,
+) -> Result<IndexSet<InputDeclaration>, D::Error>
 where D: serde::Deserializer<'de> {
-    let decls = Vec::<InputDeclaration>::deserialize(deserializer)?;
+    let decls = ootle_serde::bounded_seq::deserialize::<MAX, InputDeclaration, D>(deserializer)?;
     let mut set = IndexSet::<InputDeclaration>::with_capacity(decls.len());
     for decl in decls {
         if let Some(existing) = set.get(decl.substate_id()) {
@@ -546,7 +549,7 @@ mod tests {
     fn a_substate_declared_twice_on_the_wire_is_rejected() {
         #[derive(Deserialize)]
         struct Inputs {
-            #[serde(deserialize_with = "deserialize_input_declarations")]
+            #[serde(deserialize_with = "deserialize_input_declarations::<4, _>")]
             inputs: IndexSet<InputDeclaration>,
         }
 
@@ -567,6 +570,17 @@ mod tests {
         assert_eq!(decoded.inputs.len(), 2);
         assert!(decoded.inputs[0].is_read());
         assert!(decoded.inputs[1].is_write());
+
+        #[derive(Deserialize)]
+        struct AtMostOne {
+            #[serde(deserialize_with = "deserialize_input_declarations::<1, _>")]
+            #[allow(dead_code)]
+            inputs: IndexSet<InputDeclaration>,
+        }
+        assert!(
+            serde_json::from_str::<AtMostOne>(&json).is_err(),
+            "more declarations than MAX must be rejected"
+        );
     }
 
     #[test]

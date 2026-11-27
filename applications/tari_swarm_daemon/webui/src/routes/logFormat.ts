@@ -23,8 +23,7 @@ const HEADER_LEVEL_RE = new RegExp(
   `^(?:${TIMESTAMP_PATTERN})\\s+(?:\\[[^\\]]+\\]\\s+)*(ERROR|WARN|INFO|DEBUG|TRACE)\\b`,
 );
 /** Matches console/stdout lines without a full date prefix (e.g. `HH:MM INFO ...` or `[target] WARN ...`). */
-const BARE_LEVEL_RE =
-  /^\s*(?:\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?\s+)?(?:\[[^\]]+\]\s+)*(ERROR|WARN|INFO|DEBUG|TRACE)\b/;
+const BARE_LEVEL_RE = /^\s*(?:\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?\s+)?(?:\[[^\]]+\]\s+)*(ERROR|WARN|INFO|DEBUG|TRACE)\b/;
 /**
  * A tracing line is `<timestamp> <LEVEL> [<spans>: ]<target>: <message>`, with no brackets around the target.
  * Rewriting it into log4rs' shape lets one renderer highlight both.

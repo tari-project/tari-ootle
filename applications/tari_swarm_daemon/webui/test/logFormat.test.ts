@@ -79,11 +79,17 @@ describe("parse", () => {
 
   it("gives no level to continuation lines in a timestamped chunk", () => {
     const lines = parse(`${T}  INFO a::b: first\nERROR looks like a level\n`, 0);
-    assert.deepEqual(lines.map((line) => line.level), ["INFO", null]);
+    assert.deepEqual(
+      lines.map((line) => line.level),
+      ["INFO", null],
+    );
   });
 
   it("reads bare levels when the chunk has no timestamps", () => {
     const lines = parse("12:00 WARN careful\n[target] ERROR bad\n", 0);
-    assert.deepEqual(lines.map((line) => line.level), ["WARN", "ERROR"]);
+    assert.deepEqual(
+      lines.map((line) => line.level),
+      ["WARN", "ERROR"],
+    );
   });
 });

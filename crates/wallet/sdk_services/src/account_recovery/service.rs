@@ -43,6 +43,7 @@ pub struct AccountRecoveryService<TSpec: WalletSdkSpec> {
     utxo_scanner_handle: UtxoScannerHandle,
     abandon_after_not_found: usize,
     cipher_seed_birthday_epoch: Epoch,
+    retry_delay: Duration,
 }
 
 impl<TSpec> AccountRecoveryService<TSpec>
@@ -63,7 +64,13 @@ where
             utxo_scanner_handle,
             abandon_after_not_found,
             cipher_seed_birthday_epoch,
+            retry_delay: RETRY_DELAY,
         }
+    }
+
+    pub fn with_retry_delay(mut self, retry_delay: Duration) -> Self {
+        self.retry_delay = retry_delay;
+        self
     }
 
     pub async fn scan(self) {
@@ -91,33 +98,42 @@ where
         let mut last_found_key = None;
         let mut unused_accounts = Vec::new();
         // Every run starts from the first key, so a run that was interrupted is redone in full. Keys are derived
-        // without advancing the key manager's index, which is set once the scan is complete.
+        // by index without advancing the key manager.
         let mut key_index = 0;
         loop {
             let key = match key_manager_api.derive_account_key(key_index) {
                 Ok(key) => key,
                 Err(err) => {
                     error!(target: LOG_TARGET, "Error deriving key {key_index}: {err}. Scanning failed...");
+                    self.cleanup_unused_accounts(&unused_accounts, last_found_key);
+                    if let Some(probed) = key_index.checked_sub(1) {
+                        self.record_max_probed_key(probed);
+                    }
                     return;
                 },
             };
             info!(target: LOG_TARGET, "🔍️ Attempting to recover account with key index {}", key_index);
             match self.try_recover_account_with_retries(&key).await {
-                Some(RecoveredAccount::Found) => {
+                RecoveredAccount::Found => {
                     last_found_key = Some(key_index);
                     info!(target: LOG_TARGET, "✅ Account with key index {} found!", key_index);
                     not_found_accounts_count = 0;
                     found_accounts_count += 1;
                 },
-                Some(RecoveredAccount::Unused(address)) => {
+                RecoveredAccount::Unused(address) => {
                     unused_accounts.push((key_index, address));
                     not_found_accounts_count += 1;
                 },
-                None => {
+                RecoveredAccount::Failed { kept } => {
+                    if kept {
+                        last_found_key = Some(key_index);
+                    }
                     error!(
                         target: LOG_TARGET,
                         "❌ Could not scan the account at key index {key_index}. Recovery will run again when the wallet restarts"
                     );
+                    self.cleanup_unused_accounts(&unused_accounts, last_found_key);
+                    self.record_max_probed_key(key_index);
                     return;
                 },
             }
@@ -132,25 +148,8 @@ where
         }
         let max_probed_key = key_index;
 
-        let kept_key_index = last_found_key.unwrap_or(0);
-
-        // The account at the last found key index (or index 0) is kept so that a wallet with nothing to recover still
-        // has its first account.
-        for (_, address) in unused_accounts.iter().filter(|(index, _)| *index != kept_key_index) {
-            match self.wallet_sdk.accounts_api().delete_if_unused(address) {
-                Ok(true) => info!(target: LOG_TARGET, "🗑️ Removed unused account {address}"),
-                Ok(false) => info!(target: LOG_TARGET, "Keeping account {address} because it has activity"),
-                Err(err) => warn!(target: LOG_TARGET, "⚠️ Error removing unused account {address}: {err}"),
-            }
-        }
-
-        if let Err(err) = self
-            .wallet_sdk
-            .config_api()
-            .set(ConfigKey::RecoveryMaxProbedKeyIndex, &max_probed_key)
-        {
-            error!(target: LOG_TARGET, "Error setting the highest recovered key index: {err}");
-        }
+        self.cleanup_unused_accounts(&unused_accounts, last_found_key);
+        self.record_max_probed_key(max_probed_key);
 
         // Set a flag to indicate that the wallet has completed recovery
         if let Err(err) = self.wallet_sdk.config_api().set(ConfigKey::RecoveryNeeded, &false) {
@@ -160,13 +159,13 @@ where
         info!(target: LOG_TARGET, "✅ Scanning accounts finished! {found_accounts_count} owned account(s) found!");
     }
 
-    /// Returns None if the account could not be scanned after several attempts. The scan cannot skip the key: the
-    /// key may hold the only UTXOs that keep the scan going, and its account row must not be left in place of an
-    /// account the user creates later.
-    async fn try_recover_account_with_retries(&self, key: &DerivedWalletKey) -> Option<RecoveredAccount> {
+    /// Retries scanning the account derived from `key`, returning [`RecoveredAccount::Failed`] if all attempts fail.
+    /// The scan cannot skip the key: the key may hold the only UTXOs that keep the scan going, and its account row must
+    /// not be left as a spurious unused `recovered-account-*` account in the wallet until the next run.
+    async fn try_recover_account_with_retries(&self, key: &DerivedWalletKey) -> RecoveredAccount {
         for attempt in 1..=MAX_ATTEMPTS_PER_KEY {
             match self.try_recover_account(key).await {
-                Ok(recovered) => return Some(recovered),
+                Ok(recovered) => return recovered,
                 Err(err) => {
                     warn!(
                         target: LOG_TARGET,
@@ -174,12 +173,29 @@ where
                         key.key_index()
                     );
                     if attempt < MAX_ATTEMPTS_PER_KEY {
-                        time::sleep(RETRY_DELAY * attempt).await;
+                        time::sleep(self.retry_delay * attempt).await;
                     }
                 },
             }
         }
-        None
+        let public_key = RistrettoPublicKey::from_secret_key(&key.key).to_byte_type();
+        let account_addr = derive_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, &public_key);
+        let mut kept = false;
+        match self
+            .wallet_sdk
+            .accounts_api()
+            .delete_if_unused(&account_addr)
+            .optional()
+        {
+            Ok(Some(true)) => info!(target: LOG_TARGET, "🗑️ Removed unused account {account_addr}"),
+            Ok(Some(false)) => {
+                info!(target: LOG_TARGET, "Keeping account {account_addr} because it has activity");
+                kept = true;
+            },
+            Ok(None) => {},
+            Err(err) => warn!(target: LOG_TARGET, "⚠️ Error removing unused account {account_addr}: {err}"),
+        }
+        RecoveredAccount::Failed { kept }
     }
 
     /// Adds the account derived from the key and scans it for vaults and stealth UTXOs. The account is found if it
@@ -275,6 +291,35 @@ where
             Ok(RecoveredAccount::Unused(account_addr))
         }
     }
+
+    fn cleanup_unused_accounts(&self, unused_accounts: &[(u64, ComponentAddress)], last_found_key: Option<u64>) {
+        let kept_key_index = last_found_key.unwrap_or(0);
+
+        // The account at the last found key index (or index 0) is kept so that a wallet with nothing to recover still
+        // has its first account.
+        for (_, address) in unused_accounts.iter().filter(|(index, _)| *index != kept_key_index) {
+            match self.wallet_sdk.accounts_api().delete_if_unused(address) {
+                Ok(true) => info!(target: LOG_TARGET, "🗑️ Removed unused account {address}"),
+                Ok(false) => info!(target: LOG_TARGET, "Keeping account {address} because it has activity"),
+                Err(err) => warn!(target: LOG_TARGET, "⚠️ Error removing unused account {address}: {err}"),
+            }
+        }
+    }
+
+    fn record_max_probed_key(&self, probed_key: u64) {
+        let config_api = self.wallet_sdk.config_api();
+        let stored = match config_api.get::<u64>(ConfigKey::RecoveryMaxProbedKeyIndex).optional() {
+            Ok(stored) => stored,
+            Err(err) => {
+                error!(target: LOG_TARGET, "Error reading the highest recovered key index: {err}");
+                None
+            },
+        };
+        let max_probed_key = stored.map_or(probed_key, |prev| prev.max(probed_key));
+        if let Err(err) = config_api.set(ConfigKey::RecoveryMaxProbedKeyIndex, &max_probed_key) {
+            error!(target: LOG_TARGET, "Error setting the highest recovered key index: {err}");
+        }
+    }
 }
 
 enum RecoveredAccount {
@@ -282,4 +327,7 @@ enum RecoveredAccount {
     Found,
     /// Nothing was ever sent to the account.
     Unused(ComponentAddress),
+    /// The account could not be scanned after several attempts; `kept` indicates whether an account row with activity
+    /// was retained.
+    Failed { kept: bool },
 }

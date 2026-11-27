@@ -461,8 +461,8 @@ fn calc_instruction_weight(instruction: &Instruction) -> u64 {
             let access_rule_nodes = access_rules.as_ref().map(|a| a.num_nodes() as u64).unwrap_or(0);
             (owner_rule_nodes + access_rule_nodes + workspace_id.as_ref().map(|_| 1).unwrap_or(0)).max(INVOCATION_FLOOR)
         },
-        Instruction::CallFunction { function, args, .. } => calc_call_weight(function, args),
-        Instruction::CallMethod { method, args, .. } => calc_call_weight(method, args),
+        Instruction::CallFunction { function, args, .. } => calc_args_weight(function, args).max(INVOCATION_FLOOR),
+        Instruction::CallMethod { method, args, .. } => calc_args_weight(method, args).max(INVOCATION_FLOOR),
         Instruction::PutLastInstructionOutputOnWorkspace { .. } => 0, // Call already costs
         Instruction::ClaimBurn { .. } => CLAIM_FIXED_COST,
         Instruction::ClaimValidatorFees { .. } => 1,
@@ -480,7 +480,7 @@ fn calc_instruction_weight(instruction: &Instruction) -> u64 {
         Instruction::PayFeeFromBucket { .. } => 1,
         Instruction::UpdateComponentTemplate { migrate, .. } => (1 + migrate
             .as_ref()
-            .map(|m| calc_args_weight(&m.args) + calc_function_name_weight(&m.name))
+            .map(|m| calc_args_weight(&m.name, &m.args))
             .unwrap_or(0))
         .max(INVOCATION_FLOOR),
         Instruction::SetComponentAccessRules { access_rules, .. } => 1 + access_rules.num_nodes() as u64,
@@ -544,17 +544,9 @@ pub const INVOCATION_FLOOR: u64 = 30;
 /// invocation count. `no_invocation_encodes_smaller_than_the_recorded_minimum` keeps it honest.
 pub const MIN_INVOCATION_ENCODED_BYTES: usize = 10;
 
-fn calc_call_weight(function: &FunctionName, args: &[InstructionArg]) -> u64 {
-    (calc_args_weight(args) + calc_function_name_weight(function)).max(INVOCATION_FLOOR)
-}
-
-/// A function name is up to 256 bytes the caller chooses, priced at the literal-argument rate. Most names weigh less
-/// than [`INVOCATION_FLOOR`], so this only raises the weight of calls with long names.
-fn calc_function_name_weight(name: &FunctionName) -> u64 {
-    name.len() as u64 / LITERAL_BYTE_DIVISOR
-}
-
-fn calc_args_weight(args: &[InstructionArg]) -> u64 {
+/// Weight of a call's function name and args. The name is up to 256 bytes the caller chooses, so its bytes count with
+/// the literal bytes, at the literal-argument rate.
+fn calc_args_weight(name: &FunctionName, args: &[InstructionArg]) -> u64 {
     // Workspace and blob refs are cheap — just an index. Blob payloads are charged at the
     // transaction level by `calc_blobs_weight`, so we don't double-count them here.
     const NON_LITERAL_WEIGHT: u64 = 1;
@@ -563,7 +555,7 @@ fn calc_args_weight(args: &[InstructionArg]) -> u64 {
     // Dividing per-argument would let a large literal be split into many small ones so each share
     // rounds down, evading the weight (and hence the fee). Each literal still costs at least
     // `NON_LITERAL_WEIGHT`, so a flood of tiny args can never be cheaper than the same bytes in one.
-    let mut total_literal_bytes = 0u64;
+    let mut total_literal_bytes = name.len() as u64;
     let mut num_literals = 0u64;
     let mut num_non_literals = 0u64;
     for arg in args {
@@ -1146,6 +1138,19 @@ mod weight_tests {
             new_template: TemplateAddress::default(),
         };
         assert_eq!(calc_instruction_weight(&update), 1 + expected);
+    }
+
+    #[test]
+    fn a_function_name_counts_with_the_literal_bytes() {
+        // Args already above the floor: the name's bytes add to them, divided once with the literal bytes.
+        let literal = InstructionArg::raw_literal_bytes(vec![0u8; 301]);
+        let call = |name: &str| Instruction::CallMethod {
+            call: crate::ComponentReference::Workspace(0),
+            method: FunctionName::try_from(name).expect("a short name fits"),
+            args: vec![literal.clone()],
+        };
+        assert_eq!(calc_instruction_weight(&call("m")), 302 / LITERAL_BYTE_DIVISOR);
+        assert_eq!(calc_instruction_weight(&call("transfer")), 309 / LITERAL_BYTE_DIVISOR);
     }
 
     /// An access rule of exactly `num_nodes` nodes: one `AnyOf` holding `num_nodes - 1` empty `AnyOf`s.

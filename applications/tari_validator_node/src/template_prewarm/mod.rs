@@ -788,6 +788,7 @@ mod tests {
                             access_rules: Default::default(),
                             entity_id: address.entity_id(),
                             upgrade_rule: Default::default(),
+                            rules_updater: None,
                         },
                         body: ComponentBody {
                             state: tari_bor::Value::Null,

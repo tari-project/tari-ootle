@@ -12,7 +12,14 @@ use syn::{LitInt, LitStr, Token, ext::IdentExt, parenthesized, parse::ParseStrea
 use tari_engine_types::substate::SubstateId;
 use tari_template_lib_types::{
     OwnerRule,
-    access_rules::{AccessRule, ComponentAccessRules, RequireRule, RestrictedAccessRule, RuleRequirement},
+    access_rules::{
+        AccessRule,
+        ComponentAccessRules,
+        InvalidAccessRule,
+        RequireRule,
+        RestrictedAccessRule,
+        RuleRequirement,
+    },
     constants::{CALLER_COMPONENT_RESOURCE_ADDRESS, DIRECT_CALLER_TEMPLATE_RESOURCE_ADDRESS, TARI_TOKEN},
     crypto::RistrettoPublicKeyBytes,
 };
@@ -97,6 +104,8 @@ impl fmt::Display for RuleArg {
     }
 }
 
+const MAX_RULE_DEPTH: usize = tari_bor::MAX_DECODE_DEPTH;
+
 const REQUIREMENTS: &str = "resource, non_fungible, public_key, caller_component, direct_caller_template, \
                             any_caller_component, any_caller_template";
 
@@ -171,32 +180,47 @@ pub(crate) fn parse_owner_rule(input: ParseStream) -> syn::Result<OwnerRuleExpr>
 
 /// `allow_all`, `deny_all` or a restricted rule.
 pub(crate) fn parse_access_rule(input: ParseStream) -> syn::Result<AccessRuleExpr> {
-    let name: Ident = input.parse()?;
+    let fork = input.fork();
+    let name: Ident = fork.parse()?;
     match name.to_string().as_str() {
-        "allow_all" => Ok(AccessRuleExpr::AllowAll),
-        "deny_all" => Ok(AccessRuleExpr::DenyAll),
-        _ => Ok(AccessRuleExpr::Restricted(parse_restricted_named(&name, input)?)),
+        "allow_all" => {
+            input.parse::<Ident>()?;
+            Ok(AccessRuleExpr::AllowAll)
+        },
+        "deny_all" => {
+            input.parse::<Ident>()?;
+            Ok(AccessRuleExpr::DenyAll)
+        },
+        _ => Ok(AccessRuleExpr::Restricted(parse_restricted(input, 0)?)),
     }
 }
 
-fn parse_restricted(input: ParseStream) -> syn::Result<RestrictedRuleExpr> {
+fn parse_restricted(input: ParseStream, depth: usize) -> syn::Result<RestrictedRuleExpr> {
     let name: Ident = input.parse()?;
-    parse_restricted_named(&name, input)
-}
-
-fn parse_restricted_named(name: &Ident, input: ParseStream) -> syn::Result<RestrictedRuleExpr> {
+    if depth >= MAX_RULE_DEPTH {
+        return Err(syn::Error::new_spanned(
+            &name,
+            format!("access rule nests deeper than {MAX_RULE_DEPTH} levels"),
+        ));
+    }
     match name.to_string().as_str() {
         "any_of" | "all_of" => {
             let content;
             let paren = parenthesized!(content in input);
-            let rules = Punctuated::<_, Token![,]>::parse_terminated_with(&content, parse_restricted)?;
+            let mut rules = Vec::new();
+            while !content.is_empty() {
+                rules.push(parse_restricted(&content, depth + 1)?);
+                if content.is_empty() {
+                    break;
+                }
+                content.parse::<Token![,]>()?;
+            }
             if rules.is_empty() {
                 return Err(syn::Error::new(
                     paren.span.join(),
                     format!("{name}(..) needs at least one rule"),
                 ));
             }
-            let rules = rules.into_iter().collect();
             Ok(if name == "any_of" {
                 RestrictedRuleExpr::AnyOf(rules)
             } else {
@@ -222,10 +246,10 @@ fn parse_restricted_named(name: &Ident, input: ParseStream) -> syn::Result<Restr
             })
         },
         "allow_all" | "deny_all" => Err(syn::Error::new_spanned(
-            name,
+            &name,
             format!("`{name}` is a whole rule and cannot be combined with other rules"),
         )),
-        _ => Ok(RestrictedRuleExpr::Require(parse_requirement_named(name, input)?)),
+        _ => Ok(RestrictedRuleExpr::Require(parse_requirement_named(&name, input)?)),
     }
 }
 
@@ -306,7 +330,12 @@ fn expect_end(input: ParseStream) -> syn::Result<()> {
 impl AccessRulesExpr {
     pub(crate) fn build(&self, vars: &impl RuleVariables) -> Result<ComponentAccessRules, ManifestError> {
         let (default, methods) = match self {
-            Self::Var(ident) => return decode_var(vars, ident),
+            Self::Var(ident) => {
+                let rules: ComponentAccessRules = decode_var(vars, ident)?;
+                reject_scoped_rule(rules.contains_scoped_to_component_or_template())?;
+                check_valid_rule(rules.find_invalid_rule())?;
+                return Ok(rules);
+            },
             Self::Inline { default, methods } => (default, methods),
         };
         let mut rules = ComponentAccessRules::new();
@@ -323,7 +352,14 @@ impl AccessRulesExpr {
 impl OwnerRuleExpr {
     pub(crate) fn build(&self, vars: &impl RuleVariables) -> Result<OwnerRule, ManifestError> {
         Ok(match self {
-            Self::Var(ident) => return decode_var(vars, ident),
+            Self::Var(ident) => {
+                let rule: OwnerRule = decode_var(vars, ident)?;
+                if let OwnerRule::ByAccessRule(access_rule) = &rule {
+                    reject_scoped_rule(access_rule.contains_scoped_to_component_or_template())?;
+                    check_valid_rule(access_rule.find_invalid_rule())?;
+                }
+                rule
+            },
             Self::OwnedBySigner => OwnerRule::OwnedBySigner,
             Self::NoOwner => OwnerRule::None,
             Self::PublicKey(arg) => OwnerRule::ByPublicKey(public_key(vars, arg)?),
@@ -339,13 +375,27 @@ impl AccessRuleExpr {
             Self::DenyAll => AccessRule::DenyAll,
             Self::Restricted(rule) => AccessRule::Restricted(rule.build(vars)?),
         };
-        if let Some(invalid) = rule.find_invalid_rule() {
-            return Err(ManifestError::InvalidInstruction {
-                reason: format!("invalid access rule: {invalid:?}"),
-            });
-        }
+        check_valid_rule(rule.find_invalid_rule())?;
         Ok(rule)
     }
+}
+
+fn reject_scoped_rule(has_scoped: bool) -> Result<(), ManifestError> {
+    if has_scoped {
+        return Err(ManifestError::InvalidInstruction {
+            reason: "component access and owner rules do not accept component(..) or template(..)".to_string(),
+        });
+    }
+    Ok(())
+}
+
+fn check_valid_rule(invalid: Option<InvalidAccessRule>) -> Result<(), ManifestError> {
+    if let Some(invalid) = invalid {
+        return Err(ManifestError::InvalidInstruction {
+            reason: format!("invalid access rule: {invalid:?}"),
+        });
+    }
+    Ok(())
 }
 
 impl RestrictedRuleExpr {
@@ -509,5 +559,51 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(err.contains("duplicate rule for method `mint`"), "{err}");
+    }
+
+    #[test]
+    fn rules_enforce_nesting_depth() {
+        let nest = |levels: usize| format!("{}resource(TARI){}", "any_of(".repeat(levels), ")".repeat(levels));
+        assert!(access_rule(&nest(MAX_RULE_DEPTH - 1)).is_ok());
+        let err = access_rule(&nest(MAX_RULE_DEPTH)).unwrap_err();
+        assert!(err.contains("nests deeper than"), "{err}");
+    }
+
+    #[test]
+    fn decoded_rule_variables_reject_scoped_and_invalid_rules() {
+        struct SingleVar(ManifestValue);
+        impl RuleVariables for SingleVar {
+            fn rule_variable(&self, _name: &str) -> Result<&ManifestValue, ManifestError> {
+                Ok(&self.0)
+            }
+        }
+
+        let scoped = OwnerRule::ByAccessRule(AccessRule::Restricted(RestrictedAccessRule::Require(
+            RequireRule::Require(RuleRequirement::ScopedToComponent([1u8; 32].into())),
+        )));
+        let var = SingleVar(ManifestValue::new_value(&scoped).unwrap());
+        let err = parse_owner_rule
+            .parse_str("owner")
+            .unwrap()
+            .build(&var)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("do not accept component(..) or template(..)"), "{err}");
+
+        let invalid = ComponentAccessRules::new().add_method_rule(
+            "mint",
+            AccessRule::Restricted(RestrictedAccessRule::Require(RequireRule::MOfN(
+                2,
+                Box::new([RuleRequirement::Resource(TARI_TOKEN)]),
+            ))),
+        );
+        let var = SingleVar(ManifestValue::new_value(&invalid).unwrap());
+        let err = parse_access_rules
+            .parse_str("rules")
+            .unwrap()
+            .build(&var)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("invalid access rule"), "{err}");
     }
 }

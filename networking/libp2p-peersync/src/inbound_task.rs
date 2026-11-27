@@ -46,7 +46,10 @@ where
                     });
                 }
 
-                let msg = SignedPeerRecord::try_from(msg)?;
+                let msg = SignedPeerRecord::try_from(msg).map_err(|e| Error::InvalidMessage {
+                    peer_id,
+                    details: e.to_string(),
+                })?;
                 tracing::debug!(
                     "Received local peer record from peer {peer_id} containing {} address(es)",
                     msg.addresses.len()
@@ -115,8 +118,6 @@ where
     TPeerStore: PeerStore,
     S: AsyncRead + AsyncWrite + Unpin,
 {
-    let mut store_stream = store.stream();
-
     let orig_want_list_len = msg.want_peer_ids.len();
     if orig_want_list_len > config.max_want_list_len {
         tracing::warn!(
@@ -140,6 +141,8 @@ where
             peer_id,
             details: format!("invalid peer id in requested want_list: {e}"),
         })?;
+
+    let mut store_stream = store.stream();
 
     let mut peers_sent = 0;
     let event = loop {
@@ -232,6 +235,26 @@ mod tests {
                 "expected InvalidSignedPeer for {conn_peer}, got {err:?}"
             );
             assert!(store.get(&signed_other.to_peer_id()).await.unwrap().is_none());
+        });
+    }
+
+    #[test]
+    fn inbound_attributes_malformed_local_record_to_connected_peer() {
+        block_on(async {
+            let conn_peer = PeerId::random();
+            let raw_record = proto::SignedPeerRecord {
+                addresses: vec![],
+                ts_updated_at: 0,
+                signature: None,
+            };
+            let framed = make_inbound_framed(vec![raw_record.into()]);
+            let err = inbound_sync_task_inner(conn_peer, framed, MemoryPeerStore::new(), Config::default())
+                .await
+                .unwrap_err();
+            assert!(
+                matches!(err, Error::InvalidMessage { peer_id, .. } if peer_id == conn_peer),
+                "expected InvalidMessage for {conn_peer}, got {err:?}"
+            );
         });
     }
 

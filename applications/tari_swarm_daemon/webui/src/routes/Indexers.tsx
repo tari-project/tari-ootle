@@ -2,6 +2,7 @@
 //  SPDX-License-Identifier: BSD-3-Clause
 
 import { NodeCard } from "../components/NodeCard";
+import { IndexerSync } from "../components/SyncProgress";
 import { useSwarm } from "../state/context";
 import { Empty } from "../ui";
 
@@ -35,7 +36,16 @@ export default function Indexers() {
                   </a>
                 </>
               }
-            />
+            >
+              {indexer.is_running && (
+                <div>
+                  <div className="eyebrow" style={{ marginBottom: 4 }}>
+                    Sync
+                  </div>
+                  <IndexerSync stats={swarm.indexerSync[indexer.instance_id]} />
+                </div>
+              )}
+            </NodeCard>
           ))}
         </div>
       ) : (

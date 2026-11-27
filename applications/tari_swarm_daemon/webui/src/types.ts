@@ -100,6 +100,24 @@ export type TxHolding =
   | { kind: "absent" };
 
 /** Everything polled from one validator's own JSON-RPC. */
+/** The subset of an indexer's `GET /network/stats` the swarm UI reads to show its sync progress. */
+export interface IndexerSyncStats {
+  shard_groups: {
+    shard_group: { start: number; end_inclusive: number };
+    phase: {
+      kind: "Starting" | "SyncingCheckpoints" | "Snapshotting" | "Streaming" | "Paused" | "Halted";
+      shard?: number;
+    };
+  }[];
+  shards: {
+    shard: number;
+    state: "Waiting" | "Snapshotting" | "CatchingUp" | "Following" | "Halted";
+    verified: { state_version: number } | null;
+    tip_leaf: { state_version: number } | null;
+    snapshot: { fraction: number } | null;
+  }[];
+}
+
 export interface VnDetail {
   epoch: EpochManagerStats | null;
   consensus: ConsensusStatus | null;

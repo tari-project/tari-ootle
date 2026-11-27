@@ -3,11 +3,13 @@
 
 import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { describeError, nodeRpc, swarmRpc } from "../api/rpc";
+import { CatchUp, readChannels, trackCatchUp } from "../consensus";
 import {
   ConsensusStatus,
   EpochManagerStats,
   Identity,
   Indexer,
+  IndexerSyncStats,
   Instance,
   InstanceType,
   LogFile,
@@ -62,6 +64,8 @@ export function SwarmProvider({ children }: { children: ReactNode }) {
   const [wallets, setWallets] = useState<WalletDaemon[]>([]);
   const [indexers, setIndexers] = useState<Indexer[]>([]);
   const [details, setDetails] = useState<Record<number, VnDetail>>({});
+  const [catchUp, setCatchUp] = useState<Record<number, CatchUp>>({});
+  const [indexerSync, setIndexerSync] = useState<Record<number, IndexerSyncStats | null>>({});
   const [logs, setLogs] = useState<Record<number, InstanceLogs>>({});
   const [baseNodeHeight, setBaseNodeHeight] = useState<number | null>(null);
   const [isMining, setIsMining] = useState(false);
@@ -71,6 +75,7 @@ export function SwarmProvider({ children }: { children: ReactNode }) {
 
   // Identities never change for the life of an instance, so they are fetched once.
   const identities = useRef<Record<number, Identity>>({});
+  const catchUpRef = useRef<Record<number, CatchUp>>({});
   const nextToastId = useRef(0);
   const pollNow = useRef<() => void>(() => {});
 
@@ -149,8 +154,24 @@ export function SwarmProvider({ children }: { children: ReactNode }) {
       setBaseNodeHeight(null);
     }
 
-    const detailList = await Promise.all(vnList.nodes.map(pollValidator));
-    setDetails(Object.fromEntries(vnList.nodes.map((vn, i) => [vn.instance_id, detailList[i]])));
+    const [detailList, syncList] = await Promise.all([
+      Promise.all(vnList.nodes.map(pollValidator)),
+      Promise.all(
+        indexerList.nodes.map((indexer) =>
+          indexer.is_running
+            ? settle<IndexerSyncStats | null>(
+                fetch(new URL("network/stats", indexer.api_url)).then((r) => (r.ok ? r.json() : null)),
+                null,
+              )
+            : Promise.resolve(null),
+        ),
+      ),
+    ]);
+    const nextDetails = Object.fromEntries(vnList.nodes.map((vn, i) => [vn.instance_id, detailList[i]]));
+    setDetails(nextDetails);
+    catchUpRef.current = trackCatchUp(catchUpRef.current, readChannels(vnList.nodes, nextDetails).channels);
+    setCatchUp(catchUpRef.current);
+    setIndexerSync(Object.fromEntries(indexerList.nodes.map((indexer, i) => [indexer.instance_id, syncList[i]])));
 
     const logResults = await Promise.all(
       LOGGED_TYPES.map((instance_type) =>
@@ -220,6 +241,8 @@ export function SwarmProvider({ children }: { children: ReactNode }) {
       wallets,
       indexers,
       details,
+      catchUp,
+      indexerSync,
       logs,
       baseNodeHeight,
       isMining,
@@ -238,6 +261,8 @@ export function SwarmProvider({ children }: { children: ReactNode }) {
       wallets,
       indexers,
       details,
+      catchUp,
+      indexerSync,
       logs,
       baseNodeHeight,
       isMining,

@@ -49,3 +49,47 @@ impl Display for NewViewMessage {
         )
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use tari_consensus_types::{BlockId, QuorumDecision, ValidatorSignatureBytes};
+    use tari_ootle_common_types::{Epoch, NodeHeight, NumPreshards, ShardGroup, StateTreeHash};
+    use tari_template_lib_types::crypto::{RistrettoPublicKeyBytes, SchnorrSignatureBytes};
+
+    use super::*;
+    use crate::messages::HotstuffMessage;
+
+    fn sample_high_pc(epoch: Epoch, height: NodeHeight) -> ProposalCertificate {
+        ProposalCertificate::new(
+            StateTreeHash::default(),
+            BlockId::zero(),
+            height,
+            epoch,
+            ShardGroup::all_shards(NumPreshards::P64),
+            vec![],
+            QuorumDecision::Accept,
+        )
+    }
+
+    fn sample_timeout_vote(epoch: Epoch, height: NodeHeight, high_pc_height: NodeHeight) -> TimeoutVote {
+        TimeoutVote {
+            epoch,
+            height,
+            high_pc_height,
+            signature: ValidatorSignatureBytes::new(
+                RistrettoPublicKeyBytes::default(),
+                SchnorrSignatureBytes::zero(),
+            ),
+        }
+    }
+
+    #[test]
+    fn hotstuff_message_epoch_matches_new_view_epoch() {
+        let msg = NewViewMessage {
+            high_pc: sample_high_pc(Epoch(1), NodeHeight(5)),
+            last_vote: None,
+            timeout: sample_timeout_vote(Epoch(2), NodeHeight(6), NodeHeight(5)),
+        };
+        assert_eq!(HotstuffMessage::new_newview(msg.clone()).epoch(), msg.epoch());
+    }
+}

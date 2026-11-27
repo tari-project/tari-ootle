@@ -6166,7 +6166,8 @@ mod tests {
                 )
                 .unwrap();
         });
-        f.runtime
+        let created_component = f
+            .runtime
             .tracker
             .new_component(
                 tari_bor::to_value(&created_vault).unwrap(),
@@ -6191,6 +6192,11 @@ mod tests {
             .unwrap();
         assert_eq!(balance, Amount::new(7));
         f.runtime.pop_call_frame(&IndexedWellKnownTypes::new()).unwrap();
+        f.runtime
+            .pop_call_frame(
+                &IndexedWellKnownTypes::from_value(&tari_bor::to_value(&created_component).unwrap()).unwrap(),
+            )
+            .unwrap();
     }
 
     #[test]

@@ -221,14 +221,24 @@ impl SubstateRecord {
     pub fn get_any<'a, TTx: StateStoreReadTransaction, I: IntoIterator<Item = VersionedSubstateIdRef<'a>>>(
         tx: &TTx,
         requirements: I,
-    ) -> Result<(Vec<SubstateRecord>, HashSet<VersionedSubstateIdRef<'a>>), StorageError> {
-        let mut substate_ids = requirements.into_iter().collect::<HashSet<_>>();
-        let found = tx.substates_get_any(&substate_ids)?;
-        for f in &found {
-            substate_ids.remove(f.substate_id());
+    ) -> Result<(Vec<SubstateRecord>, HashSet<VersionedSubstateId>), StorageError> {
+        let mut substate_ids = HashSet::new();
+        let mut unique_refs = Vec::new();
+        for req in requirements {
+            if substate_ids.insert((req.substate_id, req.version)) {
+                unique_refs.push(req);
+            }
         }
+        let found = tx.substates_get_any(&unique_refs)?;
+        for f in &found {
+            substate_ids.remove(&(f.substate_id(), f.version()));
+        }
+        let missing = substate_ids
+            .into_iter()
+            .map(|(id, version)| VersionedSubstateId::new(id.clone(), version))
+            .collect();
 
-        Ok((found, substate_ids))
+        Ok((found, missing))
     }
 
     pub fn get_all<'a, TTx: StateStoreReadTransaction, I: IntoIterator<Item = VersionedSubstateIdRef<'a>>>(

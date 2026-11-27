@@ -752,29 +752,6 @@ where
             self.config.maximum_client_deadline,
         );
 
-        // The client side deadline MUST be greater or equal to the minimum_client_deadline
-        if deadline < self.config.minimum_client_deadline {
-            debug!(
-                target: LOG_TARGET,
-                "({}) Client has an invalid deadline. {}", self.logging_context_string, decoded_msg
-            );
-            // Let the client know that they have disobeyed the spec
-            let status = RpcStatus::bad_request(format!(
-                "Invalid deadline ({:.0?}). The deadline MUST be at least {:.0?}.",
-                deadline, self.config.minimum_client_deadline,
-            ));
-            let bad_request = proto::RpcResponse {
-                request_id,
-                status: status.as_code(),
-                flags: RpcMessageFlags::FIN.bits().into(),
-                payload: status.to_details_bytes(),
-            };
-            #[cfg(feature = "metrics")]
-            metrics::status_error_counter(&self.peer_id, &self.protocol, status.as_status_code()).inc();
-            self.framed.send(bad_request.encode_to_vec().into()).await?;
-            return Ok(());
-        }
-
         let msg_flags = RpcMessageFlags::from_bits(u8::try_from(decoded_msg.flags).map_err(|_| {
             RpcServerError::ProtocolError(format!("invalid message flag: must be less than {}", u8::MAX))
         })?)
@@ -799,6 +776,29 @@ where
                 ..Default::default()
             };
             self.framed.send(ack.encode_to_vec().into()).await?;
+            return Ok(());
+        }
+
+        // The client side deadline MUST be greater or equal to the minimum_client_deadline
+        if deadline < self.config.minimum_client_deadline {
+            debug!(
+                target: LOG_TARGET,
+                "({}) Client has an invalid deadline. {}", self.logging_context_string, decoded_msg
+            );
+            // Let the client know that they have disobeyed the spec
+            let status = RpcStatus::bad_request(format!(
+                "Invalid deadline ({:.0?}). The deadline MUST be at least {:.0?}.",
+                deadline, self.config.minimum_client_deadline,
+            ));
+            let bad_request = proto::RpcResponse {
+                request_id,
+                status: status.as_code(),
+                flags: RpcMessageFlags::FIN.bits().into(),
+                payload: status.to_details_bytes(),
+            };
+            #[cfg(feature = "metrics")]
+            metrics::status_error_counter(&self.peer_id, &self.protocol, status.as_status_code()).inc();
+            self.framed.send(bad_request.encode_to_vec().into()).await?;
             return Ok(());
         }
 
@@ -1378,6 +1378,35 @@ mod keepalive_tests {
         let response = serve_one_request_with_deadline(config, 5).await;
         assert_eq!(response.status, RpcStatus::ok().as_code());
         assert_eq!(response.payload, b"pong");
+    }
+
+    #[tokio::test]
+    async fn a_fin_or_ack_control_frame_without_a_deadline_is_not_rejected_for_minimum_deadline() {
+        let config = RpcServerBuilder::default().with_minimum_client_deadline(Duration::from_secs(5));
+        let (server_framed, mut client_framed) = framed_pair();
+        let mut service = answering_session(config, server_framed);
+
+        let fin = proto::RpcRequest {
+            request_id: 1,
+            flags: u32::from(RpcMessageFlags::FIN.bits()),
+            deadline: 0,
+            ..Default::default()
+        };
+        service.handle_request(fin.encode_to_vec().into()).await.unwrap();
+
+        let ack = proto::RpcRequest {
+            request_id: 0,
+            flags: u32::from(RpcMessageFlags::ACK.bits()),
+            deadline: 0,
+            ..Default::default()
+        };
+        service.handle_request(ack.encode_to_vec().into()).await.unwrap();
+        drop(service);
+
+        let responses = collect_responses(&mut client_framed).await;
+        assert_eq!(responses.len(), 1, "expected only the ACK response, got {responses:?}");
+        assert_eq!(responses[0].status, RpcStatus::ok().as_code());
+        assert!(responses[0].flags().unwrap().contains(RpcMessageFlags::ACK));
     }
 
     #[test]

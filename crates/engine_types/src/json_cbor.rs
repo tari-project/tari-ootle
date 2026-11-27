@@ -5,30 +5,30 @@ use serde_json as json;
 
 const MAX_DEPTH: usize = 50;
 
-#[derive(Debug, thiserror::Error)]
-#[error("Maximum depth of {} exceeded during JSON to CBOR conversion", MAX_DEPTH)]
-pub struct MaxDepthExceeded;
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
+pub enum JsonCborError {
+    #[error("Maximum depth of {MAX_DEPTH} exceeded during JSON to CBOR conversion")]
+    MaxDepthExceeded,
+    #[error("JSON number is outside the CBOR integer and finite f64 range")]
+    NumberOutOfRange,
+}
 
 /// Direct conversion from a serde JSON value to a CBOR value type.
 ///
-/// Returns an error if the maximum depth (50) is exceeded during conversion.
-pub fn convert_json_to_cbor(value: json::Value) -> Result<tari_bor::Value, MaxDepthExceeded> {
+/// Returns an error if the maximum depth (50) is exceeded or if a number falls outside the CBOR
+/// integer and finite `f64` range.
+pub fn convert_json_to_cbor(value: json::Value) -> Result<tari_bor::Value, JsonCborError> {
     convert_json_to_cbor_inner(value, 0)
 }
 
-fn convert_json_to_cbor_inner(value: json::Value, depth: usize) -> Result<tari_bor::Value, MaxDepthExceeded> {
+fn convert_json_to_cbor_inner(value: json::Value, depth: usize) -> Result<tari_bor::Value, JsonCborError> {
     if depth >= MAX_DEPTH {
-        return Err(MaxDepthExceeded);
+        return Err(JsonCborError::MaxDepthExceeded);
     }
     match value {
         json::Value::Null => Ok(tari_bor::Value::Null),
         json::Value::Bool(v) => Ok(tari_bor::Value::Bool(v)),
-        json::Value::Number(n) => Ok(n
-            .as_i64()
-            .map(|v| tari_bor::Value::Integer(v.into()))
-            .or_else(|| n.as_u64().map(|v| tari_bor::Value::Integer(v.into())))
-            .or_else(|| n.as_f64().map(tari_bor::Value::Float))
-            .expect("A JSON number is always convertable to an integer or a float")),
+        json::Value::Number(n) => convert_json_number(&n),
         // Allow special string parsing within nested arrays and objects
         json::Value::String(s) => Ok(tari_bor::Value::Text(s)),
         json::Value::Array(arr) => Ok(tari_bor::Value::Array(
@@ -42,6 +42,18 @@ fn convert_json_to_cbor_inner(value: json::Value, depth: usize) -> Result<tari_b
                 .collect::<Result<_, _>>()?,
         )),
     }
+}
+
+// Overflowing floats and integers outside [i64::MIN, u64::MAX] only reach `json::Number`
+// when `serde_json/arbitrary_precision` is enabled (as in `tari_walletd`). Without that
+// feature, `serde_json` rejects overflowing floats at parse time and widens integers above
+// `u64::MAX` to `f64`.
+fn convert_json_number(n: &json::Number) -> Result<tari_bor::Value, JsonCborError> {
+    n.as_i64()
+        .map(|v| tari_bor::Value::Integer(v.into()))
+        .or_else(|| n.as_u64().map(|v| tari_bor::Value::Integer(v.into())))
+        .or_else(|| n.as_f64().filter(|_| n.is_f64()).map(tari_bor::Value::Float))
+        .ok_or(JsonCborError::NumberOutOfRange)
 }
 
 #[cfg(test)]
@@ -70,6 +82,18 @@ mod tests {
     }
 
     #[test]
+    fn rejects_numbers_outside_cbor_integer_and_finite_f64_range() {
+        for raw in ["18446744073709551616", "-9223372036854775809", "1e400", "-1e400"] {
+            let value: json::Value = json::from_str(raw).unwrap();
+            assert_eq!(
+                convert_json_to_cbor(value),
+                Err(JsonCborError::NumberOutOfRange),
+                "expected error for {raw}"
+            );
+        }
+    }
+
+    #[test]
     fn enforces_max_depth_consistent_with_indexed_value() {
         let mut allowed = json::json!(1);
         for _ in 0..(MAX_DEPTH - 1) {
@@ -80,6 +104,9 @@ mod tests {
             .expect("IndexedValue::from_value must accept every CBOR value produced by convert_json_to_cbor");
 
         let too_deep = (0..MAX_DEPTH).fold(json::json!(1), |acc, _| json::Value::Array(vec![acc]));
-        assert!(matches!(convert_json_to_cbor(too_deep), Err(MaxDepthExceeded)));
+        assert!(matches!(
+            convert_json_to_cbor(too_deep),
+            Err(JsonCborError::MaxDepthExceeded)
+        ));
     }
 }

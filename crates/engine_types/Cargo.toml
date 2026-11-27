@@ -42,6 +42,7 @@ extract-template-def = ["dep:wasmparser"]
 ts = ["ts-rs", "tari_template_lib/ts", "tari_template_abi/ts"]
 
 [dev-dependencies]
+serde_json = { workspace = true, features = ["arbitrary_precision"] }
 # Path-only (no version) to break the circular dev-dep: tari_template_builtin depends on
 # tari_engine_types, so a published version here would leave `cargo publish` unable to resolve
 # this manifest.

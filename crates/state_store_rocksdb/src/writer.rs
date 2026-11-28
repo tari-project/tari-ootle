@@ -1476,6 +1476,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         entries.truncate(num_entries);
 
         let pending = self.pending_state();
+        let mut num_kept = 0usize;
         for (key, addresses) in entries {
             let mut still_locked = Vec::new();
             // TODO(perf): consider storing the actual values in a separate column family to avoid get/set
@@ -1503,6 +1504,7 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
             }
             unpruned_index.delete(&key, OPERATION)?;
             if !still_locked.is_empty() {
+                num_kept += still_locked.len();
                 // Indexed past this cleanup's epoch, so the next epoch's cleanup checks the locks again
                 let (_, shard, version) = key;
                 let next_key = (epoch + Epoch(1), shard, version);
@@ -1513,6 +1515,13 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
                 addresses.extend(still_locked);
                 unpruned_index.put(&next_key, &addresses, OPERATION)?;
             }
+        }
+
+        if num_kept > 0 {
+            debug!(
+                target: LOG_TARGET,
+                "🔒️ Kept {num_kept} of {count} downed substate values examined for epoch {epoch}: a substate lock still names their version",
+            );
         }
 
         Ok(count)

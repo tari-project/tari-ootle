@@ -67,7 +67,7 @@ fn run_epoch_cleanup<TStore: StateStore>(store: &TStore, batch_size: usize) -> R
             }
         }
         if total > 0 {
-            log::info!(target: LOG_TARGET, "🗑️ Pruned {total} {step} for epoch {epoch}");
+            log::info!(target: LOG_TARGET, "🗑️ Processed {total} {step} for epoch {epoch}");
         }
     }
     Ok(())

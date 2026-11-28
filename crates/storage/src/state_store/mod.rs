@@ -296,6 +296,13 @@ pub trait StateStoreReadTransaction: Sized {
         chain: &PendingChain,
         substate_id: T,
     ) -> Result<SubstateChange, StorageError>;
+    /// Returns the UP of the given substate version recorded by the branch ending at the chain's leaf, including one
+    /// the branch has since put DOWN, or `NotFound` if the branch never put that version UP.
+    fn block_diffs_get_up_for_versioned_substate_in_chain<'a, T: Into<VersionedSubstateIdRef<'a>>>(
+        &self,
+        chain: &PendingChain,
+        substate_id: T,
+    ) -> Result<SubstateChange, StorageError>;
     /// Returns whether the branch ending at `block_id` records any change for the given substate version. Selection
     /// follows the same branch rules as [`Self::block_diffs_get_last_change_for_substate`].
     ///

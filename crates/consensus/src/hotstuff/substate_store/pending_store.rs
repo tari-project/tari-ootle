@@ -166,6 +166,10 @@ impl<TTx: StateStoreReadTransaction> SubstateLayer for PendingSubstateStore<'_, 
         self.log.get(&self.chain, id)
     }
 
+    fn get_retained_substate(&self, id: VersionedSubstateIdRef<'_>) -> Result<Substate, SubstateStoreError> {
+        self.log.get_retained(&self.chain, id)
+    }
+
     fn is_version_up(&self, id: VersionedSubstateIdRef<'_>) -> Result<Option<bool>, SubstateStoreError> {
         self.log.is_version_up(&self.chain, id)
     }
@@ -744,7 +748,8 @@ impl<'store, TTx: StateStoreReadTransaction> PendingSubstateStore<'store, TTx> {
         })
     }
 
-    /// Adds a transaction's local inputs to the substates this block pledges to foreign shard groups.
+    /// Adds a transaction's local inputs to the substates this block pledges to foreign shard groups. Every input
+    /// must be UP.
     ///
     /// Nothing is added if the inputs alone come to more than `max_transaction_bytes`, or if they would take the
     /// block past its pledge budget (see [`Self::with_pledge_budget`]). An input another command of the block already
@@ -757,11 +762,43 @@ impl<'store, TTx: StateStoreReadTransaction> PendingSubstateStore<'store, TTx> {
     where
         I: IntoIterator<Item = VersionedSubstateIdRef<'i>>,
     {
+        self.pledge_inputs_with(inputs, max_transaction_bytes, <Self as SubstateLayer>::get_substate)
+    }
+
+    /// Adds the inputs a transaction locked when it prepared to the substates this block pledges, as
+    /// [`Self::pledge_inputs`] does. An input may have been put DOWN since it was locked, because an in-place update
+    /// such as a leader fee deposit into a validator fee pool supersedes the locked version regardless of its locks.
+    /// The version locked is the one pledged, so its value is the one counted.
+    pub fn pledge_locked_inputs<'i, I>(
+        &mut self,
+        inputs: I,
+        max_transaction_bytes: usize,
+    ) -> Result<InputPledge, SubstateStoreError>
+    where
+        I: IntoIterator<Item = VersionedSubstateIdRef<'i>>,
+    {
+        self.pledge_inputs_with(
+            inputs,
+            max_transaction_bytes,
+            <Self as SubstateLayer>::get_retained_substate,
+        )
+    }
+
+    fn pledge_inputs_with<'i, I, F>(
+        &mut self,
+        inputs: I,
+        max_transaction_bytes: usize,
+        get: F,
+    ) -> Result<InputPledge, SubstateStoreError>
+    where
+        I: IntoIterator<Item = VersionedSubstateIdRef<'i>>,
+        F: Fn(&Self, VersionedSubstateIdRef<'i>) -> Result<Substate, SubstateStoreError>,
+    {
         let mut transaction_bytes = 0usize;
         let mut new_inputs = HashSet::new();
         let mut new_bytes = 0usize;
         for id in inputs {
-            let substate = self.get(id)?;
+            let substate = get(self, id)?;
             let bytes = up_encoded_len(id.substate_id(), &substate);
             transaction_bytes = transaction_bytes.saturating_add(bytes);
             let id = id.to_owned();

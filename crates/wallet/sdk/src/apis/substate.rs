@@ -289,12 +289,12 @@ where
             }
         }
 
-        // The parent fetches above carry the version from the network scan, ignoring the `unversioned`
-        // request. When the caller asked for
-        // unversioned dependencies, normalise the whole set: a locally-cached version can be stale
-        // (e.g. a swap pool reserve advances on every swap), and pinning it makes the indexer reject the
-        // input as "down" once the chain moves past it. `SubstateRequirement` hashes by id only, so
-        // collapsing to unversioned cannot introduce duplicates.
+        // The parent fetches above carry versions from the network scan even when `unversioned` is
+        // requested. Normalise the whole set so none of those fetched versions are pinned: a version
+        // fetched during detection can move on before the transaction lands (e.g. a swap pool reserve
+        // advances on every swap), causing the indexer to reject a pinned input as "down".
+        // `SubstateRequirement` hashes by id only, so collapsing to unversioned cannot introduce
+        // duplicates.
         if unversioned {
             return Ok(substate_ids
                 .into_iter()

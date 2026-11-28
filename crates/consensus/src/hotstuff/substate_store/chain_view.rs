@@ -72,9 +72,9 @@ impl<TTx: StateStoreReadTransaction> SubstateLayer for ChainView<'_, TTx> {
 
     fn get_retained_substate(&self, id: VersionedSubstateIdRef<'_>) -> Result<Substate, SubstateStoreError> {
         if let Some(change) = BlockDiff::get_up_for_versioned_substate(self.store, &self.parent_chain, id).optional()? {
-            return change
-                .into_up()
-                .ok_or_else(|| SubstateStoreError::SubstateNotFound { id: id.to_owned() });
+            return change.into_up().ok_or_else(|| SubstateStoreError::InvariantError {
+                details: format!("The UP lookup for substate {id} returned a DOWN"),
+            });
         }
 
         let Some(substate) = SubstateRecord::get(self.store, &id.to_substate_address()).optional()? else {

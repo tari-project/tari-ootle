@@ -1048,14 +1048,14 @@ fn authorize_with_wallet_keys(
         .authorize(&seal_signer_pk, keys, stealth_keys, transaction)?)
 }
 
-/// Resolves the substate inputs `transaction` depends on and merges them with any declarations
-/// already carried on `transaction`.
+/// Returns a declaration for each substate `transaction` depends on, keeping read/write from any
+/// existing declaration.
 ///
 /// `Instruction::CreateAccount` is idempotent create-or-deposit: its derived `Account` component
-/// exists before execution only when the account is already on-chain, whereas a later instruction
-/// in the same transaction may call or pass that derived address after `CreateAccount` creates it.
-/// Derived addresses whose first appearance is `CreateAccount` (and not already declared in
-/// `transaction.inputs()`) are therefore probed in a batch and included only when live.
+/// exists before execution only when the account is already on-chain, whereas another instruction
+/// in the same transaction may reference that derived address. Derived addresses not already
+/// declared in `transaction.inputs()` are therefore removed from the referenced set, probed in a
+/// batch, and included only when live.
 async fn detect_transaction_inputs(
     sdk: &WalletSdk,
     transaction: &UnsignedTransaction,
@@ -1066,11 +1066,12 @@ async fn detect_transaction_inputs(
         substates.insert(req.substate_id().clone());
     }
 
-    let create_account_candidates = collect_create_account_candidates(transaction)?;
+    let create_account_candidates = collect_create_account_candidates(transaction);
     if !create_account_candidates.is_empty() {
         for candidate in &create_account_candidates {
             substates.remove(candidate);
         }
+        // Probe candidates before `locate_dependent_substates`, which fails on any missing substate.
         let existing = sdk
             .substate_api()
             .get_substates_from_network(&create_account_candidates)
@@ -1092,102 +1093,21 @@ async fn detect_transaction_inputs(
         .collect())
 }
 
-fn record_raw_arg_components(
-    raw: &[u8],
-    seen: &HashSet<SubstateId>,
-    before: &mut HashSet<SubstateId>,
-) -> Result<(), tari_ootle_common_types::engine_types::indexed_value::IndexedValueError> {
-    let value = tari_ootle_common_types::engine_types::indexed_value::IndexedValue::from_raw(raw)?;
-    for id in value.referenced_substates() {
-        if id.is_component() && !seen.contains(&id) {
-            before.insert(id);
-        }
-    }
-    Ok(())
-}
-
-fn collect_create_account_candidates(
-    transaction: &UnsignedTransaction,
-) -> Result<Vec<SubstateId>, tari_ootle_common_types::engine_types::indexed_value::IndexedValueError> {
-    let has_create_account = transaction
+fn collect_create_account_candidates(transaction: &UnsignedTransaction) -> Vec<SubstateId> {
+    let declared = transaction.inputs();
+    let mut seen = HashSet::new();
+    transaction
         .fee_instructions()
         .iter()
         .chain(transaction.instructions())
-        .any(|inst| matches!(inst, Instruction::CreateAccount { .. }));
-    if !has_create_account {
-        return Ok(Vec::new());
-    }
-
-    let declared = transaction.inputs();
-    let mut candidates = Vec::new();
-    let mut seen_candidates = HashSet::new();
-    let mut referenced_before_create = HashSet::new();
-
-    for instruction in transaction.fee_instructions().iter().chain(transaction.instructions()) {
-        match instruction {
-            Instruction::CreateAccount { owner_public_key, .. } => {
-                let derived = SubstateId::Component(derive_component_address_from_public_key(
-                    &ACCOUNT_TEMPLATE_ADDRESS,
-                    owner_public_key,
-                ));
-                if !declared.contains(&derived) &&
-                    !referenced_before_create.contains(&derived) &&
-                    seen_candidates.insert(derived.clone())
-                {
-                    candidates.push(derived);
-                }
-            },
-            Instruction::CallFunction { args, .. } => {
-                for raw in args.iter().filter_map(|a| a.as_literal_bytes()) {
-                    record_raw_arg_components(raw, &seen_candidates, &mut referenced_before_create)?;
-                }
-            },
-            Instruction::CallMethod { call, args, .. } => {
-                if let Some(addr) = call.address() {
-                    let id = SubstateId::Component(*addr);
-                    if !seen_candidates.contains(&id) {
-                        referenced_before_create.insert(id);
-                    }
-                }
-                for raw in args.iter().filter_map(|a| a.as_literal_bytes()) {
-                    record_raw_arg_components(raw, &seen_candidates, &mut referenced_before_create)?;
-                }
-            },
-            Instruction::StealthTransfer { statement, .. } => {
-                for raw in statement.script_path_template_functions().flat_map(|tf| &tf.args) {
-                    record_raw_arg_components(raw, &seen_candidates, &mut referenced_before_create)?;
-                }
-            },
-            Instruction::UpdateComponentTemplate { component, migrate, .. } => {
-                if let Some(addr) = component.address() {
-                    let id = SubstateId::Component(*addr);
-                    if !seen_candidates.contains(&id) {
-                        referenced_before_create.insert(id);
-                    }
-                }
-                for raw in migrate
-                    .as_ref()
-                    .iter()
-                    .flat_map(|m| &m.args)
-                    .filter_map(|a| a.as_literal_bytes())
-                {
-                    record_raw_arg_components(raw, &seen_candidates, &mut referenced_before_create)?;
-                }
-            },
-            Instruction::SetComponentAccessRules { component, .. } |
-            Instruction::SetComponentOwnerRule { component, .. } => {
-                if let Some(addr) = component.address() {
-                    let id = SubstateId::Component(*addr);
-                    if !seen_candidates.contains(&id) {
-                        referenced_before_create.insert(id);
-                    }
-                }
-            },
-            _ => {},
-        }
-    }
-
-    Ok(candidates)
+        .filter_map(|instruction| match instruction {
+            Instruction::CreateAccount { owner_public_key, .. } => Some(SubstateId::Component(
+                derive_component_address_from_public_key(&ACCOUNT_TEMPLATE_ADDRESS, owner_public_key),
+            )),
+            _ => None,
+        })
+        .filter(|derived| !declared.contains(derived) && seen.insert(derived.clone()))
+        .collect()
 }
 
 /// Turns a detected dependency into a declaration, deferring to what the transaction already said
@@ -2116,7 +2036,6 @@ mod tests {
             component::{Component, ComponentBody, ComponentHeader},
             substate::{Substate, SubstateValue},
         };
-        use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
         use tari_template_lib_types::{
             EntityId,
             SubstateOwnerRule,
@@ -2181,9 +2100,7 @@ mod tests {
     #[tokio::test]
     async fn detect_inputs_includes_existing_create_account_component_and_vaults_and_skips_new_accounts() {
         use tari_crypto::{keys::PublicKey as _, ristretto::RistrettoPublicKey};
-        use tari_engine_types::component::derive_component_address_from_public_key;
         use tari_ootle_wallet_sdk::IndexerTrust;
-        use tari_template_builtin::ACCOUNT_TEMPLATE_ADDRESS;
         use tari_template_lib_types::{ObjectKey, ResourceAddress, VaultId, constants::TARI_TOKEN};
 
         use crate::handlers::test_support::FakeIndexer;
@@ -2473,7 +2390,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn detect_inputs_omits_uncreated_account_referenced_after_create_account_and_rejects_earlier_reference() {
+    async fn detect_inputs_omits_uncreated_account_referenced_with_create_account_unless_explicitly_declared() {
         let f = setup_create_account_submission_fixture().await;
 
         let fee_claim_style = TransactionBuilder::new(Network::LocalNet.as_byte(), Epoch(100))
@@ -2515,11 +2432,26 @@ mod tests {
             .create_account(f.fresh_pk)
             .build_unsigned();
 
+        let omitted = handle_detect_inputs(
+            &f.daemon.context,
+            Some(&f.daemon.session),
+            TransactionDetectInputsRequest {
+                transaction: called_before_create.clone(),
+                use_unversioned: false,
+            },
+        )
+        .await
+        .unwrap()
+        .transaction;
+        assert!(!omitted.inputs().contains(&SubstateId::Component(f.fresh_account_addr)));
+
+        let explicitly_declared =
+            called_before_create.with_inputs([InputDeclaration::write(SubstateId::Component(f.fresh_account_addr))]);
         let err = handle_detect_inputs(
             &f.daemon.context,
             Some(&f.daemon.session),
             TransactionDetectInputsRequest {
-                transaction: called_before_create,
+                transaction: explicitly_declared,
                 use_unversioned: false,
             },
         )

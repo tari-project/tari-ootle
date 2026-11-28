@@ -776,7 +776,8 @@ pub trait StateStoreWriteTransaction {
     /// in.
     fn substates_commit_batch(&mut self, update_batch: SubstateUpdateBatch) -> Result<(), StorageError>;
     /// Clears the values of substates downed in or before `epoch`, stopping at the first index entry that takes the
-    /// count to `limit` or more. Returns the number of values cleared; a result below `limit` means none remain.
+    /// count to `limit` or more. The value of a version a substate lock still names is kept, and checked again by the
+    /// cleanup of a later epoch. Returns the number of values examined; a result below `limit` means none remain.
     fn substates_prune_downed_values(&mut self, epoch: Epoch, limit: usize) -> Result<usize, StorageError>;
     /// Rewinds substate state for `shard` back to `target_state_version` by inverting every state transition
     /// recorded for versions > `target_state_version`, in reverse order.

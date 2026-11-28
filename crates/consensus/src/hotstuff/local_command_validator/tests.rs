@@ -41,6 +41,7 @@ use tari_ootle_common_types::{
     derive_fee_pool_address,
 };
 use tari_ootle_storage::{
+    EpochCleanupStep,
     StateStore,
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
@@ -422,6 +423,37 @@ impl Replica {
                 let (changes, _) = substate_store.into_parts();
                 tx.block_diffs_insert(parent.block_id(), &changes)
             })
+            .unwrap();
+    }
+
+    /// Commits the deposit of `leader_fee` into the fee pool of `claim_key`, as a committed block that deposited it
+    /// would.
+    fn commit_leader_fee_deposit(&self, claim_key: &RistrettoPublicKeyBytes, leader_fee: u64) {
+        let shard = self.committee.shard_group().start();
+        let changes = self
+            .store
+            .with_read_tx(|tx| {
+                let mut substate_store = PendingSubstateStore::init(tx, self.parent.as_leaf(), NUM_PRESHARDS)?;
+                apply_leader_fee_to_substate_store(&mut substate_store, claim_key, NUM_PRESHARDS, shard, leader_fee)
+                    .unwrap();
+                let (changes, _) = substate_store.into_parts();
+                Ok::<_, StorageError>(changes)
+            })
+            .unwrap();
+        let mut batch = SubstateUpdateBatch::new(NETWORK, Epoch::zero());
+        let transitions = batch.with_transition(shard, 1);
+        for change in changes {
+            transitions.push(match change {
+                SubstateChange::Down { id, .. } => SubstateTransition::Down { id },
+                SubstateChange::Up { id, substate, .. } => SubstateTransition::Up {
+                    id,
+                    version: substate.version(),
+                    substate_or_hash: substate.into_substate_value().into(),
+                },
+            });
+        }
+        self.store
+            .with_write_tx(|tx| SubstateRecord::commit_batch(tx, batch))
             .unwrap();
     }
 
@@ -2579,6 +2611,30 @@ mod local_accept_from_local_prepared {
     /// the version the claim locked, at its size.
     #[test]
     fn an_accept_whose_locked_fee_pool_was_updated_in_place_is_proposed_and_voted_for() {
+        assert_fee_claim_accepted_after(|replica, claim_key| {
+            replica.deposit_leader_fee_in_parent(claim_key, 2_000);
+        });
+    }
+
+    /// A claim can wait for its foreign pledges for longer than downed values are retained. The value of the version
+    /// it locked outlives the epoch cleanup that follows the deposit.
+    #[test]
+    fn an_accept_whose_locked_fee_pool_was_updated_in_place_and_garbage_collected_is_proposed_and_voted_for() {
+        assert_fee_claim_accepted_after(|replica, claim_key| {
+            replica.commit_leader_fee_deposit(claim_key, 2_000);
+            replica
+                .store
+                .with_write_tx(|tx| {
+                    tx.epoch_cleanup_step(Epoch(1_000), EpochCleanupStep::DownedSubstateValues, usize::MAX)
+                })
+                .unwrap();
+        });
+    }
+
+    /// Prepares a cross-shard claim on the replica's validator fee pool, has `supersede` replace the version it locked,
+    /// then checks a proposer accepts the claim as a commit that pledges the locked version and a validator votes for
+    /// it.
+    fn assert_fee_claim_accepted_after(supersede: impl FnOnce(&Replica, &RistrettoPublicKeyBytes)) {
         let (local, foreign) = local_and_foreign_halves();
         let replica = Replica::in_committee(local, 2);
         let claim_key = RistrettoPublicKeyBytes::default();
@@ -2597,7 +2653,7 @@ mod local_accept_from_local_prepared {
                 .any(|(input, lock)| *input == pool && lock.version == locked.version()),
             "the claim locks the pool's first version"
         );
-        replica.deposit_leader_fee_in_parent(&claim_key, 2_000);
+        supersede(&replica, &claim_key);
         replica.receive_input_pledges(&id, foreign, &[&foreign_input]);
 
         let mut ready_rec = replica.pending_record(&id);

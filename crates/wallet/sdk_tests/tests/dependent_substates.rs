@@ -206,11 +206,18 @@ async fn locate_dependent_substates_resolves_versions_for_local_references_and_s
     let identity_badge = SubstateId::from(NonFungibleAddress::from_public_key(RistrettoPublicKeyBytes::default()));
     let missing_ref_id = SubstateId::from(ComponentAddress::new(ObjectKey::from_array([35; 32])));
 
-    let network = CannedSubstateNetworkInterface::new([(
-        resx_id.clone(),
-        SubstateVersion::new(7),
-        create_test_resource_value(ResourceType::Confidential),
-    )]);
+    let network = CannedSubstateNetworkInterface::new([
+        (
+            vault_id.clone(),
+            SubstateVersion::new(5),
+            create_test_vault_value(resx_addr, 100),
+        ),
+        (
+            resx_id.clone(),
+            SubstateVersion::new(7),
+            create_test_resource_value(ResourceType::Confidential),
+        ),
+    ]);
     let test = TestWithNetwork::without_accounts(network);
     let substates = test.sdk().substate_api();
 
@@ -735,4 +742,112 @@ async fn locate_dependent_substates_omits_spent_substates_referenced_in_componen
     assert!(!by_id.contains_key(&SubstateId::Resource(spent_confidential_resx)));
     assert_eq!(by_id.len(), 3);
     assert_eq!(network_probe.query_count(&spent_utxo_id), 1);
+}
+
+#[tokio::test]
+async fn locate_dependent_substates_refreshes_stored_non_components_and_preserves_live_versions_across_parents() {
+    let component_id = SubstateId::from(ComponentAddress::new(ObjectKey::from_array([80; 32])));
+    let vault = VaultId::new(ObjectKey::from_array([81; 32]));
+    let vault_id = SubstateId::Vault(vault);
+    let resx = ResourceAddress::new(ObjectKey::from_array([82; 32]));
+    let resx_id = SubstateId::Resource(resx);
+    let nft_resx = ResourceAddress::new(ObjectKey::from_array([83; 32]));
+    let nft_resx_id = SubstateId::Resource(nft_resx);
+    let nft_id = SubstateId::from(NonFungibleAddress::new(nft_resx, NonFungibleId::from_u64(9)));
+    let spent_ref_id = SubstateId::from(ComponentAddress::new(ObjectKey::from_array([84; 32])));
+
+    let live_state = tari_bor::to_value(&(vec![vault], spent_ref_id.clone())).unwrap();
+    let network = CannedSubstateNetworkInterface::new([
+        (
+            component_id.clone(),
+            SubstateVersion::new(3),
+            create_test_component_value(live_state),
+        ),
+        (
+            vault_id.clone(),
+            SubstateVersion::new(5),
+            create_test_vault_value(resx, 500),
+        ),
+        (
+            resx_id.clone(),
+            SubstateVersion::new(2),
+            create_test_resource_value(ResourceType::Fungible),
+        ),
+        (
+            nft_id.clone(),
+            SubstateVersion::new(4),
+            SubstateValue::NonFungible(NonFungibleContainer::no_data()),
+        ),
+        (
+            nft_resx_id.clone(),
+            SubstateVersion::new(1),
+            create_test_resource_value(ResourceType::NonFungible),
+        ),
+    ]);
+    let test = TestWithNetwork::without_accounts(network);
+    let substates = test.sdk().substate_api();
+
+    // Seed stale local versions for the component, its vault, the shared resource, the NFT, and a down ref.
+    substates
+        .save_root(VersionedSubstateIdRef::new(&component_id, SubstateVersion::ZERO), vec![
+            vault_id.clone(),
+        ])
+        .unwrap();
+    substates
+        .save_child(
+            &component_id,
+            VersionedSubstateIdRef::new(&vault_id, SubstateVersion::ZERO),
+            vec![resx_id.clone(), spent_ref_id.clone()],
+        )
+        .unwrap();
+    substates
+        .save_root(VersionedSubstateIdRef::new(&resx_id, SubstateVersion::ZERO), vec![])
+        .unwrap();
+    substates
+        .save_root(
+            VersionedSubstateIdRef::new(&spent_ref_id, SubstateVersion::ZERO),
+            vec![],
+        )
+        .unwrap();
+    substates
+        .save_child(
+            &nft_resx_id,
+            VersionedSubstateIdRef::new(&nft_id, SubstateVersion::ZERO),
+            vec![resx_id.clone()],
+        )
+        .unwrap();
+
+    // Case 1: [component, its stored vault] must keep the live vault/resource versions and omit the down ref.
+    for inputs in [vec![component_id.clone(), vault_id.clone()], vec![
+        vault_id.clone(),
+        component_id.clone(),
+    ]] {
+        let resolved = substates.locate_dependent_substates(&inputs, false).await.unwrap();
+        let by_id = resolved
+            .iter()
+            .map(|req| (req.substate_id().clone(), req.version()))
+            .collect::<std::collections::HashMap<_, _>>();
+        assert_eq!(by_id.get(&component_id), Some(&Some(SubstateVersion::new(3))));
+        assert_eq!(by_id.get(&vault_id), Some(&Some(SubstateVersion::new(5))));
+        assert_eq!(by_id.get(&resx_id), Some(&Some(SubstateVersion::new(2))));
+        assert!(!by_id.contains_key(&spent_ref_id));
+        assert_eq!(by_id.len(), 3);
+    }
+
+    // Case 2: stored non-component top-level inputs (including two stored parents sharing a resource)
+    // must refresh to live versions and drop down/spent local references.
+    let direct_vault = substates
+        .locate_dependent_substates(&[vault_id.clone(), nft_id.clone()], false)
+        .await
+        .unwrap();
+    let by_id = direct_vault
+        .iter()
+        .map(|req| (req.substate_id().clone(), req.version()))
+        .collect::<std::collections::HashMap<_, _>>();
+    assert_eq!(by_id.get(&vault_id), Some(&Some(SubstateVersion::new(5))));
+    assert_eq!(by_id.get(&resx_id), Some(&Some(SubstateVersion::new(2))));
+    assert_eq!(by_id.get(&nft_id), Some(&Some(SubstateVersion::new(4))));
+    assert_eq!(by_id.get(&nft_resx_id), Some(&Some(SubstateVersion::new(1))));
+    assert!(!by_id.contains_key(&spent_ref_id));
+    assert_eq!(by_id.len(), 4);
 }

@@ -210,8 +210,14 @@ where
                         "Parent substate {} found in local store, loading dependent substates",
                         parent.substate_id
                     );
+                    let mut local_substates = HashSet::new();
                     self.store
-                        .with_read_tx(|tx| get_dependent_substates(tx, parent, &mut substate_ids))?;
+                        .with_read_tx(|tx| get_dependent_substates(tx, parent, &mut local_substates))?;
+                    for req in local_substates {
+                        if !network_missing.contains(req.substate_id()) {
+                            substate_ids.insert(req.into_unversioned());
+                        }
+                    }
                 },
                 None => {
                     debug!(
@@ -244,7 +250,7 @@ where
                         SubstateValue::Template(_) => {},
                         SubstateValue::Vault(vault) => {
                             let resx_addr = SubstateId::Resource(*vault.resource_address());
-                            self.insert_substate_if_absent(
+                            self.resolve_substate_once(
                                 &resx_addr,
                                 unversioned,
                                 &mut substate_ids,
@@ -263,7 +269,7 @@ where
                                 ))
                             })?;
                             let resx_addr = SubstateId::Resource(resx);
-                            self.insert_substate_if_absent(
+                            self.resolve_substate_once(
                                 &resx_addr,
                                 unversioned,
                                 &mut substate_ids,
@@ -283,8 +289,8 @@ where
             }
         }
 
-        // `get_dependent_substates` and the parent fetches above carry the version from the wallet's
-        // local store / network scan, ignoring the `unversioned` request. When the caller asked for
+        // The parent fetches above carry the version from the network scan, ignoring the `unversioned`
+        // request. When the caller asked for
         // unversioned dependencies, normalise the whole set: a locally-cached version can be stale
         // (e.g. a swap pool reserve advances on every swap), and pinning it makes the indexer reject the
         // input as "down" once the chain moves past it. `SubstateRequirement` hashes by id only, so
@@ -347,7 +353,7 @@ where
             }
             if let Some(resx) = associated_resource_address(&addr) {
                 let resx_addr = SubstateId::Resource(resx);
-                self.insert_substate_if_absent(&resx_addr, unversioned, substate_ids, network_resolved)
+                self.resolve_substate_once(&resx_addr, unversioned, substate_ids, network_resolved)
                     .await?;
             }
             live_refs.push(addr);
@@ -372,7 +378,7 @@ where
             let result = self.fetch_substate_from_network(&vault_addr, None).await?;
             if let SubstateValue::Vault(vault) = &result.substate {
                 let resx_addr = SubstateId::Resource(*vault.resource_address());
-                self.insert_substate_if_absent(&resx_addr, unversioned, substate_ids, network_resolved)
+                self.resolve_substate_once(&resx_addr, unversioned, substate_ids, network_resolved)
                     .await?;
             }
             if unversioned {
@@ -425,7 +431,7 @@ where
 
     /// Inserts a substate ID into the set, resolving its live version from the network once per lookup
     /// when `unversioned` is false.
-    async fn insert_substate_if_absent(
+    async fn resolve_substate_once(
         &self,
         substate_id: &SubstateId,
         unversioned: bool,

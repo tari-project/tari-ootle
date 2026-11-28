@@ -6,6 +6,7 @@ use std::{collections::HashSet, fmt::Display, iter};
 use indexmap::IndexSet;
 use log::*;
 use tari_engine_types::{
+    confidential::MinotariBurnClaimProof,
     fees::LITERAL_BYTE_DIVISOR,
     hashing::{EngineHashDomainLabel, hash_template_code, hasher32},
     indexed_value::IndexedValueError,
@@ -444,8 +445,6 @@ impl Display for TransactionV1 {
 }
 
 fn calc_instruction_weight(instruction: &Instruction) -> u64 {
-    // TODO: formalize costing numbers
-    const CLAIM_FIXED_COST: u64 = 1100;
     match instruction {
         Instruction::CreateAccount {
             owner_rule,
@@ -463,7 +462,7 @@ fn calc_instruction_weight(instruction: &Instruction) -> u64 {
         Instruction::CallFunction { args, .. } => calc_args_weight(args).max(INVOCATION_FLOOR),
         Instruction::CallMethod { args, .. } => calc_args_weight(args).max(INVOCATION_FLOOR),
         Instruction::PutLastInstructionOutputOnWorkspace { .. } => 0, // Call already costs
-        Instruction::ClaimBurn { .. } => CLAIM_FIXED_COST,
+        Instruction::ClaimBurn { claim } => calc_claim_burn_weight(claim),
         Instruction::ClaimValidatorFees { .. } => 1,
         Instruction::DropAllProofsInWorkspace => 1,
         Instruction::Assert { .. } => 1,
@@ -486,6 +485,17 @@ fn calc_instruction_weight(instruction: &Instruction) -> u64 {
             _ => 1,
         },
     }
+}
+
+/// Least weight of a burn claim. A typical claim encodes to well under `LITERAL_BYTE_DIVISOR * CLAIM_FIXED_COST` bytes,
+/// so it weighs exactly this.
+const CLAIM_FIXED_COST: u64 = 1100;
+
+/// Weight of a burn claim: its encoded bytes at the literal-argument rate, and never less than `CLAIM_FIXED_COST`.
+/// The claim's script, covenant, encrypted data, metadata signature and MMR proofs are caller-sized, up to about 17
+/// KiB in all, and the proof is only verified at execution.
+fn calc_claim_burn_weight(claim: &MinotariBurnClaimProof) -> u64 {
+    (tari_bor::encoded_len(claim) as u64 / LITERAL_BYTE_DIVISOR).max(CLAIM_FIXED_COST)
 }
 
 fn calc_stealth_statement_weight(statement: &StealthTransferStatement) -> u64 {
@@ -1243,5 +1253,74 @@ mod weight_tests {
             tari_bor::encode(&workspace_call()).unwrap().len(),
             MIN_INVOCATION_ENCODED_BYTES
         );
+    }
+
+    fn bytes<const N: usize>(len: usize) -> bounded_vec::BoundedVec<u8, 1, N> {
+        bounded_vec::BoundedVec::<u8, 1, N>::from_vec(vec![0xab; len]).expect("the length is within the bound")
+    }
+
+    fn mmr_proof(hashes: usize) -> tari_engine_types::confidential::MmrInclusionProof {
+        tari_engine_types::confidential::MmrInclusionProof {
+            leaf_index: 0,
+            mmr_size: 1,
+            path: vec![tari_template_lib_types::Hash32::zero(); hashes],
+            peaks: vec![tari_template_lib_types::Hash32::zero(); hashes],
+        }
+    }
+
+    /// A claim whose caller-sized fields are `len` bytes each (capped at each field's bound) and whose MMR proofs
+    /// carry `hashes` hashes in each list.
+    fn burn_claim(len: usize, hashes: usize) -> MinotariBurnClaimProof {
+        use tari_engine_types::confidential::{BurnOutput, BurnOutputFeatures, BurnOutputInclusionProof};
+        use tari_template_lib_types::{
+            Hash32,
+            crypto::{PedersenCommitmentBytes, RistrettoPublicKeyBytes, SchnorrSignatureBytes},
+        };
+        MinotariBurnClaimProof {
+            commitment: PedersenCommitmentBytes::zero(),
+            ownership_proof: SchnorrSignatureBytes::zero(),
+            value: 1_000,
+            output: BurnOutput {
+                version: 0,
+                features: BurnOutputFeatures {
+                    version: 0,
+                    maturity: 0,
+                    claim_public_key: RistrettoPublicKeyBytes::zero(),
+                    sidechain_id: None,
+                    range_proof_type: 0,
+                },
+                rangeproof_hash: Hash32::zero(),
+                script: bytes(len.min(4098)),
+                sender_offset_public_key: RistrettoPublicKeyBytes::zero(),
+                metadata_signature: bytes(len.min(256)),
+                covenant: bytes(len.min(4098)),
+                encrypted_data: bytes(len.min(340)),
+                minimum_value_promise: 0,
+            },
+            inclusion_proof: BurnOutputInclusionProof {
+                block_hash: Hash32::zero(),
+                normal_output_proof: mmr_proof(hashes),
+                normal_output_mr: Hash32::zero(),
+                block_output_proof: mmr_proof(hashes),
+            },
+        }
+    }
+
+    #[test]
+    fn burn_claims_weigh_their_encoded_bytes() {
+        let claim_weight =
+            |claim: MinotariBurnClaimProof| calc_instruction_weight(&Instruction::ClaimBurn { claim: Box::new(claim) });
+
+        // A claim of ordinary size weighs the fixed cost.
+        let ordinary = burn_claim(100, 16);
+        assert!((tari_bor::encoded_len(&ordinary) as u64) < LITERAL_BYTE_DIVISOR * CLAIM_FIXED_COST);
+        assert_eq!(claim_weight(ordinary), CLAIM_FIXED_COST);
+
+        // Every caller-sized field at its bound: about 17 KiB, which weighs its bytes at the literal rate.
+        let largest = burn_claim(usize::MAX, 64);
+        let len = tari_bor::encoded_len(&largest) as u64;
+        assert!(len > 17_000, "the largest claim encodes to {len} bytes");
+        assert_eq!(claim_weight(largest), len / LITERAL_BYTE_DIVISOR);
+        assert!(len / LITERAL_BYTE_DIVISOR > 5 * CLAIM_FIXED_COST);
     }
 }

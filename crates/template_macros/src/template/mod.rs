@@ -59,14 +59,17 @@ pub fn generate_template(options: TemplateOptions, input: TokenStream) -> Result
     }
 
     let template_def = generate_template_def(&ast)?;
-    let definition = generate_definition(&ast, &template_def.well_known_checks);
     let dispatcher = generate_dispatcher(&ast)?;
+    let checks = &template_def.well_known_checks;
+    let definition = generate_definition(&ast, &quote! {
+        #checks
+
+        #dispatcher
+    });
     let template_def = template_def.section;
 
     let output = quote! {
         #definition
-
-        #dispatcher
 
         #template_def
     };
@@ -292,5 +295,71 @@ mod tests {
 
         let check = "assert_well_known :: < Bucket > (:: tari_template_lib :: well_known :: WellKnownType :: Bucket ,)";
         assert_eq!(out.matches(check).count(), 1, "{out}");
+    }
+
+    /// The WASM dispatcher lives inside the generated template module so module-local types, `use super::...`
+    /// imports, and raw function/parameter identifiers resolve identically to the template's own items.
+    #[test]
+    fn wasm_and_non_wasm_support_module_types_super_imports_patterns_and_raw_idents() {
+        let src = r#"
+            mod market {
+                use super::shared::Discount;
+
+                pub struct Market {
+                    total: u64,
+                }
+
+                pub struct Order {
+                    pub price: u64,
+                    pub qty: u64,
+                }
+
+                impl Market {
+                    pub fn new() -> Self {
+                        Self { total: 0 }
+                    }
+
+                    pub fn r#match(&mut self, order: Order, discount: Discount, _: u64, (a, b): (u64, u64), r#type: u64) -> u64 {
+                        self.total += order.price * order.qty - discount.bps + a + b + r#type;
+                        self.total
+                    }
+                }
+            }
+        "#;
+
+        let wasm_out = expand(src, TemplateOptions::default());
+        let file = syn::parse_str::<syn::File>(&wasm_out).unwrap();
+        let module_body = file
+            .items
+            .iter()
+            .find_map(|item| match item {
+                syn::Item::Mod(item_mod) if item_mod.ident == "Market_template" => {
+                    let (_, items) = item_mod.content.as_ref()?;
+                    Some(quote::quote!(#(#items)*).to_string())
+                },
+                _ => None,
+            })
+            .expect("expected generated `pub mod Market_template`");
+        assert!(module_body.contains("fn Market_main"), "{module_body}");
+        assert!(
+            module_body.contains("use super :: shared :: Discount ;"),
+            "{module_body}"
+        );
+        assert!(module_body.contains("decode_exact :: < Order >"), "{module_body}");
+        assert!(module_body.contains("decode_exact :: < Discount >"), "{module_body}");
+        assert!(
+            module_body.contains("super :: Market_template :: Market :: r#match"),
+            "{module_body}"
+        );
+        assert!(
+            !file
+                .items
+                .iter()
+                .any(|item| matches!(item, syn::Item::Fn(item_fn) if item_fn.sig.ident == "Market_main")),
+            "dispatcher must be emitted inside Market_template, not at parent scope: {wasm_out}"
+        );
+
+        let non_wasm_out = expand_non_wasm(src, TemplateOptions::default()).unwrap();
+        assert!(non_wasm_out.contains("fn r#match"), "{non_wasm_out}");
     }
 }

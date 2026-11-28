@@ -34,6 +34,7 @@ use syn::{
     Type,
     TypePath,
     TypeTuple,
+    ext::IdentExt,
 };
 use tari_template_abi::{
     ArgDef,
@@ -64,7 +65,7 @@ pub struct GeneratedTemplateDef {
 }
 
 pub fn generate_template_def(ast: &TemplateAst) -> Result<GeneratedTemplateDef> {
-    let template_name_as_str = ast.template_name.to_string();
+    let template_name_as_str = ast.template_name.unraw().to_string();
 
     if template_name_as_str.len() > MAX_TEMPLATE_NAME_LENGTH {
         return Err(syn::Error::new_spanned(
@@ -183,7 +184,7 @@ impl<'a> TypeConverter<'a> {
                 Item::Union(item) => Some(&item.ident),
                 _ => None,
             })
-            .map(ToString::to_string)
+            .map(|ident| ident.unraw().to_string())
             .collect();
         Self {
             template_name,
@@ -265,7 +266,7 @@ impl<'a> TypeConverter<'a> {
         let Some(segment) = type_path.path.segments.last() else {
             return ArgType::Unit;
         };
-        let ty = segment.ident.to_string();
+        let ty = segment.ident.unraw().to_string();
         match ty.as_str() {
             "" => ArgType::Unit,
             "bool" => ArgType::Bool,
@@ -884,5 +885,51 @@ mod tests {
             name: "HashMap<ResourceAddress, Amount>".to_string()
         });
         assert_eq!(well_known_checks(input), "");
+    }
+
+    #[test]
+    fn wildcard_destructuring_and_raw_identifiers_produce_normalized_abi_names() {
+        let def = parse_template_def(indoc! {"
+            mod test_template {
+                pub struct r#Match {}
+                pub struct Point { pub x: u64, pub y: u64 }
+                impl r#Match {
+                    pub fn r#match(
+                        &self,
+                        _: u64,
+                        (a, b): (u64, u64),
+                        Point { x, y }: Point,
+                        (wrapped): u64,
+                        r#type: String,
+                    ) -> bool {
+                        true
+                    }
+                }
+            }
+        "});
+
+        let TemplateDef::V2(v2) = &def;
+        assert_eq!(v2.template_name, "Match");
+
+        let funcs = get_functions(&def);
+        assert_eq!(funcs.len(), 1);
+        assert_eq!(funcs[0].name, "match");
+        let names = funcs[0].arguments.iter().map(|a| a.name.as_str()).collect::<Vec<_>>();
+        assert_eq!(names, vec!["_", "_", "_", "wrapped", "type"]);
+
+        let raw_std = parse2::<TemplateAst>(
+            TokenStream::from_str(indoc! {"
+                mod test_template {
+                    pub struct r#std {}
+                    impl r#std {
+                        pub fn create() -> Self { }
+                    }
+                }
+            "})
+            .unwrap(),
+        )
+        .unwrap();
+        let err = generate_template_def(&raw_std).unwrap_err();
+        assert!(err.to_string().contains("not permitted"), "{err}");
     }
 }

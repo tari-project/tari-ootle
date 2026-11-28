@@ -6,6 +6,7 @@
 //! end-of-epoch checkpoints to a verifying wallet.
 
 use std::{
+    collections::HashMap,
     str::FromStr,
     sync::{Arc, Mutex},
 };
@@ -13,11 +14,17 @@ use std::{
 use axum::{
     Json,
     Router,
-    extract::{Query, State},
+    extract::{Path, Query, State},
     http::StatusCode,
-    routing::get,
+    routing::{get, post},
 };
 use axum_extra::headers::{Authorization, authorization::Bearer};
+use tari_engine_types::{
+    commit_result::{ExecuteResult, FinalizeResult, TransactionResult},
+    encoded::Encoded,
+    fees::FeeReceipt,
+    substate::{EncodedSubstate, Substate, SubstateDiff, SubstateId},
+};
 use tari_indexer_client::types::{
     EpochCheckpointEntry,
     GetCommitteeRequest,
@@ -25,6 +32,17 @@ use tari_indexer_client::types::{
     GetEpochManagerStatsResponse,
     GetLatestEpochCheckpointResponse,
     GetLatestShardGroupCheckpointsResponse,
+    GetSubstateRequest,
+    GetSubstateResponse,
+    GetSubstateVersionsRequest,
+    GetSubstateVersionsResponse,
+    GetSubstatesRequest,
+    GetSubstatesResponse,
+    SubmitTransactionDryRunResponse,
+    SubmitTransactionRequest,
+    SubmitTransactionResponse,
+    SubstateProof,
+    SubstateState,
     ValidatorSetCommittee,
 };
 use tari_ootle_address::Network;
@@ -36,7 +54,9 @@ use tari_ootle_light_client::test_fixtures::{
     checkpoint_entry,
     high,
     low,
+    substate_proof,
 };
+use tari_ootle_transaction::Transaction;
 use tari_ootle_wallet_sdk::{
     IndexerTrust,
     WalletSdkConfig,
@@ -94,6 +114,15 @@ impl TestDaemon {
     /// A handler context on LocalNet that reads from `indexer` with `indexer_trust`.
     pub async fn start_with_indexer(indexer: &FakeIndexer, indexer_trust: IndexerTrust) -> Self {
         Self::init(false, indexer.url.as_str(), indexer_trust).await
+    }
+
+    /// Like [`Self::start_with_indexer`], with the transaction service running so handlers can submit
+    /// dry-run and live transactions against `indexer`.
+    pub async fn start_with_indexer_and_transaction_service(
+        indexer: &FakeIndexer,
+        indexer_trust: IndexerTrust,
+    ) -> Self {
+        Self::init(true, indexer.url.as_str(), indexer_trust).await
     }
 
     async fn init(run_transaction_service: bool, indexer_url: &str, indexer_trust: IndexerTrust) -> Self {
@@ -233,6 +262,10 @@ struct FakeIndexerState {
     committees: Vec<ValidatorSetCommittee>,
     /// The epoch the indexer claims the network is in.
     current_epoch: Epoch,
+    substates: HashMap<SubstateId, EncodedSubstate>,
+    substate_proofs: HashMap<SubstateId, SubstateProof>,
+    submitted_transactions: Vec<Transaction>,
+    dry_run_transactions: Vec<Transaction>,
 }
 
 impl FakeIndexer {
@@ -246,6 +279,11 @@ impl FakeIndexer {
             )
             .route("/committees", get(Self::committee))
             .route("/epoch-manager/stats", get(Self::epoch_manager_stats))
+            .route("/substates/{substate_id}", get(Self::get_substate))
+            .route("/substates/fetch", post(Self::fetch_substates))
+            .route("/substates/versions", post(Self::substate_versions))
+            .route("/transactions", post(Self::submit_transaction))
+            .route("/transactions/dry-run", post(Self::submit_dry_run))
             .with_state(state.clone());
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = url::Url::parse(&format!("http://{}/", listener.local_addr().unwrap())).unwrap();
@@ -320,6 +358,124 @@ impl FakeIndexer {
             consensus_epoch: Some(current_epoch),
             current_block_height: 0,
             current_block_hash: Default::default(),
+        })
+    }
+
+    pub fn insert_substate(&self, id: SubstateId, substate: Substate) {
+        let encoded = EncodedSubstate::encode(&substate).unwrap();
+        let mut guard = self.state.lock().unwrap();
+        guard.substate_proofs.remove(&id);
+        guard.substates.insert(id, encoded);
+    }
+
+    pub fn insert_proven_substate(&self, set: &ValidatorSetFixture, id: SubstateId, substate: Substate) {
+        let proof = substate_proof(set, &id, substate.version(), substate.substate_value());
+        let encoded = EncodedSubstate::encode(&substate).unwrap();
+        let mut guard = self.state.lock().unwrap();
+        guard.substate_proofs.insert(id.clone(), proof);
+        guard.substates.insert(id, encoded);
+    }
+
+    pub fn take_submitted_transactions(&self) -> Vec<Transaction> {
+        std::mem::take(&mut self.state.lock().unwrap().submitted_transactions)
+    }
+
+    pub fn take_dry_run_transactions(&self) -> Vec<Transaction> {
+        std::mem::take(&mut self.state.lock().unwrap().dry_run_transactions)
+    }
+
+    async fn get_substate(
+        State(state): State<Arc<Mutex<FakeIndexerState>>>,
+        Path(substate_id): Path<SubstateId>,
+        Query(req): Query<GetSubstateRequest>,
+    ) -> Result<Json<GetSubstateResponse>, StatusCode> {
+        let guard = state.lock().unwrap();
+        let encoded = guard.substates.get(&substate_id).ok_or(StatusCode::NOT_FOUND)?;
+        if req.version.is_some_and(|v| encoded.version() < v) {
+            return Err(StatusCode::NOT_FOUND);
+        }
+        let proof = req
+            .include_proof
+            .then(|| guard.substate_proofs.get(&substate_id).cloned())
+            .flatten();
+        Ok(Json(GetSubstateResponse {
+            version: encoded.version(),
+            state: SubstateState::Up {
+                substate: encoded.value().clone(),
+            },
+            verified: proof.is_some(),
+            proof,
+        }))
+    }
+
+    async fn fetch_substates(
+        State(state): State<Arc<Mutex<FakeIndexerState>>>,
+        Json(req): Json<GetSubstatesRequest>,
+    ) -> Json<GetSubstatesResponse> {
+        let guard = state.lock().unwrap();
+        let substates = req
+            .requests
+            .iter()
+            .filter_map(|id| guard.substates.get(id).map(|s| (id.clone(), s.clone())))
+            .collect::<HashMap<_, _>>();
+        let proofs = if req.include_proofs {
+            substates
+                .keys()
+                .filter_map(|id| guard.substate_proofs.get(id).cloned().map(|p| (id.clone(), p)))
+                .collect()
+        } else {
+            Vec::new()
+        };
+        Json(GetSubstatesResponse::new(substates, proofs))
+    }
+
+    async fn substate_versions(
+        State(state): State<Arc<Mutex<FakeIndexerState>>>,
+        Json(req): Json<GetSubstateVersionsRequest>,
+    ) -> Json<GetSubstateVersionsResponse> {
+        let guard = state.lock().unwrap();
+        let versions = req
+            .substate_ids
+            .iter()
+            .filter_map(|id| guard.substates.get(id).map(|s| (id.clone(), s.version())))
+            .collect();
+        Json(GetSubstateVersionsResponse { versions })
+    }
+
+    async fn submit_transaction(
+        State(state): State<Arc<Mutex<FakeIndexerState>>>,
+        Json(req): Json<SubmitTransactionRequest>,
+    ) -> Json<SubmitTransactionResponse> {
+        let tx = req.transaction.decode().unwrap();
+        let transaction_id = tx.calculate_id();
+        state.lock().unwrap().submitted_transactions.push(tx);
+        Json(SubmitTransactionResponse { transaction_id })
+    }
+
+    async fn submit_dry_run(
+        State(state): State<Arc<Mutex<FakeIndexerState>>>,
+        Json(req): Json<SubmitTransactionRequest>,
+    ) -> Json<SubmitTransactionDryRunResponse> {
+        let tx = req.transaction.decode().unwrap();
+        let transaction_id = tx.calculate_id();
+        state.lock().unwrap().dry_run_transactions.push(tx);
+        let finalize = FinalizeResult::new(
+            transaction_id.into_array().into(),
+            vec![],
+            vec![],
+            TransactionResult::Accept(SubstateDiff::new()),
+            FeeReceipt::default(),
+        );
+        let exec = ExecuteResult {
+            finalize,
+            execution_time: Default::default(),
+            execute_epoch: None,
+            wasm_execution_points: 0,
+            native_execution_points: 0,
+        };
+        Json(SubmitTransactionDryRunResponse {
+            transaction_id,
+            result: Encoded::encode(&exec).unwrap(),
         })
     }
 }

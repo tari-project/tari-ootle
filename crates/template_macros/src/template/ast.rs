@@ -526,8 +526,6 @@ impl TemplateAst {
         match pat {
             syn::Pat::Ident(ident) => ident.ident.unraw().to_string(),
             syn::Pat::Paren(paren) => Self::get_pat_name(&paren.pat),
-            syn::Pat::Reference(reference) => Self::get_pat_name(&reference.pat),
-            syn::Pat::Type(pat_type) => Self::get_pat_name(&pat_type.pat),
             // Wildcard and destructuring patterns bind no single parameter identifier; record `_` in the ABI.
             _ => "_".to_string(),
         }

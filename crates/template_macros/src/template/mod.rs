@@ -328,12 +328,35 @@ mod tests {
         "#;
 
         let wasm_out = expand(src, TemplateOptions::default());
-        assert!(wasm_out.contains("use super :: shared :: Discount ;"), "{wasm_out}");
-        assert!(wasm_out.contains("decode_exact :: < Order >"), "{wasm_out}");
-        assert!(wasm_out.contains("decode_exact :: < Discount >"), "{wasm_out}");
+        let file = syn::parse_str::<syn::File>(&wasm_out).unwrap();
+        let module_body = file
+            .items
+            .iter()
+            .find_map(|item| match item {
+                syn::Item::Mod(item_mod) if item_mod.ident == "Market_template" => {
+                    let (_, items) = item_mod.content.as_ref()?;
+                    Some(quote::quote!(#(#items)*).to_string())
+                },
+                _ => None,
+            })
+            .expect("expected generated `pub mod Market_template`");
+        assert!(module_body.contains("fn Market_main"), "{module_body}");
         assert!(
-            wasm_out.contains("super :: Market_template :: Market :: r#match"),
-            "{wasm_out}"
+            module_body.contains("use super :: shared :: Discount ;"),
+            "{module_body}"
+        );
+        assert!(module_body.contains("decode_exact :: < Order >"), "{module_body}");
+        assert!(module_body.contains("decode_exact :: < Discount >"), "{module_body}");
+        assert!(
+            module_body.contains("super :: Market_template :: Market :: r#match"),
+            "{module_body}"
+        );
+        assert!(
+            !file
+                .items
+                .iter()
+                .any(|item| matches!(item, syn::Item::Fn(item_fn) if item_fn.sig.ident == "Market_main")),
+            "dispatcher must be emitted inside Market_template, not at parent scope: {wasm_out}"
         );
 
         let non_wasm_out = expand_non_wasm(src, TemplateOptions::default()).unwrap();

@@ -25,8 +25,9 @@ use quote::{format_ident, quote};
 
 use crate::template::ast::TemplateAst;
 
-/// The template module, holding the template's items and `checks`, which must resolve types as the template does.
-pub fn generate_definition(ast: &TemplateAst, checks: &TokenStream) -> TokenStream {
+/// The template module, holding the template's items and `scoped_items` (such as well-known type checks and the
+/// WASM dispatcher export), which must resolve types in the same scope as the template.
+pub fn generate_definition(ast: &TemplateAst, scoped_items: &TokenStream) -> TokenStream {
     let template_mod_name = format_ident!("{}_template", ast.template_name);
     let items = &ast.module_content;
 
@@ -37,7 +38,7 @@ pub fn generate_definition(ast: &TemplateAst, checks: &TokenStream) -> TokenStre
 
             #(#items)*
 
-            #checks
+            #scoped_items
         }
     }
 }

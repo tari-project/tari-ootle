@@ -31,6 +31,10 @@ pub(super) trait SubstateLayer {
     /// The substate at exactly `id`. Fails with `SubstateNotFound` unless that version is UP.
     fn get_substate(&self, id: VersionedSubstateIdRef<'_>) -> Result<Substate, SubstateStoreError>;
 
+    /// The substate at exactly `id`, whether that version is UP or has since been put DOWN. Fails with
+    /// `SubstateNotFound` if that version never existed or its value has been pruned.
+    fn get_retained_substate(&self, id: VersionedSubstateIdRef<'_>) -> Result<Substate, SubstateStoreError>;
+
     /// Whether the version `id` names is UP, or `None` if it has never existed.
     fn is_version_up(&self, id: VersionedSubstateIdRef<'_>) -> Result<Option<bool>, SubstateStoreError>;
 
@@ -155,6 +159,33 @@ impl ChangeLog {
                 });
         }
         base.get_substate(id)
+    }
+
+    /// The substate at exactly `id`, whether that version is UP or has since been put DOWN. Fails with
+    /// `SubstateNotFound` if that version never existed or its value has been pruned.
+    pub fn get_retained<B: SubstateLayer>(
+        &self,
+        base: &B,
+        id: VersionedSubstateIdRef<'_>,
+    ) -> Result<Substate, SubstateStoreError> {
+        let address = id.to_substate_address();
+        match self.get_pending(&address) {
+            Some(SubstateChange::Up { substate, .. }) => return Ok((**substate).clone()),
+            // The log may also hold the UP of the version it puts DOWN
+            Some(SubstateChange::Down { .. }) => {
+                let up = self
+                    .changes
+                    .iter()
+                    .rev()
+                    .filter(|change| change.is_up() && change.to_substate_address() == address)
+                    .find_map(SubstateChange::up_substate);
+                if let Some(substate) = up {
+                    return Ok(substate.clone());
+                }
+            },
+            None => {},
+        }
+        base.get_retained_substate(id)
     }
 
     pub fn get_many<B, I>(&self, base: &B, ids: I) -> Result<HashMap<SubstateRequirement, Substate>, SubstateStoreError>
@@ -530,6 +561,10 @@ mod tests {
             } else {
                 Err(SubstateStoreError::SubstateNotFound { id: id.to_owned() })
             }
+        }
+
+        fn get_retained_substate(&self, id: VersionedSubstateIdRef<'_>) -> Result<Substate, SubstateStoreError> {
+            self.get_substate(id)
         }
 
         fn is_version_up(&self, id: VersionedSubstateIdRef<'_>) -> Result<Option<bool>, SubstateStoreError> {

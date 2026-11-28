@@ -97,6 +97,16 @@ impl BlockDiff {
         tx.block_diffs_get_change_for_versioned_substate_in_chain(chain, substate_id)
     }
 
+    /// Returns the UP of the given substate version recorded by the branch ending at the chain's leaf, including one
+    /// the branch has since put DOWN, or `NotFound` if the branch never put that version UP.
+    pub fn get_up_for_versioned_substate<'a, TTx: StateStoreReadTransaction, T: Into<VersionedSubstateIdRef<'a>>>(
+        tx: &TTx,
+        chain: &PendingChain,
+        substate_id: T,
+    ) -> Result<SubstateChange, StorageError> {
+        tx.block_diffs_get_up_for_versioned_substate_in_chain(chain, substate_id)
+    }
+
     /// Returns whether the branch ending at the chain's leaf records any change for the given substate version.
     /// Prefer this over [`Self::get_for_versioned_substate`] where only existence matters: it does not read the
     /// change, and an UP carries the whole substate value.

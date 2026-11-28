@@ -197,6 +197,65 @@ fn block_diffs_last_change_prefers_the_down_of_a_version() {
     tx.rollback().unwrap();
 }
 
+#[test]
+fn block_diffs_up_of_a_version_outlives_its_down() {
+    let (db, _tmp) = create_rocksdb();
+    let mut tx = db.create_write_tx().unwrap();
+
+    let chain = create_chain(10);
+    commit_chain(&mut tx, &chain);
+    let fork = create_block_with_qc(&chain[8].as_leaf());
+    fork.insert(&mut tx).unwrap();
+    tx.proposal_certificates_save(fork.justify()).unwrap();
+
+    // Version 0 is put UP and DOWN by one block and version 1 is put UP by one block and DOWN by its child
+    let substate_id = create_random_substate_id();
+    tx.block_diffs_insert(chain[8].id(), &[
+        up(&substate_id, 0, &chain[8]),
+        down(&substate_id, 0, &chain[8]),
+        up(&substate_id, 1, &chain[8]),
+    ])
+    .unwrap();
+    tx.block_diffs_insert(chain[9].id(), &[down(&substate_id, 1, &chain[9])])
+        .unwrap();
+    // A sibling branch puts up a version the queried branch never does
+    tx.block_diffs_insert(fork.id(), &[up(&substate_id, 2, &fork)]).unwrap();
+
+    let chain9 = tx.pending_chain_get(chain[9].id()).unwrap();
+    for version in [0, 1] {
+        let versioned = VersionedSubstateId::new(substate_id.clone(), SubstateVersion::new(version));
+        let change = tx
+            .block_diffs_get_change_for_versioned_substate_in_chain(&chain9, &versioned)
+            .unwrap();
+        assert!(
+            !change.is_up(),
+            "Expected the DOWN of version {version} but got {change}"
+        );
+        let change = tx
+            .block_diffs_get_up_for_versioned_substate_in_chain(&chain9, &versioned)
+            .unwrap();
+        assert_eq!(
+            identity(&change),
+            (substate_id.clone(), SubstateVersion::new(version), true)
+        );
+    }
+    let unseen = VersionedSubstateId::new(substate_id.clone(), SubstateVersion::new(2));
+    assert!(
+        tx.block_diffs_get_up_for_versioned_substate_in_chain(&chain9, &unseen)
+            .optional()
+            .unwrap()
+            .is_none()
+    );
+    let fork_chain = tx.pending_chain_get(fork.id()).unwrap();
+    assert!(
+        tx.block_diffs_get_up_for_versioned_substate_in_chain(&fork_chain, &unseen)
+            .unwrap()
+            .is_up()
+    );
+
+    tx.rollback().unwrap();
+}
+
 fn up(substate_id: &tari_engine_types::substate::SubstateId, version: u64, block: &Block) -> SubstateChange {
     SubstateChange::Up {
         id: substate_id.clone(),

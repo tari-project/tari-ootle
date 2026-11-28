@@ -296,6 +296,13 @@ pub trait StateStoreReadTransaction: Sized {
         chain: &PendingChain,
         substate_id: T,
     ) -> Result<SubstateChange, StorageError>;
+    /// Returns the UP of the given substate version recorded by the branch ending at the chain's leaf, including one
+    /// the branch has since put DOWN, or `NotFound` if the branch never put that version UP.
+    fn block_diffs_get_up_for_versioned_substate_in_chain<'a, T: Into<VersionedSubstateIdRef<'a>>>(
+        &self,
+        chain: &PendingChain,
+        substate_id: T,
+    ) -> Result<SubstateChange, StorageError>;
     /// Returns whether the branch ending at `block_id` records any change for the given substate version. Selection
     /// follows the same branch rules as [`Self::block_diffs_get_last_change_for_substate`].
     ///
@@ -769,7 +776,8 @@ pub trait StateStoreWriteTransaction {
     /// in.
     fn substates_commit_batch(&mut self, update_batch: SubstateUpdateBatch) -> Result<(), StorageError>;
     /// Clears the values of substates downed in or before `epoch`, stopping at the first index entry that takes the
-    /// count to `limit` or more. Returns the number of values cleared; a result below `limit` means none remain.
+    /// count to `limit` or more. The value of a version a substate lock still names is kept, and checked again by the
+    /// cleanup of a later epoch. Returns the number of values examined; a result below `limit` means none remain.
     fn substates_prune_downed_values(&mut self, epoch: Epoch, limit: usize) -> Result<usize, StorageError>;
     /// Rewinds substate state for `shard` back to `target_state_version` by inverting every state transition
     /// recorded for versions > `target_state_version`, in reverse order.

@@ -734,6 +734,113 @@ fn inputs_over_the_transaction_limit_are_not_pledged() {
     assert_eq!(store.pledge_bytes(), 0);
 }
 
+/// The bytes the first version of the pool [`add_fee_pool`] commits with `amount` adds to a block pledge.
+fn fee_pool_pledge_bytes(pool: &SubstateId, amount: u64) -> usize {
+    tari_bor::encoded_len(pool) +
+        tari_bor::encoded_len(&Substate::new(
+            SubstateVersion::ZERO,
+            ValidatorFeePool::new(RistrettoPublicKeyBytes::default(), amount),
+        ))
+}
+
+#[test]
+fn a_locked_input_put_down_in_place_by_the_block_is_pledged_at_the_locked_version() {
+    let (store, _tmp) = create_store();
+    let pool = add_fee_pool(&store, 100);
+    let locked = VersionedSubstateId::new(pool.clone(), SubstateVersion::ZERO);
+
+    let tx = store.create_read_tx().unwrap();
+    let mut store = create_pending_store::<TestStore>(&tx);
+    // The withdrawal updates the pool in place, putting the locked version DOWN
+    store.put_diff(&withdraw_diff(&pool, 10)).unwrap();
+
+    assert!(matches!(
+        store.pledge_inputs([locked.as_versioned_ref()], usize::MAX),
+        Err(SubstateStoreError::SubstateNotFound { .. })
+    ));
+    assert_eq!(store.pledge_bytes(), 0);
+    assert_eq!(
+        store
+            .pledge_locked_inputs([locked.as_versioned_ref()], usize::MAX)
+            .unwrap(),
+        InputPledge::Pledged
+    );
+    assert_eq!(store.pledge_bytes(), fee_pool_pledge_bytes(&pool, 100));
+}
+
+#[test]
+fn a_locked_input_created_and_put_down_in_place_by_the_block_is_pledged_at_the_locked_version() {
+    let (store, _tmp) = create_store();
+    let pool = SubstateId::from(ValidatorFeePoolAddress::from_array([9; ObjectKey::LENGTH]));
+    let locked = VersionedSubstateId::new(pool.clone(), SubstateVersion::ZERO);
+
+    let tx = store.create_read_tx().unwrap();
+    let mut store = create_pending_store::<TestStore>(&tx);
+    store
+        .put(SubstateChange::Up {
+            id: pool.clone(),
+            shard: Shard::first(),
+            substate: Box::new(Substate::new(
+                SubstateVersion::ZERO,
+                ValidatorFeePool::new(RistrettoPublicKeyBytes::default(), 100),
+            )),
+        })
+        .unwrap();
+    store
+        .put(SubstateChange::Down {
+            id: locked.clone(),
+            shard: Shard::first(),
+        })
+        .unwrap();
+
+    assert_eq!(
+        store
+            .pledge_locked_inputs([locked.as_versioned_ref()], usize::MAX)
+            .unwrap(),
+        InputPledge::Pledged
+    );
+    assert_eq!(store.pledge_bytes(), fee_pool_pledge_bytes(&pool, 100));
+}
+
+#[test]
+fn a_locked_input_whose_down_is_committed_is_pledged_at_the_locked_version() {
+    let (store, _tmp) = create_store();
+    let pool = add_fee_pool(&store, 100);
+    let locked = VersionedSubstateId::new(pool.clone(), SubstateVersion::ZERO);
+    let mut batch = SubstateUpdateBatch::new_unrecorded(Network::LocalNet, Epoch::zero());
+    let transitions = batch.with_transition(Shard::first(), 1);
+    transitions.push(SubstateTransition::Down { id: locked.clone() });
+    transitions.push(SubstateTransition::Up {
+        id: pool.clone(),
+        version: SubstateVersion::new(1),
+        substate_or_hash: SubstateValue::from(ValidatorFeePool::new(RistrettoPublicKeyBytes::default(), 90)).into(),
+    });
+    store
+        .with_write_tx(|tx| SubstateRecord::commit_batch(tx, batch))
+        .unwrap();
+
+    let tx = store.create_read_tx().unwrap();
+    let mut store = create_pending_store::<TestStore>(&tx);
+    assert!(matches!(
+        store.pledge_inputs([locked.as_versioned_ref()], usize::MAX),
+        Err(SubstateStoreError::SubstateNotFound { .. })
+    ));
+    assert_eq!(
+        store
+            .pledge_locked_inputs([locked.as_versioned_ref()], usize::MAX)
+            .unwrap(),
+        InputPledge::Pledged
+    );
+    assert_eq!(store.pledge_bytes(), fee_pool_pledge_bytes(&pool, 100));
+
+    // A version that never existed has nothing to pledge
+    let missing = VersionedSubstateId::new(pool, SubstateVersion::new(2));
+    assert!(matches!(
+        store.pledge_locked_inputs([missing.as_versioned_ref()], usize::MAX),
+        Err(SubstateStoreError::SubstateNotFound { .. })
+    ));
+}
+
 /// The requirement each substate is loaded for, as a transaction declares it.
 fn requirement(id: &VersionedSubstateId) -> (SubstateRequirement, SubstateVersion) {
     (SubstateRequirement::unversioned(id.substate_id().clone()), id.version())

@@ -1475,14 +1475,53 @@ impl<'tx, TAddr: NodeAddressable + 'tx> StateStoreWriteTransaction for RocksDbSt
         }
         entries.truncate(num_entries);
 
+        let pending = self.pending_state();
+        let mut num_kept = 0usize;
         for (key, addresses) in entries {
+            let mut still_locked = Vec::new();
             // TODO(perf): consider storing the actual values in a separate column family to avoid get/set
             for substate_addr in addresses {
-                let mut substate = substates_cf.get_for_update(&substate_addr, OPERATION)?;
+                // A rewind can restore or delete a substate whose entry was carried past the epoch it records
+                let Some(mut substate) = substates_cf.get_for_update(&substate_addr, OPERATION).optional()? else {
+                    continue;
+                };
+                if substate.destroyed().is_none_or(|destroyed| destroyed.at_epoch > epoch) {
+                    continue;
+                }
+                // An in-place update, such as a leader fee deposit into a validator fee pool, puts a version DOWN
+                // regardless of its locks. The transaction holding the lock pledges and executes that version's
+                // value, so the value is kept until every lock on the version is released.
+                let is_locked = pending
+                    .locks
+                    .blocks_locking_substate(&substate.substate_id)
+                    .any(|(_, _, locks)| locks.iter().any(|lock| lock.version() == substate.version));
+                if is_locked {
+                    still_locked.push(substate_addr);
+                    continue;
+                }
                 substate.clear_substate_value();
                 substates_cf.put(&substate_addr, &substate, OPERATION)?;
             }
             unpruned_index.delete(&key, OPERATION)?;
+            if !still_locked.is_empty() {
+                num_kept += still_locked.len();
+                // Indexed past this cleanup's epoch, so the next epoch's cleanup checks the locks again
+                let (_, shard, version) = key;
+                let next_key = (epoch + Epoch(1), shard, version);
+                let mut addresses = unpruned_index
+                    .get_for_update(&next_key, OPERATION)
+                    .optional()?
+                    .unwrap_or_default();
+                addresses.extend(still_locked);
+                unpruned_index.put(&next_key, &addresses, OPERATION)?;
+            }
+        }
+
+        if num_kept > 0 {
+            debug!(
+                target: LOG_TARGET,
+                "🔒️ Kept {num_kept} of {count} downed substate values examined for epoch {epoch}: a substate lock still names their version",
+            );
         }
 
         Ok(count)

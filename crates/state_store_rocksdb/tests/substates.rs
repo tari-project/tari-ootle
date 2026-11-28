@@ -5,8 +5,16 @@ pub mod helpers;
 use std::collections::HashSet;
 
 use helpers::{assert_eq_debug, build_substate_record, create_rocksdb, create_substate_update_batch};
+use indexmap::IndexMap;
 use tari_engine_types::substate::SubstateId;
-use tari_ootle_common_types::{Epoch, SubstateVersion, VersionedSubstateId, VersionedSubstateIdRef, shard::Shard};
+use tari_ootle_common_types::{
+    Epoch,
+    SubstateLockType,
+    SubstateVersion,
+    VersionedSubstateId,
+    VersionedSubstateIdRef,
+    shard::Shard,
+};
 use tari_ootle_storage::{
     EpochCleanupStep,
     ShardScopedTreeStoreWriter,
@@ -14,9 +22,16 @@ use tari_ootle_storage::{
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
     StateTreeRetention,
-    consensus_models::{Block, SubstateDestroyed, SubstateTransition, SubstateUpdateBatch, SubstateValueFilterFlags},
+    consensus_models::{
+        Block,
+        SubstateDestroyed,
+        SubstateLock,
+        SubstateTransition,
+        SubstateUpdateBatch,
+        SubstateValueFilterFlags,
+    },
 };
-use tari_ootle_transaction::Network;
+use tari_ootle_transaction::{Network, TransactionId};
 use tari_state_store_rocksdb::DatabaseOptions;
 use tari_state_tree::{StateTree, SubstateTreeChange, key_mapper::SpreadPrefixKeyMapper};
 use tari_template_lib::types::{ComponentAddress, ObjectKey};
@@ -353,6 +368,69 @@ fn downed_values_of_earlier_epochs_are_pruned_in_batches() {
         Ok::<_, tari_ootle_storage::StorageError>(())
     })
     .unwrap();
+}
+
+/// A transaction that locked a version and has not yet released it pledges and executes that version's value, so the
+/// value is kept past the retention window until the lock is released.
+#[test]
+fn a_downed_value_is_kept_while_a_lock_names_its_version() {
+    let (db, _tmp) = create_rocksdb_with_opts(
+        DatabaseOptions::default()
+            .with_epoch_history_length(1)
+            .with_pinned_checkpoint_epochs(1),
+    );
+    let chain = helpers::create_chain(3);
+    let [locked, free] = [13, 14].map(|seed| build_substate_record(&substate_id(seed), SubstateVersion::ZERO, 1));
+    let downs = [&locked, &free].map(|up| {
+        let mut down = up.clone();
+        down.set_destroyed(SubstateDestroyed {
+            at_epoch: Epoch(2),
+            at_state_version: 2,
+        });
+        down
+    });
+    let transaction_id = TransactionId::new([1; 32]);
+    db.with_write_tx(|tx| {
+        helpers::commit_chain(tx, &chain);
+        tx.substates_commit_batch(create_substate_update_batch(Epoch(1), [&locked, &free]))?;
+        tx.substates_commit_batch(create_substate_update_batch(Epoch(2), &downs))?;
+        tx.substate_locks_insert_all(
+            &chain[2].as_leaf(),
+            &IndexMap::from([(locked.substate_id.clone(), vec![SubstateLock::new(
+                transaction_id,
+                SubstateVersion::ZERO,
+                SubstateLockType::Write,
+                false,
+            )])]),
+        )
+    })
+    .unwrap();
+
+    let prune = |epoch| {
+        db.with_write_tx(|tx| tx.epoch_cleanup_step(epoch, EpochCleanupStep::DownedSubstateValues, usize::MAX))
+            .unwrap()
+    };
+    let has_value = |rec: &tari_ootle_storage::consensus_models::SubstateRecord| {
+        db.with_read_tx(|tx| {
+            let rec = tx.substates_get(&rec.to_substate_address())?;
+            Ok::<_, tari_ootle_storage::StorageError>(rec.substate_value().is_some())
+        })
+        .unwrap()
+    };
+
+    assert_eq!(prune(Epoch(3)), 2);
+    assert!(has_value(&locked), "the value of a locked version was pruned");
+    assert!(!has_value(&free));
+    // A cleanup of the same epoch does not examine the kept value again
+    assert_eq!(prune(Epoch(3)), 0);
+    assert_eq!(prune(Epoch(4)), 1);
+    assert!(has_value(&locked), "the value of a locked version was pruned");
+
+    db.with_write_tx(|tx| tx.substate_locks_remove_many_for_transactions([&transaction_id]))
+        .unwrap();
+    assert_eq!(prune(Epoch(5)), 1);
+    assert!(!has_value(&locked), "the value outlived the lock on its version");
+    assert_eq!(prune(Epoch(6)), 0);
 }
 
 /// A pinned tree is served with the values of the substates it holds, so a value is kept for as many epochs as

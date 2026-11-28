@@ -15,6 +15,8 @@ use tari_common_types::types::PrivateKey;
 use tari_consensus_types::{Decision, PcId, ProposalCertificate, ShardGroupAccumulatedData};
 use tari_crypto::{ristretto::RistrettoPublicKey, tari_utilities::epoch_time::EpochTime};
 use tari_engine_types::{
+    ValidatorFeePool,
+    ValidatorFeeWithdrawal,
     commit_result::{AbortReason, ExecuteResult, FeeIntentFallback, FinalizeResult, RejectReason, TransactionResult},
     component::{Component, ComponentBody, ComponentHeader},
     creation_check::CreationCheck,
@@ -36,8 +38,10 @@ use tari_ootle_common_types::{
     VersionedSubstateId,
     VotePower,
     committee::CommitteeInfo,
+    derive_fee_pool_address,
 };
 use tari_ootle_storage::{
+    EpochCleanupStep,
     StateStore,
     StateStoreReadTransaction,
     StateStoreWriteTransaction,
@@ -86,6 +90,7 @@ use tempfile::TempDir;
 use super::LocalCommandValidator;
 use crate::{
     hotstuff::{
+        apply_leader_fee_to_substate_store,
         block_change_set::ProposedBlockChangeSet,
         command_derivation::pin_new_transaction,
         command_sequencer::{BlockTotals, CommandSequencer, Sequencing},
@@ -103,6 +108,8 @@ use crate::{
 const NETWORK: Network = Network::LocalNet;
 const NUM_PRESHARDS: NumPreshards = NumPreshards::P256;
 const FEE: u64 = 1_900;
+/// What a scripted fee claim withdraws from each validator fee pool it writes.
+const FEE_CLAIM: u64 = 500;
 
 type TestStore = RocksDbStateStore<String>;
 
@@ -187,12 +194,24 @@ impl BlockTransactionExecutor<TestStore> for ScriptedExecutor {
         let receipt = SubstateId::TransactionReceipt(TransactionReceiptAddress::from(id));
         let mut diff = SubstateDiff::new();
         let mut outputs = Vec::new();
+        let mut fee_withdrawals = Vec::new();
         for input in inputs.iter().filter(|input| input.lock_type().is_write()) {
             let id = input.versioned_substate_id();
+            // A fee claim withdraws from the pool in place, as the engine's claim does
+            if let SubstateId::ValidatorFeePool(address) = id.substate_id() {
+                fee_withdrawals.push(ValidatorFeeWithdrawal {
+                    address: *address,
+                    amount: FEE_CLAIM,
+                });
+                continue;
+            }
             diff.down(id.substate_id().clone(), id.version());
             let next = id.to_next_version();
             diff.up(next.substate_id().clone(), component(next.version()));
             outputs.push(next);
+        }
+        if !fee_withdrawals.is_empty() {
+            diff.set_once_fee_withdrawals(fee_withdrawals);
         }
         for id in script.extra_downs {
             diff.down(id.substate_id().clone(), id.version());
@@ -369,6 +388,70 @@ impl Replica {
             version: SubstateVersion::ZERO,
             substate_or_hash: component_value().into(),
         });
+        self.store
+            .with_write_tx(|tx| SubstateRecord::commit_batch(tx, batch))
+            .unwrap();
+    }
+
+    /// Commits version zero of the validator fee pool of `claim_key` at the start of this replica's shard group,
+    /// where the leader fees of its blocks are deposited, holding `amount`.
+    fn add_fee_pool(&self, claim_key: &RistrettoPublicKeyBytes, amount: u64) -> SubstateId {
+        let shard = self.committee.shard_group().start();
+        let id = SubstateId::from(derive_fee_pool_address(claim_key, NUM_PRESHARDS, shard).unwrap());
+        let mut batch = SubstateUpdateBatch::new(NETWORK, Epoch::zero());
+        batch.with_transition(shard, 0).push(SubstateTransition::Up {
+            id: id.clone(),
+            version: SubstateVersion::ZERO,
+            substate_or_hash: SubstateValue::from(ValidatorFeePool::new(*claim_key, amount)).into(),
+        });
+        self.store
+            .with_write_tx(|tx| SubstateRecord::commit_batch(tx, batch))
+            .unwrap();
+        id
+    }
+
+    /// Stores the deposit of `leader_fee` into the fee pool of `claim_key` as a change the parent block made, as the
+    /// leader of a fee-paying block does when the block ends.
+    fn deposit_leader_fee_in_parent(&self, claim_key: &RistrettoPublicKeyBytes, leader_fee: u64) {
+        let parent = self.parent.as_leaf();
+        let shard = self.committee.shard_group().start();
+        self.store
+            .with_write_tx(|tx| {
+                let mut substate_store = PendingSubstateStore::init(&**tx, parent, NUM_PRESHARDS)?;
+                apply_leader_fee_to_substate_store(&mut substate_store, claim_key, NUM_PRESHARDS, shard, leader_fee)
+                    .unwrap();
+                let (changes, _) = substate_store.into_parts();
+                tx.block_diffs_insert(parent.block_id(), &changes)
+            })
+            .unwrap();
+    }
+
+    /// Commits the deposit of `leader_fee` into the fee pool of `claim_key`, as a committed block that deposited it
+    /// would.
+    fn commit_leader_fee_deposit(&self, claim_key: &RistrettoPublicKeyBytes, leader_fee: u64) {
+        let shard = self.committee.shard_group().start();
+        let changes = self
+            .store
+            .with_read_tx(|tx| {
+                let mut substate_store = PendingSubstateStore::init(tx, self.parent.as_leaf(), NUM_PRESHARDS)?;
+                apply_leader_fee_to_substate_store(&mut substate_store, claim_key, NUM_PRESHARDS, shard, leader_fee)
+                    .unwrap();
+                let (changes, _) = substate_store.into_parts();
+                Ok::<_, StorageError>(changes)
+            })
+            .unwrap();
+        let mut batch = SubstateUpdateBatch::new(NETWORK, Epoch::zero());
+        let transitions = batch.with_transition(shard, 1);
+        for change in changes {
+            transitions.push(match change {
+                SubstateChange::Down { id, .. } => SubstateTransition::Down { id },
+                SubstateChange::Up { id, substate, .. } => SubstateTransition::Up {
+                    id,
+                    version: substate.version(),
+                    substate_or_hash: substate.into_substate_value().into(),
+                },
+            });
+        }
         self.store
             .with_write_tx(|tx| SubstateRecord::commit_batch(tx, batch))
             .unwrap();
@@ -2521,6 +2604,88 @@ mod local_accept_from_local_prepared {
         );
         assert_eq!(proposal.pledge_bytes, 0);
         assert!(proposal.new_locks.is_empty(), "{:?}", proposal.new_locks);
+    }
+
+    /// A leader fee deposit updates a validator fee pool in place without regard to its locks, so the version a
+    /// cross-shard fee claim locked when it prepared may be DOWN by the time the claim is accepted. The accept pledges
+    /// the version the claim locked, at its size.
+    #[test]
+    fn an_accept_whose_locked_fee_pool_was_updated_in_place_is_proposed_and_voted_for() {
+        assert_fee_claim_accepted_after(|replica, claim_key| {
+            replica.deposit_leader_fee_in_parent(claim_key, 2_000);
+        });
+    }
+
+    /// A claim can wait for its foreign pledges for longer than downed values are retained. The value of the version
+    /// it locked outlives the epoch cleanup that follows the deposit.
+    #[test]
+    fn an_accept_whose_locked_fee_pool_was_updated_in_place_and_garbage_collected_is_proposed_and_voted_for() {
+        assert_fee_claim_accepted_after(|replica, claim_key| {
+            replica.commit_leader_fee_deposit(claim_key, 2_000);
+            replica
+                .store
+                .with_write_tx(|tx| {
+                    tx.epoch_cleanup_step(Epoch(1_000), EpochCleanupStep::DownedSubstateValues, usize::MAX)
+                })
+                .unwrap();
+        });
+    }
+
+    /// Prepares a cross-shard claim on the replica's validator fee pool, has `supersede` replace the version it locked,
+    /// then checks a proposer accepts the claim as a commit that pledges the locked version and a validator votes for
+    /// it.
+    fn assert_fee_claim_accepted_after(supersede: impl FnOnce(&Replica, &RistrettoPublicKeyBytes)) {
+        let (local, foreign) = local_and_foreign_halves();
+        let replica = Replica::in_committee(local, 2);
+        let claim_key = RistrettoPublicKeyBytes::default();
+        let pool = replica.add_fee_pool(&claim_key, 1_000);
+        let foreign_input = component_id_in(foreign);
+        let id = replica.pool_transaction(1, &[&pool, &foreign_input], commits());
+        let prepare = multishard_atom(&replica.honest_new_multishard_command(&id));
+        replica.prepare_in_parent(&prepare);
+        let locked = VersionedSubstateId::new(pool.clone(), SubstateVersion::ZERO);
+        assert!(
+            prepare
+                .evidence
+                .get(&local)
+                .unwrap()
+                .all_pledged_inputs_iter()
+                .any(|(input, lock)| *input == pool && lock.version == locked.version()),
+            "the claim locks the pool's first version"
+        );
+        supersede(&replica, &claim_key);
+        replica.receive_input_pledges(&id, foreign, &[&foreign_input]);
+
+        let mut ready_rec = replica.pending_record(&id);
+        ready_rec
+            .evidence_mut()
+            .add_shard_group(foreign)
+            .set_prepare_qc(PcId::zero());
+        ready_rec.set_ready(true);
+
+        // The pool at the version the claim locked, and the fee resource every transaction reads
+        let pledged_bytes = tari_bor::encoded_len(&pool) +
+            tari_bor::encoded_len(&Substate::new(
+                SubstateVersion::ZERO,
+                ValidatorFeePool::new(claim_key, 1_000),
+            )) +
+            tari_bor::encoded_len(&tari_token()) +
+            tari_bor::encoded_len(&component(SubstateVersion::ZERO));
+        let proposal = propose_local_accept(&replica, ready_rec.clone(), usize::MAX);
+        let proposed = proposal.command.expect("proposes the LocalAccept");
+        assert!(
+            proposed.local_accept().is_some_and(|atom| atom.decision.is_commit()),
+            "{proposed}"
+        );
+        assert_eq!(proposal.pledge_bytes, pledged_bytes);
+
+        let evaluation = replica.evaluate_after(&[proposed], |change_set| {
+            change_set.set_next_transaction_update(ready_rec).unwrap();
+        });
+
+        assert_voted(&evaluation, TransactionPoolStage::LocalAccepted, true);
+        assert_eq!(evaluation.decisions, vec![Decision::Commit]);
+        assert_eq!(evaluation.pledge_bytes, proposal.pledge_bytes);
     }
 }
 

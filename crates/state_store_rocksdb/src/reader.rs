@@ -522,6 +522,23 @@ impl<'a, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'a, R: RocksRea
         last_change.cloned()
     }
 
+    /// The UP of `version` of `substate_id` on the branch ending at the chain's leaf, including one the branch has
+    /// since put DOWN, or `None` if no block of the branch put that version UP. A version is put UP at most once on a
+    /// branch, so at most one block can hold it.
+    fn block_diffs_select_up(
+        &self,
+        chain: &PendingChain,
+        substate_id: &SubstateId,
+        version: SubstateVersion,
+    ) -> Option<SubstateChange> {
+        let pending = self.pending_state();
+        chain
+            .ancestry()
+            .iter()
+            .find_map(|block_id| pending.block_diffs.get(block_id)?.version_up(substate_id, version))
+            .cloned()
+    }
+
     /// Fails with a query error if the chain's leaf block does not exist. A leaf in the pending-chain index always
     /// does, so only an empty chain needs the lookup.
     fn require_leaf_block_exists(&self, chain: &PendingChain, operation: &str) -> Result<(), StorageError> {
@@ -1245,6 +1262,24 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
             })
     }
 
+    fn block_diffs_get_up_for_versioned_substate_in_chain<'a, T: Into<VersionedSubstateIdRef<'a>>>(
+        &self,
+        chain: &PendingChain,
+        substate_id: T,
+    ) -> Result<SubstateChange, StorageError> {
+        const OPERATION: &str = "block_diffs_get_up_for_versioned_substate";
+        self.debug_assert_chain_is_current(chain)?;
+        self.require_leaf_block_exists(chain, OPERATION)?;
+
+        let versioned = substate_id.into();
+
+        self.block_diffs_select_up(chain, versioned.substate_id(), versioned.version())
+            .ok_or_else(|| StorageError::NotFound {
+                item: "SubstateChange",
+                key: format!("UP of {versioned} in {}", chain.leaf()),
+            })
+    }
+
     fn block_diffs_contains_versioned_substate_in_chain<'a, T: Into<VersionedSubstateIdRef<'a>>>(
         &self,
         chain: &PendingChain,
@@ -1644,14 +1679,10 @@ impl<'tx, TAddr: NodeAddressable + Serialize + DeserializeOwned + 'tx, R: RocksR
         let substates_cf = self.db().cf(SubstateCf)?;
         let mut locked_substates = Vec::with_capacity(held.len());
         for (_, substate_id, lock) in held {
-            let pending_value = scope.ancestry().iter().find_map(|block_id| {
-                pending
-                    .block_diffs
-                    .get(block_id)?
-                    .version_up(substate_id, lock.version())?
-                    .up_substate()
-                    .map(|s| s.substate_value().clone())
-            });
+            let pending_value = self
+                .block_diffs_select_up(&scope, substate_id, lock.version())
+                .and_then(SubstateChange::into_up)
+                .map(Substate::into_substate_value);
             let value = match pending_value {
                 Some(value) => Some(value),
                 None => substates_cf

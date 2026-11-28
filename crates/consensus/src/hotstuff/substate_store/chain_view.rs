@@ -70,6 +70,27 @@ impl<TTx: StateStoreReadTransaction> SubstateLayer for ChainView<'_, TTx> {
             .ok_or_else(|| up_substate_without_value(id.to_owned()))
     }
 
+    fn get_retained_substate(&self, id: VersionedSubstateIdRef<'_>) -> Result<Substate, SubstateStoreError> {
+        if let Some(change) = BlockDiff::get_up_for_versioned_substate(self.store, &self.parent_chain, id).optional()? {
+            return change.into_up().ok_or_else(|| SubstateStoreError::InvariantError {
+                details: format!("The UP lookup for substate {id} returned a DOWN"),
+            });
+        }
+
+        let Some(substate) = SubstateRecord::get(self.store, &id.to_substate_address()).optional()? else {
+            return Err(SubstateStoreError::SubstateNotFound { id: id.to_owned() });
+        };
+        // A destroyed version keeps its value until epoch GC prunes it
+        let is_destroyed = substate.is_destroyed();
+        substate.into_substate().ok_or_else(|| {
+            if is_destroyed {
+                SubstateStoreError::SubstateNotFound { id: id.to_owned() }
+            } else {
+                up_substate_without_value(id.to_owned())
+            }
+        })
+    }
+
     fn is_version_up(&self, id: VersionedSubstateIdRef<'_>) -> Result<Option<bool>, SubstateStoreError> {
         if let Some(change) = BlockDiff::get_for_versioned_substate(self.store, &self.parent_chain, id).optional()? {
             return Ok(Some(change.is_up()));

@@ -426,7 +426,7 @@ where
                 execution
             } else {
                 // Preparing the transaction bounded what its inputs alone may pledge, so only the block budget applies
-                let pledge = substate_store.pledge_inputs(
+                let pledge = substate_store.pledge_locked_inputs(
                     pledged_inputs.iter().map(VersionedSubstateId::as_versioned_ref),
                     usize::MAX,
                 )?;

@@ -265,6 +265,14 @@ impl UnsignedTransactionV1 {
         let mut created_utxos = HashSet::<UtxoAddress>::new();
         for instruction in all_instructions {
             match instruction {
+                Instruction::CreateAccount {
+                    owner_rule,
+                    access_rules,
+                    ..
+                } => {
+                    substates.extend(super::rule_referenced_substates(owner_rule.as_ref())?);
+                    substates.extend(super::rule_referenced_substates(access_rules.as_ref())?);
+                },
                 Instruction::CallFunction { args, .. } => {
                     for arg in args.iter().filter_map(|a| a.as_literal_bytes()) {
                         let value = IndexedValue::from_raw(arg)?;

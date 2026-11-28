@@ -995,6 +995,15 @@ impl<D> TransactionBuilder<D> {
         }
     }
 
+    fn add_read_inputs_for_rule<T: tari_bor::Encode<()>>(&mut self, rule: Option<&T>) {
+        if let Ok(ids) = crate::v1::rule_referenced_substates(rule) {
+            declare_inputs(
+                self.unsigned_transaction.inputs_mut(),
+                ids.into_iter().map(InputDeclaration::read),
+            );
+        }
+    }
+
     fn add_inputs_for_args(&mut self, args: &[InstructionArg]) {
         for arg in args {
             if let Some(bytes) = arg.as_literal_bytes() {
@@ -1009,6 +1018,16 @@ impl<D> TransactionBuilder<D> {
         }
 
         match instruction {
+            Instruction::CreateAccount {
+                owner_rule,
+                access_rules,
+                ..
+            } => {
+                // `CreateAccount` passes custom rules as arguments to the account constructor, which requires
+                // every declarable substate they name to be in scope without mutating those substates.
+                self.add_read_inputs_for_rule(owner_rule.as_ref());
+                self.add_read_inputs_for_rule(access_rules.as_ref());
+            },
             Instruction::CallFunction { args, .. } => {
                 self.add_inputs_for_args(args);
             },
@@ -1065,7 +1084,6 @@ impl<D> TransactionBuilder<D> {
                 assertion: Assertion::IsNotNull,
                 ..
             } |
-            Instruction::CreateAccount { .. } |
             Instruction::PutLastInstructionOutputOnWorkspace { .. } |
             Instruction::ClaimBurn { .. } |
             Instruction::DropAllProofsInWorkspace |

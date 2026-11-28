@@ -493,3 +493,214 @@ fn a_proof_over_a_stealth_resource_can_be_created_and_dropped() {
         vec![account_proof],
     );
 }
+
+/// Runs `TransactionProcessor` directly so `tx.inputs()` is enforced as declared (`TemplateTest::try_execute`
+/// injects every store substate into `WrappedTransaction::inputs()`, masking undeclared-input errors).
+fn execute_with_declared_inputs(
+    tx: Transaction,
+    store: &tari_engine::state_store::memory::MemoryStateStore,
+    proof: tari_template_lib::types::NonFungibleAddress,
+    pledge_only_declared: bool,
+) -> tari_engine_types::commit_result::ExecuteResult {
+    use std::{collections::HashMap, sync::Arc};
+
+    use tari_engine::{
+        fees::WasmMeteringRate,
+        runtime::AuthParams,
+        state_store::{StateReader, StateWriter, memory::MemoryStateStore},
+        transaction::TransactionProcessor,
+    };
+    use tari_engine_types::{
+        fees::{ExhaustBurnRate, FeeScale},
+        substate::SubstateId,
+        virtual_substate::{VirtualSubstate, VirtualSubstateId},
+    };
+    use tari_ootle_transaction::Network;
+    use tari_template_test_tooling::{Package, mocks::AlwaysPassesProofVerifier};
+
+    let state_db = if pledge_only_declared {
+        let mut pledged = MemoryStateStore::new();
+        let xtr_id = SubstateId::Resource(TARI_TOKEN);
+        pledged
+            .set_state(xtr_id.clone(), store.get_state(&xtr_id).unwrap().clone())
+            .unwrap();
+        for input in tx.inputs() {
+            let id = input.substate_id().clone();
+            pledged
+                .set_state(id.clone(), store.get_state(&id).unwrap().clone())
+                .unwrap();
+        }
+        pledged.into_read_only()
+    } else {
+        store.clone().into_read_only()
+    };
+    let package = Arc::new(Package::builder().add_all_builtin_templates().build());
+    let virtual_substates = HashMap::from_iter([(VirtualSubstateId::CurrentEpoch, VirtualSubstate::CurrentEpoch(0))]);
+    let processor = TransactionProcessor::new(
+        package,
+        state_db,
+        AuthParams {
+            initial_ownership_proofs: [proof].into_iter().collect(),
+        },
+        virtual_substates.into(),
+        Arc::from([]),
+        Arc::new(AlwaysPassesProofVerifier),
+        WasmMeteringRate::unmetered(),
+        ExhaustBurnRate::new(0),
+        0,
+        FeeScale::ONE,
+        Network::LocalNet,
+        false,
+    );
+    processor.execute(tx).unwrap()
+}
+
+fn setup_badge_faucet(
+    test: &mut TemplateTest,
+    badge_holder: tari_template_lib::types::ComponentAddress,
+) -> (
+    tari_template_lib::types::ResourceAddress,
+    tari_template_lib::types::ComponentAddress,
+) {
+    let faucet_template = test.get_template_address("TestFaucet");
+    test.execute_expect_success(
+        test.transaction()
+            .allocate_component_address("faucet_address")
+            .call_function(faucet_template, "mint_with_opts", args![
+                Amount::from(1_000_000u64),
+                "BDG".to_string(),
+                Workspace("faucet_address")
+            ])
+            .call_method("faucet_address", "take_free_coins", args![])
+            .put_last_instruction_output_on_workspace("badge_coins")
+            .call_method(badge_holder, "deposit", args![Workspace("badge_coins")])
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
+    let (badge_resource, _) = test
+        .read_only_state_store()
+        .get_all_resources()
+        .unwrap()
+        .into_iter()
+        .find(|(_, r)| r.token_symbol() == Some("BDG"))
+        .expect("BDG resource not found");
+    let faucet_component = test
+        .read_only_state_store()
+        .get_components_by_template_address(faucet_template)
+        .unwrap()[0]
+        .0;
+    (badge_resource, faucet_component)
+}
+
+/// Custom `CreateAccount` rules pass badge resources and components into the account constructor frame, so
+/// auto-filling inputs declares them as reads and lets the new account be created and governed by those rules.
+#[test]
+fn create_account_with_custom_badge_rules_auto_fills_required_inputs() {
+    use tari_engine::state_store::StateWriter;
+    use tari_engine_types::substate::SubstateId;
+
+    let mut test = TemplateTest::new(CRATE_PATH, vec!["tests/templates/faucet"]);
+    let (badge_holder, badge_holder_proof, badge_holder_sk) = test.create_funded_account();
+    let (badge_resource, faucet_component) = setup_badge_faucet(&mut test, badge_holder);
+
+    let (custom_proof, custom_pk, custom_sk) = test.create_owner_proof();
+    let owner_rule = OwnerRule::ByAccessRule(rule!(resource(badge_resource)));
+    let access_rules = ComponentAccessRules::new()
+        .add_method_rule("deposit", rule!(allow_all))
+        .default(rule!(caller_component(faucet_component)));
+
+    // Without auto-fill, `CreateAccount` declares neither rule substate: execution fails with `SubstateOutOfScope`
+    // when the substates exist in the store and `RootSubstateNotFound` when only declared inputs are pledged.
+    let unpledged_tx = Transaction::builder_localnet(Epoch(1))
+        .without_auto_fill_inputs()
+        .create_account_custom::<&str>(
+            custom_pk.to_byte_type(),
+            Some(owner_rule.clone()),
+            Some(access_rules.clone()),
+            None,
+        )
+        .build_and_seal(&custom_sk);
+    assert!(unpledged_tx.inputs().is_empty());
+
+    let out_of_scope = execute_with_declared_inputs(
+        unpledged_tx.clone(),
+        test.get_state_store_mut(),
+        custom_proof.clone(),
+        false,
+    );
+    assert_reject_reason(out_of_scope.expect_failure(), RuntimeError::SubstateOutOfScope {
+        id: SubstateId::Resource(badge_resource),
+    });
+
+    let not_found = execute_with_declared_inputs(unpledged_tx, test.get_state_store_mut(), custom_proof.clone(), true);
+    assert_reject_reason(
+        not_found.expect_failure(),
+        format!("Template referenced root substate but it was not found: {faucet_component}"),
+    );
+
+    // With auto-fill enabled, both rule substates are declared as read inputs and `CreateAccount` succeeds against
+    // a store holding only the pledged inputs.
+    let create_tx = Transaction::builder_localnet(Epoch(1))
+        .with_auto_fill_inputs()
+        .create_account_custom::<&str>(custom_pk.to_byte_type(), Some(owner_rule), Some(access_rules), None)
+        .build_and_seal(&custom_sk);
+    assert!(
+        create_tx
+            .inputs()
+            .get(&SubstateId::Resource(badge_resource))
+            .unwrap()
+            .is_read()
+    );
+    assert!(
+        create_tx
+            .inputs()
+            .get(&SubstateId::Component(faucet_component))
+            .unwrap()
+            .is_read()
+    );
+    let created = execute_with_declared_inputs(create_tx, test.get_state_store_mut(), custom_proof, true);
+    for (id, substate) in created.expect_success().up_iter() {
+        test.get_state_store_mut()
+            .set_state(id.clone(), substate.clone())
+            .unwrap();
+    }
+
+    let custom_account = tari_engine_types::component::derive_component_address_from_public_key(
+        &ACCOUNT_TEMPLATE_ADDRESS,
+        &custom_pk.to_byte_type(),
+    );
+    test.execute_expect_success(
+        test.transaction()
+            .call_method(xtr_faucet_component(), "take", args![custom_account])
+            .build_and_seal(test.secret_key()),
+        vec![],
+    );
+
+    // A caller without the badge is denied, whereas authorizing a proof of `badge_resource` satisfies the owner rule.
+    let denied = test.execute_expect_failure(
+        test.transaction()
+            .call_method(custom_account, "withdraw", args![TARI_TOKEN, 50u64])
+            .put_last_instruction_output_on_workspace("b")
+            .call_method(badge_holder, "deposit", args![Workspace("b")])
+            .build_and_seal(&custom_sk),
+        vec![],
+    );
+    assert_access_denied_for_action(denied, ActionIdent::ComponentCallMethod {
+        component_address: custom_account,
+        method: "withdraw".to_string(),
+    });
+
+    test.execute_expect_success(
+        test.transaction()
+            .call_method(badge_holder, "create_proof_for_resource", args![badge_resource])
+            .put_last_instruction_output_on_workspace("badge_proof")
+            .with_authorized_proof("badge_proof", |b| {
+                b.call_method(custom_account, "withdraw", args![TARI_TOKEN, 50u64])
+                    .put_last_instruction_output_on_workspace("withdrawn")
+            })
+            .drop_all_proofs_in_workspace()
+            .call_method(badge_holder, "deposit", args![Workspace("withdrawn")])
+            .build_and_seal(&badge_holder_sk),
+        vec![badge_holder_proof],
+    );
+}

@@ -30,3 +30,16 @@ pub use transaction::*;
 pub use types::*;
 pub use unsealed::*;
 pub use unsigned::*;
+
+pub(crate) fn rule_referenced_substates<T: tari_bor::Encode<()>>(
+    rule: Option<&T>,
+) -> Result<Vec<tari_engine_types::substate::SubstateId>, tari_engine_types::indexed_value::IndexedValueError> {
+    let Some(rule) = rule else {
+        return Ok(Vec::new());
+    };
+    let value = tari_engine_types::indexed_value::IndexedValue::from_type(rule)?;
+    Ok(value
+        .referenced_substates()
+        .filter(|id| id.is_declarable_input() && *id != tari_template_lib_types::constants::TARI_TOKEN)
+        .collect())
+}

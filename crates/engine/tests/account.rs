@@ -494,10 +494,14 @@ fn a_proof_over_a_stealth_resource_can_be_created_and_dropped() {
     );
 }
 
-/// Custom `CreateAccount` rules pass badge resources and components into the account constructor frame, so
-/// auto-filling inputs declares them as reads and lets the new account be created and governed by those rules.
-#[test]
-fn create_account_with_custom_badge_rules_auto_fills_required_inputs() {
+/// Runs `TransactionProcessor` directly so `tx.inputs()` is enforced as declared (`TemplateTest::try_execute`
+/// injects every store substate into `WrappedTransaction::inputs()`, masking undeclared-input errors).
+fn execute_with_declared_inputs(
+    tx: Transaction,
+    store: &tari_engine::state_store::memory::MemoryStateStore,
+    proof: tari_template_lib::types::NonFungibleAddress,
+    pledge_only_declared: bool,
+) -> tari_engine_types::commit_result::ExecuteResult {
     use std::{collections::HashMap, sync::Arc};
 
     use tari_engine::{
@@ -514,10 +518,51 @@ fn create_account_with_custom_badge_rules_auto_fills_required_inputs() {
     use tari_ootle_transaction::Network;
     use tari_template_test_tooling::{Package, mocks::AlwaysPassesProofVerifier};
 
-    let mut test = TemplateTest::new(CRATE_PATH, vec!["tests/templates/faucet"]);
-    let faucet_template = test.get_template_address("TestFaucet");
-    let (badge_holder, badge_holder_proof, badge_holder_sk) = test.create_funded_account();
+    let state_db = if pledge_only_declared {
+        let mut pledged = MemoryStateStore::new();
+        let xtr_id = SubstateId::Resource(TARI_TOKEN);
+        pledged
+            .set_state(xtr_id.clone(), store.get_state(&xtr_id).unwrap().clone())
+            .unwrap();
+        for input in tx.inputs() {
+            let id = input.substate_id().clone();
+            pledged
+                .set_state(id.clone(), store.get_state(&id).unwrap().clone())
+                .unwrap();
+        }
+        pledged.into_read_only()
+    } else {
+        store.clone().into_read_only()
+    };
+    let package = Arc::new(Package::builder().add_all_builtin_templates().build());
+    let virtual_substates = HashMap::from_iter([(VirtualSubstateId::CurrentEpoch, VirtualSubstate::CurrentEpoch(0))]);
+    let processor = TransactionProcessor::new(
+        package,
+        state_db,
+        AuthParams {
+            initial_ownership_proofs: [proof].into_iter().collect(),
+        },
+        virtual_substates.into(),
+        Arc::from([]),
+        Arc::new(AlwaysPassesProofVerifier),
+        WasmMeteringRate::unmetered(),
+        ExhaustBurnRate::new(0),
+        0,
+        FeeScale::ONE,
+        Network::LocalNet,
+        false,
+    );
+    processor.execute(tx).unwrap()
+}
 
+fn setup_badge_faucet(
+    test: &mut TemplateTest,
+    badge_holder: tari_template_lib::types::ComponentAddress,
+) -> (
+    tari_template_lib::types::ResourceAddress,
+    tari_template_lib::types::ComponentAddress,
+) {
+    let faucet_template = test.get_template_address("TestFaucet");
     test.execute_expect_success(
         test.transaction()
             .allocate_component_address("faucet_address")
@@ -532,7 +577,6 @@ fn create_account_with_custom_badge_rules_auto_fills_required_inputs() {
             .build_and_seal(test.secret_key()),
         vec![],
     );
-
     let (badge_resource, _) = test
         .read_only_state_store()
         .get_all_resources()
@@ -545,51 +589,25 @@ fn create_account_with_custom_badge_rules_auto_fills_required_inputs() {
         .get_components_by_template_address(faucet_template)
         .unwrap()[0]
         .0;
+    (badge_resource, faucet_component)
+}
+
+/// Custom `CreateAccount` rules pass badge resources and components into the account constructor frame, so
+/// auto-filling inputs declares them as reads and lets the new account be created and governed by those rules.
+#[test]
+fn create_account_with_custom_badge_rules_auto_fills_required_inputs() {
+    use tari_engine::state_store::StateWriter;
+    use tari_engine_types::substate::SubstateId;
+
+    let mut test = TemplateTest::new(CRATE_PATH, vec!["tests/templates/faucet"]);
+    let (badge_holder, badge_holder_proof, badge_holder_sk) = test.create_funded_account();
+    let (badge_resource, faucet_component) = setup_badge_faucet(&mut test, badge_holder);
 
     let (custom_proof, custom_pk, custom_sk) = test.create_owner_proof();
     let owner_rule = OwnerRule::ByAccessRule(rule!(resource(badge_resource)));
     let access_rules = ComponentAccessRules::new()
         .add_method_rule("deposit", rule!(allow_all))
         .default(rule!(caller_component(faucet_component)));
-
-    let package = Arc::new(Package::builder().add_all_builtin_templates().build());
-    let execute_pledged = |tx: Transaction, store: &MemoryStateStore, pledge_only_declared: bool| {
-        let state_db = if pledge_only_declared {
-            let mut pledged = MemoryStateStore::new();
-            let xtr_id = SubstateId::Resource(TARI_TOKEN);
-            pledged
-                .set_state(xtr_id.clone(), store.get_state(&xtr_id).unwrap().clone())
-                .unwrap();
-            for input in tx.inputs() {
-                let id = input.substate_id().clone();
-                pledged
-                    .set_state(id.clone(), store.get_state(&id).unwrap().clone())
-                    .unwrap();
-            }
-            pledged.into_read_only()
-        } else {
-            store.clone().into_read_only()
-        };
-        let virtual_substates =
-            HashMap::from_iter([(VirtualSubstateId::CurrentEpoch, VirtualSubstate::CurrentEpoch(0))]);
-        let processor = TransactionProcessor::new(
-            package.clone(),
-            state_db,
-            AuthParams {
-                initial_ownership_proofs: [custom_proof.clone()].into_iter().collect(),
-            },
-            virtual_substates.into(),
-            Arc::from([]),
-            Arc::new(AlwaysPassesProofVerifier),
-            WasmMeteringRate::unmetered(),
-            ExhaustBurnRate::new(0),
-            0,
-            FeeScale::ONE,
-            Network::LocalNet,
-            false,
-        );
-        processor.execute(tx).unwrap()
-    };
 
     // Without auto-fill, `CreateAccount` declares neither rule substate: execution fails with `SubstateOutOfScope`
     // when the substates exist in the store and `RootSubstateNotFound` when only declared inputs are pledged.
@@ -604,12 +622,17 @@ fn create_account_with_custom_badge_rules_auto_fills_required_inputs() {
         .build_and_seal(&custom_sk);
     assert!(unpledged_tx.inputs().is_empty());
 
-    let out_of_scope = execute_pledged(unpledged_tx.clone(), test.get_state_store_mut(), false);
+    let out_of_scope = execute_with_declared_inputs(
+        unpledged_tx.clone(),
+        test.get_state_store_mut(),
+        custom_proof.clone(),
+        false,
+    );
     assert_reject_reason(out_of_scope.expect_failure(), RuntimeError::SubstateOutOfScope {
         id: SubstateId::Resource(badge_resource),
     });
 
-    let not_found = execute_pledged(unpledged_tx, test.get_state_store_mut(), true);
+    let not_found = execute_with_declared_inputs(unpledged_tx, test.get_state_store_mut(), custom_proof.clone(), true);
     assert_reject_reason(
         not_found.expect_failure(),
         format!("Template referenced root substate but it was not found: {faucet_component}"),
@@ -635,9 +658,8 @@ fn create_account_with_custom_badge_rules_auto_fills_required_inputs() {
             .unwrap()
             .is_read()
     );
-    let created = execute_pledged(create_tx, test.get_state_store_mut(), true);
-    let diff = created.expect_success();
-    for (id, substate) in diff.up_iter() {
+    let created = execute_with_declared_inputs(create_tx, test.get_state_store_mut(), custom_proof, true);
+    for (id, substate) in created.expect_success().up_iter() {
         test.get_state_store_mut()
             .set_state(id.clone(), substate.clone())
             .unwrap();

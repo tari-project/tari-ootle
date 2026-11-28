@@ -995,18 +995,11 @@ impl<D> TransactionBuilder<D> {
         }
     }
 
-    fn add_inputs_for_type<T, F>(&mut self, value: &T, make_declaration: F)
-    where
-        T: tari_bor::Encode<()>,
-        F: FnMut(SubstateId) -> InputDeclaration,
-    {
-        if let Ok(indexed) = IndexedValue::from_type(value) {
+    fn add_read_inputs_for_rule<T: tari_bor::Encode<()>>(&mut self, rule: Option<&T>) {
+        if let Ok(ids) = crate::v1::rule_referenced_substates(rule) {
             declare_inputs(
                 self.unsigned_transaction.inputs_mut(),
-                indexed
-                    .referenced_substates()
-                    .filter(|id| id.is_declarable_input() && *id != TARI_TOKEN)
-                    .map(make_declaration),
+                ids.into_iter().map(InputDeclaration::read),
             );
         }
     }
@@ -1032,12 +1025,8 @@ impl<D> TransactionBuilder<D> {
             } => {
                 // `CreateAccount` passes custom rules as arguments to the account constructor, which requires
                 // every declarable substate they name to be in scope without mutating those substates.
-                if let Some(owner_rule) = owner_rule {
-                    self.add_inputs_for_type(owner_rule, InputDeclaration::read);
-                }
-                if let Some(access_rules) = access_rules {
-                    self.add_inputs_for_type(access_rules, InputDeclaration::read);
-                }
+                self.add_read_inputs_for_rule(owner_rule.as_ref());
+                self.add_read_inputs_for_rule(access_rules.as_ref());
             },
             Instruction::CallFunction { args, .. } => {
                 self.add_inputs_for_args(args);

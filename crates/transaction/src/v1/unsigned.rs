@@ -270,22 +270,8 @@ impl UnsignedTransactionV1 {
                     access_rules,
                     ..
                 } => {
-                    if let Some(owner_rule) = owner_rule {
-                        let value = IndexedValue::from_type(owner_rule)?;
-                        substates.extend(
-                            value
-                                .referenced_substates()
-                                .filter(|id| id.is_declarable_input() && *id != TARI_TOKEN),
-                        );
-                    }
-                    if let Some(access_rules) = access_rules {
-                        let value = IndexedValue::from_type(access_rules)?;
-                        substates.extend(
-                            value
-                                .referenced_substates()
-                                .filter(|id| id.is_declarable_input() && *id != TARI_TOKEN),
-                        );
-                    }
+                    substates.extend(super::rule_referenced_substates(owner_rule.as_ref())?);
+                    substates.extend(super::rule_referenced_substates(access_rules.as_ref())?);
                 },
                 Instruction::CallFunction { args, .. } => {
                     for arg in args.iter().filter_map(|a| a.as_literal_bytes()) {

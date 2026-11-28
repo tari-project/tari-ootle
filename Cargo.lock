@@ -12407,6 +12407,7 @@ name = "tari_ootle_transaction"
 version = "0.57.0"
 dependencies = [
  "borsh",
+ "bounded-vec",
  "criterion",
  "hex",
  "indexmap 2.14.2",
